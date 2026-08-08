@@ -1,0 +1,83 @@
+# CODEOWNERS — mechanical separation of duties (NIST AC-5, CM-5, AIC-2)
+#
+# CODEOWNERS is what turns "the author doesn't approve" from a convention into a control.
+# Combined with branch protection ("Require review from Code Owners" + "Dismiss stale
+# approvals" + no administrator bypass), a PR cannot merge without an approval from an
+# identity other than the author.
+#
+# Replace the placeholder teams with your real GitHub teams or usernames.
+# Order matters: the LAST matching pattern wins.
+
+# ---------------------------------------------------------------------------
+# Default — every change needs an engineering review by a non-author
+# ---------------------------------------------------------------------------
+*                               @your-org/engineering
+
+# ---------------------------------------------------------------------------
+# The process itself. Changing the rules requires the people accountable for them.
+# ---------------------------------------------------------------------------
+/CLAUDE.md                      @your-org/security @your-org/engineering-leads
+/docs/                          @your-org/engineering-leads
+/docs/compliance/               @your-org/compliance @your-org/security
+/docs/11-ai-agent-controls.md   @your-org/ai-risk @your-org/security
+/docs/12-ai-feature-governance.md @your-org/ai-risk @your-org/security
+/process/gates/                 @your-org/security @your-org/engineering-leads
+
+# ---------------------------------------------------------------------------
+# THE PIPELINE GATES ITSELF. A PR that edits workflows can disable every other
+# control in this repo, so it requires security review without exception. (CM-5)
+# ---------------------------------------------------------------------------
+/.github/workflows/             @your-org/security @your-org/platform
+/.github/CODEOWNERS             @your-org/security @your-org/engineering-leads
+/.github/dependabot.yml         @your-org/security
+
+# ---------------------------------------------------------------------------
+# Agent and command definitions are configuration items under change control.
+# An edit here can relax a control as effectively as editing a workflow — this is
+# the quietest way to weaken the system. (AIC-8)
+# ---------------------------------------------------------------------------
+/.claude/agents/                @your-org/ai-risk @your-org/security
+/.claude/commands/              @your-org/ai-risk @your-org/engineering-leads
+/.claude/settings.json          @your-org/security @your-org/platform
+
+# ---------------------------------------------------------------------------
+# Security-relevant code paths. Adjust to your actual layout — these patterns are
+# the point, not the specific directory names.
+# ---------------------------------------------------------------------------
+**/auth/**                      @your-org/security
+**/authn/**                     @your-org/security
+**/authz/**                     @your-org/security
+**/session/**                   @your-org/security
+**/crypto/**                    @your-org/security
+**/secrets/**                   @your-org/security
+**/middleware/**                @your-org/security
+**/migrations/**                @your-org/security @your-org/data
+
+# Infrastructure and configuration (CM-6, CM-7)
+/infra/                         @your-org/security @your-org/platform
+/terraform/                     @your-org/security @your-org/platform
+**/Dockerfile                   @your-org/security @your-org/platform
+**/*.tf                         @your-org/security @your-org/platform
+
+# Dependency manifests — supply chain (SR-3, SR-4, SR-11, AIC-7)
+**/package.json                 @your-org/security
+**/package-lock.json            @your-org/security
+**/requirements*.txt            @your-org/security
+**/pyproject.toml               @your-org/security
+**/go.mod                       @your-org/security
+**/Cargo.toml                   @your-org/security
+
+# ---------------------------------------------------------------------------
+# AI feature code. Prompts are code — a prompt change is a behavior change that
+# ships to production, and it gets the same review as any other. (AIC-8)
+# ---------------------------------------------------------------------------
+**/prompts/**                   @your-org/ai-risk @your-org/security
+**/evals/**                     @your-org/ai-risk
+**/guardrails/**                @your-org/ai-risk @your-org/security
+**/*.prompt.*                   @your-org/ai-risk
+
+# ---------------------------------------------------------------------------
+# Evidence is an audit artifact. It is generated, never hand-edited — a hand-edited
+# scan report is a fabrication regardless of intent. (AU-9)
+# ---------------------------------------------------------------------------
+/evidence/                      @your-org/compliance @your-org/security

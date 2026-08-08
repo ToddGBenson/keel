@@ -1,0 +1,228 @@
+# PR governance — makes process rules mechanical rather than remembered.
+# Controls: CM-3, CM-5, AC-5, AIC-2, AIC-6, AIC-7, SR-3
+#
+# This is the workflow that enforces the parts of the process a reviewer would otherwise
+# have to notice. Everything here is a REQUIRED status check on `main`.
+
+name: PR Governance
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: write   # to apply labels and post the governance summary
+
+concurrency:
+  group: pr-governance-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  governance:
+    name: Process compliance
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.draft == false
+    steps:
+      - name: Check out
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - name: Enforce governance rules
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const body = pr.body || '';
+            const failures = [];
+            const warnings = [];
+
+            // ---- CM-3 / CM-5: all change traces to a work item -------------------
+            // Accept "Closes #123", "Refs: #123", "Fixes #123", or a bare "#123".
+            const issueRef = /(?:closes|fixes|resolves|refs?)\s*:?\s*#(\d+)/i.test(body)
+                          || /#\d+/.test(pr.title);
+            if (!issueRef) {
+              failures.push(
+                'No linked issue. Every branch, commit, and PR references a GitHub issue — ' +
+                'work with no issue is unauthorized change (CM-3, CM-5). ' +
+                'Add "Closes #<n>" to the PR body.');
+            }
+
+            // ---- AIC-6: AI authorship declared ----------------------------------
+            const aiSection = /##\s*AI authorship/i.test(body);
+            const aiDeclared = /\*\*Parts AI-authored:\*\*\s*\S+/i.test(body)
+                            || /-\s*\[x\]\s*\*\*Parts AI-authored/i.test(body);
+            if (!aiSection || !aiDeclared) {
+              failures.push(
+                'AI authorship not declared (AIC-6). State which parts were AI-authored ' +
+                '(or "none"), which agent/model, and what you verified personally. ' +
+                'Concealing AI authorship is a process violation.');
+            }
+
+            // ---- AIC-9: reviewer calibration — the author states what they verified
+            const verified = /what I verified personally[^\n]*\n?\s*[-*]?\s*\S{15,}/i.test(body);
+            if (aiDeclared && !verified) {
+              warnings.push(
+                'The "what I verified personally" field looks empty or thin. Agent output is ' +
+                'usually right, which is what makes complacent review dangerous (AIC-9).');
+            }
+
+            // ---- DoD checklist present and engaged -------------------------------
+            const dodPresent = /##\s*Definition of Done/i.test(body);
+            const unchecked = (body.match(/- \[ \]/g) || []).length;
+            const checked   = (body.match(/- \[[xX]\]/g) || []).length;
+            if (!dodPresent) {
+              failures.push('Definition of Done checklist missing. Use the PR template.');
+            } else if (checked === 0) {
+              failures.push(
+                `Definition of Done checklist is entirely unchecked (${unchecked} items). ` +
+                'A PR with an untouched DoD is closed, not fixed in review.');
+            } else if (unchecked > 0) {
+              warnings.push(`${unchecked} Definition of Done item(s) still unchecked.`);
+            }
+
+            // ---- "What I made worse" — honesty prompt ----------------------------
+            if (!/##\s*What I made worse/i.test(body)) {
+              warnings.push(
+                'The "What I made worse" section is missing. A PR claiming to improve ' +
+                'everything and worsen nothing is one reviewers learn to distrust.');
+            }
+
+            // ---- Conventional commit title ---------------------------------------
+            if (!/^(feat|fix|chore|docs|refactor|test|sec|perf|build|ci)(\([^)]+\))?!?:\s.+/
+                  .test(pr.title)) {
+              failures.push(
+                'PR title is not a Conventional Commit. Expected ' +
+                '"<type>(<scope>): <summary>" with type in ' +
+                'feat|fix|chore|docs|refactor|test|sec|perf|build|ci.');
+            }
+
+            // ---- Review-quality signal: oversized PRs -----------------------------
+            const changed = pr.additions + pr.deletions;
+            if (changed > 400) {
+              warnings.push(
+                `This PR changes ${changed} lines. Past ~400 lines reviewers degrade to ` +
+                'skimming and everyone involved knows it. Consider splitting.');
+            }
+
+            // ---- Labels for downstream measurement (AIC-6) ------------------------
+            const labels = [];
+            if (aiDeclared && !/\*\*Parts AI-authored:\*\*\s*(none|n\/a)/i.test(body)) {
+              labels.push('ai-authored');
+            }
+            if (/-\s*\[[xX]\][^\n]*Security-relevant/i.test(body)
+                || /\*\*Security-relevant\?\*\*\s*yes/i.test(body)) {
+              labels.push('security-relevant');
+            }
+            if (/##\s*AI feature changes/i.test(body)
+                && /-\s*\[[xX]\][^\n]*AI Impact Assessment/i.test(body)) {
+              labels.push('ai-relevant');
+            }
+            if (labels.length) {
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner, repo: context.repo.repo,
+                issue_number: pr.number, labels,
+              });
+            }
+
+            // ---- Report -----------------------------------------------------------
+            const lines = [];
+            if (failures.length) {
+              lines.push('### ❌ Governance failures\n');
+              failures.forEach(f => lines.push(`- ${f}`));
+              lines.push('');
+            }
+            if (warnings.length) {
+              lines.push('### ⚠️ Warnings\n');
+              warnings.forEach(w => lines.push(`- ${w}`));
+              lines.push('');
+            }
+            if (!failures.length && !warnings.length) {
+              lines.push('### ✅ Governance checks passed');
+            }
+            core.summary.addRaw(lines.join('\n')).write();
+
+            if (failures.length) {
+              core.setFailed(
+                `${failures.length} governance failure(s). These are process controls ` +
+                `(CM-3, CM-5, AIC-6), not style preferences.`);
+            }
+
+  platform-integrity:
+    name: Platform integrity (AIC-3, AIC-8, AU-9)
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.draft == false
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38 # v5.4.0
+        with:
+          python-version: '3.12'
+
+      - name: Install parser
+        run: pip install pyyaml
+
+      # Replaces the ADAPT stub that previously stood in for this check. Verifies agent
+      # tool grants match docs/compliance/ai-inventory.md, skills are registered, actions
+      # are SHA-pinned, workflows declare least-privilege permissions, and no generated
+      # evidence has been hand-placed in the tree.
+      - name: Validate platform integrity
+        run: python scripts/validate-platform.py
+
+      # Per the control-assessment skill: TEST beats EXAMINE. Three real defects in these
+      # guards were found only by exercising them (POAM-002/003/004), including one that
+      # blocked edits REMOVING a secret. Four assertions are regression tests for those.
+      - name: Guard hook self-test
+        run: bash .claude/hooks/selftest.sh
+
+  dependency-review:
+    name: Dependency review (SR-3, SR-4, AIC-7)
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.draft == false
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      # Fails on NEW High/Critical vulnerabilities and disallowed licenses.
+      # Gating on new-only is deliberate: gating on the absolute count in a real
+      # codebase means the pipeline is red forever and everyone learns to ignore it.
+      - name: Dependency review
+        uses: actions/dependency-review-action@3b139cfc5fae8b618d3eae3675e383bb1769c019 # v4.5.0
+        with:
+          fail-on-severity: high
+          comment-summary-in-pr: always
+          # Adjust to your policy. Copyleft licenses often need legal review rather than
+          # a blanket block — decide deliberately rather than inheriting a default.
+          deny-licenses: AGPL-3.0, GPL-3.0
+
+      # AIC-7: models hallucinate plausible package names and attackers register them
+      # ("slopsquatting"). Any manifest change gets a human eye on the package identity.
+      - name: Flag manifest changes for package-identity verification
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        with:
+          script: |
+            const files = await github.paginate(github.rest.pulls.listFiles, {
+              owner: context.repo.owner, repo: context.repo.repo,
+              pull_number: context.payload.pull_request.number,
+            });
+            const manifests = files.filter(f => /(?:package\.json|requirements.*\.txt|pyproject\.toml|go\.mod|Cargo\.toml|Gemfile|pom\.xml|build\.gradle)$/.test(f.filename));
+            if (!manifests.length) return;
+
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner, repo: context.repo.repo,
+              issue_number: context.payload.pull_request.number,
+              labels: ['dependency-change'],
+            });
+            core.summary.addRaw([
+              '### 📦 Dependency manifest changed — verify package identity (AIC-7)',
+              '',
+              manifests.map(m => `- \`${m.filename}\``).join('\n'),
+              '',
+              'For each **new** package confirm, and record in the PR:',
+              '- the publisher and source repository are the ones you intend',
+              '- download history and maintenance signal look real',
+              '- the name is not a near-miss of a popular package',
+              '',
+              'Models hallucinate plausible package names; attackers register the popular',
+              'hallucinations. This check is cheap and the failure is a supply-chain compromise.',
+            ].join('\n')).write();

@@ -1,0 +1,78 @@
+name: Bug
+description: Something behaves differently than it should
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Done for a bug requires a regression test that fails on the unfixed code**, plus a
+        root-cause note. A bug fixed without a failing-first test will return.
+
+        If this is a **security** issue, use the security finding template instead — or, for
+        anything sensitive, report privately rather than in a public issue.
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Exact steps. A bug that cannot be reproduced cannot be verified fixed.
+      value: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+
+  - type: input
+    id: expected
+    attributes:
+      label: Expected
+    validations:
+      required: true
+
+  - type: input
+    id: actual
+    attributes:
+      label: Actual
+    validations:
+      required: true
+
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Severity
+      options:
+        - Blocker — no workaround, core journey affected
+        - Major — significant impairment
+        - Minor — cosmetic or edge case
+    validations:
+      required: true
+
+  - type: input
+    id: scope
+    attributes:
+      label: Scope of impact
+      description: How many users, which segment, since when.
+
+  - type: input
+    id: versions
+    attributes:
+      label: Affected versions / environments
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: Logs, screenshots, trace IDs, error output. Redact secrets and personal data.
+
+  - type: checkboxes
+    id: flags
+    attributes:
+      label: Flags
+      options:
+        - label: Data loss or corruption involved
+        - label: Data exposed to an unauthorized party
+        - label: Security-relevant
+        - label: AI-relevant (unexpected model behavior, guardrail bypass, drift)
+        - label: Escaped a gate — note which one; this is retro material

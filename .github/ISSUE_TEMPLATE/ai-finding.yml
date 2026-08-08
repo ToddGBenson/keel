@@ -1,0 +1,91 @@
+name: AI finding
+description: Unexpected model behavior, guardrail bypass, eval regression, drift, or AI incident
+title: "[AI] "
+labels: ["ai-finding", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Routed to the **AI Risk Officer**. Per `docs/12-ai-feature-governance.md`.
+
+        Critical and High AI findings **block release** with the same authority as security
+        findings. **Every AI incident becomes an eval case** — that is how the suite earns its
+        keep over time.
+
+  - type: dropdown
+    id: category
+    attributes:
+      label: Category
+      options:
+        - Confabulation / materially incorrect output
+        - Harmful, biased, or discriminatory output
+        - Prompt injection succeeded (direct or indirect)
+        - Guardrail bypassed
+        - Sensitive information disclosure
+        - Insecure output handling (output reached a sink unvalidated)
+        - Tool-call abuse / privilege escalation through the model
+        - Eval regression
+        - Drift — behavior changed with no code change
+        - Cost / denial of wallet
+        - Over-refusal of benign requests
+        - Agent behaved outside its grant (AIC-3)
+    validations:
+      required: true
+
+  - type: input
+    id: system
+    attributes:
+      label: AI system / feature
+      description: As listed in `docs/compliance/ai-inventory.md`.
+    validations:
+      required: true
+
+  - type: textarea
+    id: versions
+    attributes:
+      label: Versions
+      value: |
+        Model + version:
+        Prompt version:
+        Eval-set version:
+        Retrieval/grounding source version:
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction
+      description: Input, context, and observed output. Redact personal data. Note whether it reproduces consistently — intermittent is still a finding.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Severity
+      description: Same scale and SLAs as security findings (7 / 30 / 90 days).
+      options:
+        - Critical — harmful output reaching users, data leakage, or full guardrail bypass
+        - High — exploitable with limited preconditions; significant incorrect output in a consequential path
+        - Medium — requires unusual conditions
+        - Low — defense in depth
+    validations:
+      required: true
+
+  - type: textarea
+    id: impact
+    attributes:
+      label: Impact
+      description: Who is affected and how. Be concrete — "bias risk" is not an assessment.
+
+  - type: checkboxes
+    id: followup
+    attributes:
+      label: Required follow-up
+      options:
+        - label: Added to the eval suite as a permanent test case
+        - label: Guardrail added or strengthened, with a test proving it blocks
+        - label: AI inventory updated
+        - label: Postmortem required (harmful output reached a user, or data leaked)
+        - label: Agent definition change needed (if the finding is about our build agents)

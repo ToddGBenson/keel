@@ -1,0 +1,66 @@
+# Stack profile: Node / TypeScript
+# Spliced into .github/workflows/ci.yml and security.yml by scripts/bootstrap.sh,
+# replacing the ADAPT: placeholders. Adjust after bootstrap — it is yours from then on.
+
+name: node
+display: "Node / TypeScript"
+detect: ["package.json"]
+
+setup: |
+  - uses: actions/setup-node@1d0ff469b7ec7b3cb9d8673fde0c81c44821de2a # v4.2.0
+    with:
+      node-version: '22'
+      cache: 'npm'
+
+install: |
+  npm ci                      # NOT npm install — the lockfile is authoritative (SR-3, SR-4)
+
+build: |
+  npm run build --if-present
+
+lint: |
+  npm run lint
+
+typecheck: |
+  npx tsc --noEmit
+
+format_check: |
+  npx prettier --check .
+
+unit_test: |
+  npm test -- --coverage
+
+integration_test: |
+  npm run test:integration --if-present
+
+e2e_test: |
+  npm run test:e2e --if-present
+
+coverage_check: |
+  # Fails below threshold AND on any drop vs. the base branch — otherwise a large
+  # untested change passes by diluting an already-high number.
+  npx nyc check-coverage --lines "$COVERAGE_THRESHOLD" --functions "$COVERAGE_THRESHOLD"
+
+sast_language: javascript-typescript
+
+license_check: |
+  npx license-checker --production --failOn 'AGPL-3.0;GPL-3.0'
+
+# Local pre-commit block, spliced into .git/hooks/pre-commit.
+# Keep under ~10s. A slow hook is a hook people start bypassing.
+precommit: |
+  changed_js=$(printf '%s' "$staged" | grep -E '[.](ts|tsx|js|jsx|mjs|cjs)$' || true)
+  if [ -n "$changed_js" ]; then
+    npx eslint $changed_js || fail=1
+    npx prettier --check $changed_js || fail=1
+  fi
+
+test_artifacts:
+  - "coverage/**"
+  - "test-results/**"
+
+gitignore_extra: |
+  node_modules/
+  .next/
+  .turbo/
+  *.tsbuildinfo

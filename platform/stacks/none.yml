@@ -1,0 +1,56 @@
+# Stack profile: none — docs, research, infrastructure, or a project whose stack is not
+# yet decided. The governance layer runs in full; the code-specific checks are no-ops that
+# say so rather than pretending to pass.
+#
+# This profile exists because "no code yet" is a legitimate project state, and a pipeline
+# that reports green on checks it never ran is the single most damaging thing in this
+# system — it manufactures assurance that is not real.
+
+name: none
+display: "None (docs / research / infra)"
+detect: []
+
+setup: ""
+
+install: |
+  echo "No stack configured. Re-run: bash scripts/bootstrap.sh --stack <name>"
+
+build: |
+  echo "SKIPPED: no stack configured — nothing to build."
+
+lint: |
+  echo "SKIPPED: no stack configured — no linter."
+
+typecheck: |
+  echo "SKIPPED: no stack configured."
+
+format_check: |
+  echo "SKIPPED: no stack configured."
+
+unit_test: |
+  echo "SKIPPED: no stack configured — NO TESTS WERE RUN."
+  echo "This is not a pass. Configure a stack before relying on this pipeline."
+
+integration_test: |
+  echo "SKIPPED: no stack configured."
+
+e2e_test: |
+  echo "SKIPPED: no stack configured."
+
+coverage_check: |
+  echo "SKIPPED: no coverage measured."
+
+sast_language: ""
+sast_alternative: |
+  echo "SKIPPED: no SAST language configured. SA-11(1) is NOT satisfied for code."
+  echo "Secret scanning, IaC scanning, and dependency review still run."
+
+license_check: |
+  echo "SKIPPED: no dependency manifest."
+
+precommit: |
+  : # governance checks only — secrets, large files, evidence integrity, commit format
+
+test_artifacts: []
+
+gitignore_extra: ""

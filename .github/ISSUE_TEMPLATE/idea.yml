@@ -1,0 +1,95 @@
+name: Idea
+description: A raw idea or request, to be walked back to a problem statement at G0 intake
+title: "[Idea] "
+labels: ["idea", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Most ideas arrive as **solutions** ("add a save button"). Intake's job is to walk it
+        back to the **problem** ("users lose ~12 minutes of work when a session expires").
+        Run `/idea` to do this properly. Per `docs/02-intake-and-discovery.md`.
+
+  - type: textarea
+    id: raw
+    attributes:
+      label: The request, verbatim
+      description: Capture what was actually asked for, before interpreting it. The original wording is data.
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem statement
+      description: "Who, what they cannot do, what it costs them. **No solution words** — no 'add', 'build', or UI elements."
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence — and label its type honestly
+      description: "'A user asked for this' is evidence of a request. Telemetry is evidence of a problem. Say which you have."
+    validations:
+      required: true
+
+  - type: input
+    id: population
+    attributes:
+      label: Affected population
+      description: How many, which segment, how often.
+
+  - type: input
+    id: workaround
+    attributes:
+      label: Current workaround
+      description: What people do today. No workaround *and* no complaint is a signal the problem may not be real.
+
+  - type: textarea
+    id: success
+    attributes:
+      label: Success measure — with a current baseline
+      description: "**Without a baseline nobody can later prove this worked.** If none exists, say so explicitly."
+      value: |
+        Metric:
+        Current baseline:
+        Target:
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: relevance
+    attributes:
+      label: Relevance flags
+      description: Set at intake, not discovered at G4. When uncertain, tick it.
+      options:
+        - label: Security-relevant
+        - label: AI-relevant
+        - label: Privacy-relevant
+        - label: Regulatory or contractual constraint applies
+
+  - type: textarea
+    id: options
+    attributes:
+      label: Options considered — at least two, including "do nothing"
+      description: The do-nothing cost is the option most often omitted and frequently the right one.
+      value: |
+        1. Do nothing — cost:
+        2.
+        3.
+    validations:
+      required: true
+
+  - type: textarea
+    id: rice
+    attributes:
+      label: RICE
+      description: Coarse on purpose. Precision here is false precision. Risk-reduction items are not RICE-ranked — they get SLA-driven due dates.
+      value: |
+        Reach (users/quarter):
+        Impact (3 / 2 / 1 / 0.5 / 0.25):
+        Confidence (100% / 80% / 50%):
+        Effort (person-weeks):
+        Score:
+        Reasoning:

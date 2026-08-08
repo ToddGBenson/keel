@@ -1,0 +1,99 @@
+# Platform manifest — what belongs to the platform, what belongs to your project.
+#
+# This file is the contract that makes the base repo forkable AND upgradeable. Without it,
+# a fork is a one-time copy: the moment the platform improves, every fork is stranded.
+#
+# Read by scripts/sync-platform.sh. Edit deliberately — moving a path from platform_owned
+# to project_owned means that path stops receiving upstream improvements forever.
+
+version: 1
+
+# ── PLATFORM-OWNED ───────────────────────────────────────────────────────────
+# Synced from upstream on `sync-platform.sh`. Local edits here WILL be overwritten.
+# If you need a change, make it upstream and promote it (see /promote) so every fork
+# benefits — that is the whole point of the learning loop.
+platform_owned:
+  - .claude/agents/
+  - .claude/commands/
+  - .claude/skills/
+  - .claude/hooks/
+  - process/gates/
+  - platform/
+  - scripts/
+  - docs/00-overview.md
+  - docs/01-roles.md
+  - docs/02-intake-and-discovery.md
+  - docs/03-refinement.md
+  - docs/04-development.md
+  - docs/05-verification.md
+  - docs/06-cicd.md
+  - docs/07-release-and-change.md
+  - docs/08-operate-and-respond.md
+  - docs/09-retrospective-and-improvement.md
+  - docs/10-definitions.md
+  - docs/11-ai-agent-controls.md
+  - docs/12-ai-feature-governance.md
+  - docs/templates/
+  - docs/compliance/nist-800-53-control-map.md
+  - docs/compliance/ssdf-crosswalk.md
+  - docs/compliance/evidence-model.md
+  - docs/compliance/assessment-plan.md
+  - docs/compliance/ssp-outline.md
+  - docs/lessons/
+  - CONTRIBUTING.md
+  - SETUP.md
+
+# ── PROJECT-OWNED ────────────────────────────────────────────────────────────
+# Never touched by sync. Yours entirely, from the moment you bootstrap.
+project_owned:
+  - src/
+  - lib/
+  - app/
+  - tests/
+  - test/
+  - infra/
+  - terraform/
+  - evidence/
+  - docs/adr/                        # your architecture decisions, not the platform's
+  - docs/compliance/poam.md          # your open findings
+  - docs/compliance/ai-inventory.md  # your AI systems
+  - docs/product/                    # your ideas, epics, product docs
+  - README.md                        # rewritten by bootstrap for your project
+  - .env.example
+  - package.json
+  - pyproject.toml
+  - go.mod
+  - Cargo.toml
+
+# ── MERGE-REQUIRED ───────────────────────────────────────────────────────────
+# Both the platform and your project legitimately change these. sync-platform.sh will
+# NOT overwrite them; it reports the upstream diff and leaves the merge to a human.
+# This is deliberate — silently overwriting a workflow you tuned would break your build,
+# and silently skipping it would strand you on an old control set.
+merge_required:
+  - .github/workflows/
+  - .github/CODEOWNERS
+  - .github/ISSUE_TEMPLATE/
+  - .github/PULL_REQUEST_TEMPLATE.md
+  - .github/dependabot.yml
+  - .claude/settings.json
+  - CLAUDE.md
+  - .gitignore
+
+# ── BOOTSTRAP-ONLY ───────────────────────────────────────────────────────────
+# Consumed by scripts/bootstrap.sh and removed from the fork afterwards. These describe
+# the base repo itself and would be misleading inside a project.
+bootstrap_only:
+  - platform/stacks/
+  - docs/adr/ADR-0001-platform-architecture.md
+
+# ── Placeholders substituted at bootstrap ────────────────────────────────────
+placeholders:
+  - token: "{{PROJECT_NAME}}"
+    prompt: "Project name"
+  - token: "{{PROJECT_DESCRIPTION}}"
+    prompt: "One-line description"
+  - token: "{{GITHUB_ORG}}"
+    prompt: "GitHub org or username (for CODEOWNERS)"
+  - token: "{{STACK}}"
+    prompt: "Stack: node | python | go | rust | none"

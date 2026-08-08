@@ -1,0 +1,165 @@
+# Continuous monitoring & evidence collection.
+# Controls: CA-2, CA-7, RA-5, SI-2, SI-4, CM-2, CM-6, CM-8, AU-6, AU-11, AIC-12
+#
+# Scheduled rather than event-driven, because the risk changes while your code does not.
+# A clean scan at build time says nothing about a CVE published yesterday.
+
+name: Compliance & Continuous Monitoring
+
+on:
+  schedule:
+    - cron: '0 5 * * *'      # daily
+    - cron: '0 6 * * 1'      # weekly (Monday)
+    - cron: '0 7 1 * *'      # monthly (1st)
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  daily:
+    name: Daily — deployed artifact rescan (RA-5, SI-2)
+    if: github.event.schedule == '0 5 * * *' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Rescan DEPLOYED artifacts against current advisories
+        run: |
+          echo "ADAPT: pull the SBOM for what is actually running in production and query"
+          echo "it against current advisory feeds."
+          echo ""
+          echo "This is different from scanning the repo. The repo tells you about the code;"
+          echo "this tells you about what your users are exposed to right now."
+
+      - name: File findings for new Critical/High
+        run: |
+          echo "ADAPT: open an issue per new Critical/High with the severity SLA as the"
+          echo "due date (Critical 7d, High 30d), and create the POA&M entry."
+
+      - name: Report findings past SLA
+        run: |
+          echo "ADAPT: query open findings past their SLA date."
+          echo "Escalate past-due Critical/High to a human immediately — do not wait for"
+          echo "the weekly review. An aging chart that only goes up is the clearest early"
+          echo "signal of a team that has stopped being able to absorb its own risk."
+
+  weekly:
+    name: Weekly — drift, secrets, exceptions (CM-2, CM-6, IA-5)
+    if: github.event.schedule == '0 6 * * 1' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - name: Configuration drift vs. baseline
+        run: |
+          echo "ADAPT: diff running configuration against the IaC baseline. Any drift → investigate."
+
+      - name: Full-history secret sweep
+        run: |
+          echo "ADAPT: gitleaks over the complete history, not just the recent diff."
+
+      - name: Expiring suppressions, exceptions, and certificates
+        run: |
+          echo "ADAPT: report suppressions and security exceptions within 14 days of expiry,"
+          echo "plus certificates and secrets within 30 days (IA-5, SC-12)."
+          echo ""
+          echo "Automatic renewal is prohibited. An expiring exception is a decision that"
+          echo "has to be made again, deliberately."
+
+      - name: POA&M health
+        run: |
+          echo "ADAPT: report three things, in this order —"
+          echo "  1. entries past due"
+          echo "  2. entries extended MORE THAN ONCE (a resourcing or will problem, not a"
+          echo "     schedule problem — name it as one)"
+          echo "  3. entries closed without evidence of remediation"
+
+  monthly:
+    name: Monthly — SBOM refresh, agent assurance, evidence integrity
+    if: github.event.schedule == '0 7 1 * *' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Refresh SBOM and re-query vulnerabilities (CM-8)
+        run: |
+          echo "ADAPT: regenerate the SBOM for deployed artifacts and re-query."
+
+      - name: Unsupported / EOL component check (SA-22)
+        run: |
+          echo "ADAPT: flag components past end-of-life or without a maintenance signal."
+          echo "These enter intake as scheduled chores — scheduled, not deferred."
+
+      - uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38 # v5.4.0
+        with:
+          python-version: '3.12'
+      - run: pip install pyyaml
+
+      # No longer a stub. Diffs actual agent tool grants against ai-inventory.md § Section B.
+      # Drift is a genuine control failure and is easy to introduce accidentally — an agent
+      # definition edited to "unblock" a task is the usual cause.
+      - name: Agent tool-grant audit (AIC-3, AIC-8)
+        run: python scripts/validate-platform.py
+
+      - name: Guard hook self-test (CA-2)
+        run: bash .claude/hooks/selftest.sh
+
+      - name: Role / artifact mismatch audit (POAM-001 compensating control)
+        run: |
+          echo "ADAPT: sample merged PRs; cross-check the declared producing agent against"
+          echo "the paths that PR changed, using ai-inventory.md § Section B expected scope."
+          echo ""
+          echo "  e.g. a PR declaring 'product-owner' that modified src/** is a role"
+          echo "       violation — the boundary is prompt-enforced only, so this audit is"
+          echo "       the DETECTION half of the control. Flag, do not assume malice:"
+          echo "       the usual cause is a command invoking the wrong agent."
+          echo ""
+          echo "This is a compensating control for POAM-001. If it never fires, confirm it"
+          echo "still works rather than concluding the boundary is holding."
+
+      - name: AI provenance audit (AIC-6)
+        run: |
+          echo "ADAPT: sample merged PRs from the last month; confirm AI authorship"
+          echo "declarations are present and non-trivial."
+          echo ""
+          echo "Also compute the divergence metric: do AI-authored changes fail review or"
+          echo "escape to production at a different rate than human-authored ones? This is"
+          echo "diagnostic, not punitive — it calibrates review depth on evidence."
+
+      - name: Evidence integrity check (AU-9)
+        run: |
+          echo "ADAPT: verify gate evidence bundles exist for everything released this"
+          echo "month, are retrievable, within retention, and were not hand-edited."
+          echo ""
+          echo "Then READ a sample. Evidence that exists but does not support the claim is"
+          echo "the most common finding in a mature program, and it survives for years"
+          echo "precisely because nobody opens the file."
+
+  metrics:
+    name: Metrics snapshot for the retro
+    runs-on: ubuntu-latest
+    if: github.event.schedule == '0 6 * * 1' || github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Collect
+        run: |
+          echo "ADAPT: snapshot to evidence/retros/<period>/metrics.json"
+          echo ""
+          echo "  Flow (DORA):  deployment frequency, lead time, change failure rate,"
+          echo "                time to restore, queue time by state"
+          echo "  Quality:      escaped defects, GATE REJECTION RATE BY GATE, flaky tests,"
+          echo "                PR review latency"
+          echo "  Security:     new findings by severity, MTTR, past SLA"
+          echo "  AI assurance: eval pass rate, drift events, agent gate rejections"
+          echo "  Process:      emergency changes used, exceptions raised, gates skipped"
+          echo ""
+          echo "NEVER collect velocity, story points, or per-person commit counts. They are"
+          echo "trivially gamed, and measuring them corrupts the estimates the whole process"
+          echo "depends on within one sprint."

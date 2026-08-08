@@ -1,0 +1,18 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability (private)
+    url: https://github.com/your-org/your-repo/security/advisories/new
+    about: >-
+      Report security vulnerabilities privately, never in a public issue. Findings enter the
+      POA&M with severity-driven SLAs (Critical 7d / High 30d / Medium 90d).
+  - name: Spike — a question that needs answering first
+    url: https://github.com/your-org/your-repo/issues/new?labels=spike&template=story.yml
+    about: >-
+      Confidence below 50%, or unknowns too large to estimate? Open a time-boxed spike. Spikes
+      produce a written answer and a recommendation — never production code.
+  - name: Process friction
+    url: https://github.com/your-org/your-repo/issues/new?labels=process
+    about: >-
+      The process got in your way? Say so concretely — what you were doing, what the process
+      demanded, what it cost. Route-arounds are evidence about the process, never misconduct.
+      Feeds /retro and /learn.

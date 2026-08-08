@@ -1,0 +1,191 @@
+# Security scanning — SAST, SCA, secrets, IaC, containers.
+# Controls: SA-11(1), RA-5, SR-3, SR-11, IA-5, CM-6, CM-7, SI-2, SI-3
+#
+# ── THE DESIGN DECISION THAT MATTERS ──────────────────────────────────────────
+# Gate on NEW findings, not TOTAL. Gating on the absolute count in any real codebase
+# means the pipeline is red forever and everyone learns to ignore it — at which point
+# it stops being a control and becomes decoration. The existing backlog is driven down
+# on SLA through the POA&M (Critical 7d / High 30d / Medium 90d).
+#
+# Scanner output is not findings. Every result is dispositioned by the security-engineer
+# at G4: true positive / false positive (with a written rationale AND an expiry date) /
+# accepted risk (human approval + POA&M entry). A suppression with no rationale is a
+# control failure and is reported as one.
+
+name: Security
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    # Daily rescan. A clean scan at build time says nothing about a CVE published
+    # yesterday — this is the control that catches it. (RA-5, SI-2)
+    - cron: '17 6 * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sast:
+    name: SAST — CodeQL (SA-11(1))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        # ADAPT: your languages.
+        language: ['javascript-typescript']
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: github/codeql-action/init@f443b600d91635bebf5b0d9ebc620189c0d6fba5 # v3.28.11
+        with:
+          language: ${{ matrix.language }}
+          queries: security-extended,security-and-quality
+      - uses: github/codeql-action/autobuild@f443b600d91635bebf5b0d9ebc620189c0d6fba5 # v3.28.11
+      - uses: github/codeql-action/analyze@f443b600d91635bebf5b0d9ebc620189c0d6fba5 # v3.28.11
+        with:
+          category: "/language:${{ matrix.language }}"
+      # Results land in the Security tab as SARIF — that file IS the SA-11(1) evidence.
+      # Read it. A green badge on a job that scanned nothing is the most common form of
+      # false assurance in a pipeline.
+
+  secrets:
+    name: Secret scanning (IA-5)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0   # full history — a secret deleted in a later commit is still leaked
+
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@83373cf2f8c4db6e24b41c1a9b086bb9619e9cd3 # v2.3.7
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # Any hit fails. If one fires, the correct response is to ROTATE the credential,
+        # then remove it. A deleted commit is not a rotated credential.
+
+  dependencies:
+    name: SCA — dependency vulnerabilities (RA-5, SR-3)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Scan dependencies
+        uses: anchore/scan-action@f2e0f3d1b9f0c8a3b3d0dc0a2cdbd1cb4d4ba0f8 # v6.1.0
+        id: grype
+        with:
+          path: "."
+          fail-build: true
+          severity-cutoff: high
+          output-format: sarif
+
+      - name: Upload SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@f443b600d91635bebf5b0d9ebc620189c0d6fba5 # v3.28.11
+        with:
+          sarif_file: ${{ steps.grype.outputs.sarif }}
+          category: dependency-scan
+
+  iac:
+    name: IaC & configuration (CM-6, CM-7)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Checkov
+        uses: bridgecrewio/checkov-action@38a95e98d734de90b74687a0fc94cfb4dcc9c169 # v12.2996.0
+        with:
+          quiet: true
+          soft_fail: false          # High/Critical misconfiguration blocks
+          output_format: sarif
+          output_file_path: checkov.sarif
+        continue-on-error: true     # so the SARIF still uploads; the gate is the upload check
+
+      - name: Upload SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@f443b600d91635bebf5b0d9ebc620189c0d6fba5 # v3.28.11
+        with:
+          sarif_file: checkov.sarif
+          category: iac-scan
+
+  container:
+    name: Container image scan (RA-5, SR-11)
+    runs-on: ubuntu-latest
+    # ADAPT: enable when you ship containers.
+    if: false
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Build image
+        run: |
+          echo "ADAPT: docker build -t local/app:${{ github.sha }} ."
+      - name: Trivy
+        uses: aquasecurity/trivy-action@18f2510ee396bbf400402947b394f2dd8c87dbb0 # v0.29.0
+        with:
+          image-ref: local/app:${{ github.sha }}
+          format: sarif
+          output: trivy.sarif
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true      # gate on what you can actually act on
+      - uses: github/codeql-action/upload-sarif@f443b600d91635bebf5b0d9ebc620189c0d6fba5 # v3.28.11
+        if: always()
+        with:
+          sarif_file: trivy.sarif
+          category: container-scan
+
+  suppression-audit:
+    name: Suppression audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      # A suppression with no rationale and no expiry is a control failure. Blanket
+      # suppressions are how a scanner quietly stops being a control.
+      - name: Find suppressions without a rationale or expiry
+        run: |
+          set +e
+          PATTERN='nosec|noqa|eslint-disable|codeql\[|# type: ignore|checkov:skip|trivy:ignore'
+          HITS=$(grep -rInE "$PATTERN" --include='*.*' \
+                   --exclude-dir=.git --exclude-dir=node_modules --exclude-dir=.github . || true)
+          if [ -z "$HITS" ]; then echo "No suppressions found."; exit 0; fi
+
+          echo "$HITS" > /tmp/all_suppressions.txt
+          # A valid suppression cites an issue (#123) AND an expiry (expires: YYYY-MM-DD).
+          BAD=$(grep -vE '#[0-9]+' /tmp/all_suppressions.txt | grep -viE 'expires?:? *[0-9]{4}-[0-9]{2}-[0-9]{2}' || true)
+
+          {
+            echo "### Suppression audit"
+            echo ""
+            echo "Total suppressions: $(wc -l < /tmp/all_suppressions.txt)"
+            echo ""
+            if [ -n "$BAD" ]; then
+              echo "#### ❌ Suppressions missing a rationale (issue ref) and/or an expiry date"
+              echo ""
+              echo '```'
+              echo "$BAD"
+              echo '```'
+              echo ""
+              echo "Every suppression needs an issue reference and an \`expires: YYYY-MM-DD\`."
+              echo "Suppressions are reviewed quarterly. An unjustified one fails G4."
+            else
+              echo "✅ All suppressions carry an issue reference and an expiry date."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          [ -n "$BAD" ] && exit 1 || exit 0

@@ -1,0 +1,104 @@
+name: Story
+description: A vertical slice of user-visible value, ready to pass the G1 Definition of Ready
+title: "[Story] "
+labels: ["story", "needs-refinement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Refined per `docs/03-refinement.md`. Run `/ready` before development starts.
+        **Every acceptance criterion must be binary and observable** — if two honest people
+        could disagree about whether it passed, rewrite it.
+
+  - type: input
+    id: parent
+    attributes:
+      label: Parent epic / idea
+      description: The G0-accepted idea or epic this traces to. Required — untraceable work is unauthorized change.
+      placeholder: "#42"
+    validations:
+      required: true
+
+  - type: textarea
+    id: narrative
+    attributes:
+      label: Narrative
+      value: |
+        As a <role>
+        I want <capability>
+        So that <outcome>
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Given/When/Then. Cover the happy path, at least one error path, and at least one boundary.
+      value: |
+        ```gherkin
+        Given <precondition>
+        When <action>
+        Then <observable outcome>
+
+        # error path
+        Given <precondition>
+        When <failure condition>
+        Then <observable outcome>
+
+        # boundary
+        Given <at the limit>
+        When <action>
+        Then <observable outcome>
+        ```
+    validations:
+      required: true
+
+  - type: textarea
+    id: nfr
+    attributes:
+      label: Non-functional criteria — with numbers
+      description: '"Fast" and "secure" are not criteria. State thresholds.'
+      value: |
+        - Performance: p95 < ___ ms at ___ concurrent users
+        - Security: authz rule ___ ; input validated at ___ ; audit event `___` emitted
+        - Privacy: personal data touched ___ ; retention ___
+        - Accessibility: WCAG 2.2 AA (if user-facing)
+        - Observability: must emit ___ so an operator can debug it
+        - Reliability: on <dependency> failure, behaviour is ___
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: relevance
+    attributes:
+      label: Relevance triage — determines which gates apply
+      description: Per `docs/10-definitions.md`. Any box ticked makes **G2 mandatory**. When uncertain, tick it.
+      options:
+        - label: "**Security-relevant** — authn, authz, sessions, crypto, secrets, personal/regulated data, file upload/parsing, external calls, deserialization, template rendering, subprocess, query construction, infra/CI config, or adds a dependency"
+        - label: "**AI-relevant** — adds/changes a model call, prompt, system instruction, generation parameter, retrieval/grounding data, tool-calling capability, or autonomy boundary; processes user data through a model; or surfaces model output into a user-affecting decision"
+        - label: "**Privacy-relevant** — collects, processes, stores, transmits, or deletes personal data, or changes retention, access, or purpose"
+
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: Dependencies
+      description: Named, with status. Unresolved dependencies mean this is Blocked, not Ready.
+
+  - type: textarea
+    id: open-questions
+    attributes:
+      label: Open questions
+      description: "**A story with an open question whose answer would change the design is not Ready** — however complete it otherwise looks."
+
+  - type: input
+    id: test-approach
+    attributes:
+      label: Test approach
+      description: One line, agreed in principle with QA.
+
+  - type: input
+    id: estimate
+    attributes:
+      label: Estimate
+      description: Relative size. ≤ ~3 developer-days, or split it. Sizes uncertainty, not effort alone — and is never a commitment.
