@@ -95,18 +95,27 @@ for line in raw.split("\n"):
             buf.append(line[2:] if line.startswith("  ") else line)
             continue
         prof[key] = "\n".join(buf).rstrip(); key, buf = None, []
-    m = re.match(r"^([a-z_]+):\s*\|\s*$", line)
+    m = re.match(r"^([a-z0-9_]+):\s*\|\s*$", line)
     if m:
         key = m.group(1); buf = []; continue
-    m = re.match(r'^([a-z_]+):\s*"?([^"\n]*)"?\s*$', line)
+    # DEFECT FIXED 2026-08-08: both key regexes were `[a-z_]+`, which excludes DIGITS.
+    # `e2e_test` therefore never parsed as a key and was silently dropped from every stack
+    # profile — leaving its ADAPT placeholder in the generated pipeline, where the step
+    # would "pass" by echoing. Silent key loss in a config parser is the worst kind.
+    m = re.match(r'^([a-z0-9_]+):\s*"?([^"\n]*)"?\s*$', line)
     if m and not line.startswith(" "):
         prof[m.group(1)] = m.group(2).strip()
 if key is not None:
     prof[key] = "\n".join(buf).rstrip()
 
 def indent(text, n):
+    # DEFECT FIXED 2026-08-08: this ended with .strip(), which removes leading whitespace
+    # from the WHOLE result — i.e. the pad on the first line only. Every spliced block
+    # emitted its first line at column 0 and the rest correctly indented, producing invalid
+    # YAML that no local check caught because bootstrap had never been run. L0005.
     pad = " " * n
-    return "\n".join(pad + ln if ln.strip() else "" for ln in text.split("\n")).strip()
+    lines = text.strip("\n").split("\n")
+    return "\n".join(pad + ln if ln.strip() else "" for ln in lines)
 
 ci = pathlib.Path(".github/workflows/ci.yml")
 t = ci.read_text(encoding="utf-8")
@@ -128,7 +137,9 @@ for pat, field in REPLACE:
     val = prof.get(field, "").strip()
     if not val:
         continue
-    t = re.sub(pat, "          " + indent(val, 10) + "\n", t, count=1)
+    # indent() now supplies the pad for every line including the first; prepending here
+    # as well would double-indent line 1.
+    t = re.sub(pat, indent(val, 10) + "\n", t, count=1)
 
 # Insert the toolchain setup step after each checkout in the build/lint/test jobs.
 setup = prof.get("setup", "").strip()
@@ -141,6 +152,16 @@ if setup:
     )
 
 ci.write_text(t, encoding="utf-8")
+
+# Any `echo "ADAPT: ..."` still present is an unreplaced COMMAND placeholder — the step
+# would "pass" by echoing. Comments mentioning ADAPT are fine and are not matched here.
+leftover = re.findall(r'echo "ADAPT: ([^"]{0,60})', t)
+if leftover:
+    print("  [warn] " + str(len(leftover)) + " command placeholder(s) not replaced:")
+    for L in leftover:
+        print("           echo \"ADAPT: " + L + "...")
+    print("           The stack profile has no value for these. Fill them in manually,")
+    print("           or the pipeline will report success for a step that ran an echo.")
 
 # SAST language in security.yml
 sec = pathlib.Path(".github/workflows/security.yml")
@@ -173,18 +194,49 @@ pathlib.Path(".git/precommit-stack.sh").write_text(prof.get("precommit", ":"), e
 print(f"  spliced {stack} into ci.yml and security.yml")
 PY
 
-# ── 4. Substitute placeholders ───────────────────────────────────────────────
+# ── 4. Substitute project identity ───────────────────────────────────────────
+# DEFECTS FIXED 2026-08-08, found the first time this script was actually run:
+#
+#  (1) `grep -rl ... | while read` under `set -euo pipefail`: grep exits 1 when it matches
+#      nothing, which killed bootstrap outright. Once the base repo's own placeholders were
+#      substituted, NOTHING matched — so bootstrap failed 100% of the time. The template's
+#      primary function was broken and no test caught it, because the script had never been
+#      run end to end. L0005 exactly.
+#
+#  (2) It only rewrote the literal `@your-org`. The base repo carries a REAL owner so its
+#      own CI works, which meant every fork silently inherited the upstream author as
+#      CODEOWNER — a stranger with review authority over your repo.
+#
+# Now: replace whatever owner is actually present, and never let a no-match be fatal.
 say "Substituting project identity"
-grep -rl '{{PROJECT_NAME}}\|{{GITHUB_ORG}}\|{{PROJECT_DESCRIPTION}}\|@your-org' \
-  --include='*.md' --include='*.yml' --include='CODEOWNERS' \
-  .github docs 2>/dev/null | while read -r f; do
-  sed -i.bak \
-    -e "s|{{PROJECT_NAME}}|$PNAME|g" \
-    -e "s|{{PROJECT_DESCRIPTION}}|$PDESC|g" \
-    -e "s|{{GITHUB_ORG}}|$PORG|g" \
-    -e "s|@your-org|@$PORG|g" "$f" && rm -f "$f.bak"
-done
-info "identity applied to .github/ and docs/"
+
+# Current CODEOWNERS owner (the base repo's, or a previous fork's).
+OLD_OWNER="$(grep -m1 -oE '@[A-Za-z0-9._/-]+' .github/CODEOWNERS 2>/dev/null | head -1 | tr -d '@' | cut -d/ -f1 || true)"
+OLD_REPO_SLUG="$(grep -m1 -oE 'github\.com/[A-Za-z0-9._-]+/[A-Za-z0-9._-]+' .github/ISSUE_TEMPLATE/config.yml 2>/dev/null | head -1 | cut -d/ -f2-3 || true)"
+
+files="$(grep -rl -e '{{PROJECT_NAME}}' -e '{{GITHUB_ORG}}' -e '{{PROJECT_DESCRIPTION}}' \
+           ${OLD_OWNER:+-e "@$OLD_OWNER"} ${OLD_REPO_SLUG:+-e "$OLD_REPO_SLUG"} \
+           --include='*.md' --include='*.yml' --include='CODEOWNERS' \
+           .github docs 2>/dev/null || true)"
+
+count=0
+if [ -n "$files" ]; then
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    sed -i.bak \
+      -e "s|{{PROJECT_NAME}}|$PNAME|g" \
+      -e "s|{{PROJECT_DESCRIPTION}}|$PDESC|g" \
+      -e "s|{{GITHUB_ORG}}|$PORG|g" \
+      ${OLD_OWNER:+-e "s|@$OLD_OWNER|@$PORG|g"} \
+      ${OLD_REPO_SLUG:+-e "s|$OLD_REPO_SLUG|$PORG/$PNAME|g"} \
+      "$f" 2>/dev/null && rm -f "$f.bak"
+    count=$((count+1))
+  done <<< "$files"
+fi
+info "identity applied to $count file(s)"
+[ -n "$OLD_OWNER" ] && [ "$OLD_OWNER" != "$PORG" ] \
+  && info "CODEOWNERS reassigned: @$OLD_OWNER -> @$PORG" \
+  || true
 
 # ── 5. Reset the ledgers ─────────────────────────────────────────────────────
 # You inherit the platform's PROCESS, not its findings. Carrying the base repo's POA&M
@@ -265,10 +317,32 @@ PY
 # ── 8. Hooks and validation ──────────────────────────────────────────────────
 say "Hooks and validation"
 bash scripts/install-hooks.sh >/dev/null 2>&1 && info "git hooks installed"
-bash .claude/hooks/selftest.sh >/dev/null 2>&1 && info "guard self-test: 20/20" \
+bash .claude/hooks/selftest.sh >/dev/null 2>&1 && info "guard self-test: passed" \
   || info "guard self-test FAILED — investigate before proceeding"
 python scripts/validate-platform.py --quiet >/dev/null 2>&1 && info "platform validation: pass" \
   || info "platform validation reported issues — run: python scripts/validate-platform.py"
+
+# Validate what we just generated. Bootstrap previously emitted invalid YAML and still
+# printed its success banner — a generator that does not check its own output is a
+# generator you cannot trust.
+say "Verifying generated workflows"
+if python -c "
+import yaml, glob, sys
+bad = 0
+for f in sorted(glob.glob('.github/workflows/*.yml')):
+    try:
+        yaml.safe_load(open(f, encoding='utf-8'))
+    except Exception as e:
+        print('  [FAIL] ' + f + ': ' + str(e)[:80]); bad = 1
+sys.exit(bad)
+" 2>/dev/null; then
+  info "all workflows parse"
+else
+  echo "" >&2
+  echo "  BOOTSTRAP PRODUCED INVALID YAML. Not marking this repo as bootstrapped." >&2
+  echo "  Recover: git checkout .github/workflows/ && re-run bootstrap" >&2
+  exit 1
+fi
 
 date -u +"%Y-%m-%dT%H:%M:%SZ" > .bootstrapped
 echo "stack=$STACK name=$PNAME org=$PORG" >> .bootstrapped

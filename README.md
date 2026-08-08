@@ -73,7 +73,7 @@ ones, so every fork receives them on their next sync.
 
 The test is: *would a team on a completely different stack hit this same wall?*
 
-`docs/lessons/` already holds ten, every one a defect that shipped in this platform before it
+`docs/lessons/` already holds eleven, every one a defect that shipped in this platform before it
 was caught — including a secret guard that blocked the edit *removing* a secret, a control
 that blocked its own repair, and a signing requirement enabled without the capability to
 satisfy it, which made every PR permanently unmergeable.
@@ -192,6 +192,9 @@ Written down so nobody discovers them during an assessment:
   marks what is partial — read the 🟡 entries as the honest ones.
 - **Prompt-level agent controls are advisory.** Only the tool grants, hooks, and branch
   protection hold against a confused or adversarial model.
+- **`bootstrap.sh` and `sync-platform.sh` are now verified end to end** against a real
+  clone — nine defects were found and fixed on their first execution (L0011). The remaining
+  untested surface is the non-`node` stack profiles and `release.yml`.
 - **Agent write-scope by role is not enforceable today.** Claude Code grants tool *types*,
   not path scopes, and the hook payload carries no agent identity (probed and verified
   2026-08-07). "The product-owner agent cannot write source" is a prompt instruction, not a
