@@ -30,8 +30,9 @@ updates:
         update-types: ["minor", "patch"]
     reviewers:
       # Workflow changes require security review — the pipeline gates everything else,
-      # so a change here can disable every other control (CM-5).
-      - "your-org/security"
+      # so a change here can disable every other control (CM-5). Solo project: the
+      # single owner. A team fork gets its org substituted by scripts/bootstrap.sh.
+      - "ToddGBenson"
 
   # ── ADAPT: enable the ecosystems you actually use ──────────────────────────
   # - package-ecosystem: "npm"

@@ -321,6 +321,66 @@ if [ "$SEC" = "null" ]; then
   warn "  -> pre-commit + CI gitleaks still run. Record the gap: POA&M, control IA-5."
 fi
 
+# ── 7. CIS Software Supply Chain checks ─────────────────────────────────────
+# Settings CIS names explicitly that are not covered by branch protection.
+# Mapped in docs/compliance/cis-supply-chain-map.md.
+say "7. CIS Software Supply Chain v1.0"
+
+# 1.2.5 / 1.2.6 — security policy, description, discoverability
+[ -f SECURITY.md ]  && info "[ok]   1.2.5 SECURITY.md present"  || bad "1.2.5 SECURITY.md missing"
+[ -f LICENSE ]      && info "[ok]   ---   LICENSE present"      || bad "LICENSE missing (a public repo without one is all-rights-reserved)"
+[ -f CONTRIBUTING.md ] && info "[ok]   ---   CONTRIBUTING.md present" || warn "CONTRIBUTING.md missing"
+
+DESC="$(gh repo view --json description --jq '.description // ""')"
+[ -n "$DESC" ] && info "[ok]   1.2.6 repository description set" || bad "1.2.6 no repository description"
+
+# 1.3.2 — MFA. Account-level; report, cannot enforce from a repo.
+MFA="$(gh api user --jq '.two_factor_authentication // "unknown"' 2>/dev/null || echo unknown)"
+case "$MFA" in
+  true)  info "[ok]   1.3.2 MFA enabled on the account" ;;
+  false) bad  "1.3.2 MFA is NOT enabled — enable it; it protects every control here" ;;
+  *)     warn "1.3.2 MFA status not readable with the current token scope" ;;
+esac
+
+# 1.4.2 — every action pinned to a full commit SHA, and the SHA must RESOLVE.
+# A tag is mutable; a compromised action tag compromises every workflow using it. A
+# plausible-but-nonexistent SHA is worse — three were found in this repo (AIC-7).
+say "   1.4.2 Action pinning"
+unpinned=0; unresolved=0
+while read -r line; do
+  [ -z "$line" ] && continue
+  spec="$(printf '%s' "$line" | sed -E 's/.*uses:[[:space:]]*([^[:space:]#]+).*/\1/')"
+  ver="$(printf '%s' "$line" | sed -nE 's/.*#[[:space:]]*([^[:space:]]+).*/\1/p')"
+  repo="${spec%@*}"; sha="${spec#*@}"
+  case "$spec" in ./*) continue ;; esac
+  if ! printf '%s' "$sha" | grep -qE '^[0-9a-f]{40}$'; then
+    bad "1.4.2 not SHA-pinned: $spec"; unpinned=$((unpinned+1)); continue
+  fi
+  if [ -n "$ver" ]; then
+    base="$(printf '%s' "$repo" | cut -d/ -f1,2)"
+    real="$(gh api "repos/$base/commits/$ver" --jq .sha 2>/dev/null || echo '')"
+    if [ -n "$real" ] && [ "$real" != "$sha" ]; then
+      bad "1.4.2 SHA does not match tag $ver for $repo (have ${sha:0:12}, actual ${real:0:12})"
+      unresolved=$((unresolved+1))
+    fi
+  fi
+done < <(grep -rhE '^\s*[-]?\s*uses:' .github/workflows/ 2>/dev/null | grep -v '^\s*#')
+[ "$unpinned" = "0" ] && [ "$unresolved" = "0" ] && info "[ok]   1.4.2 all actions SHA-pinned and resolvable"
+
+# 2.2.2 — build worker least privilege
+noperm=0
+for f in .github/workflows/*.yml; do
+  grep -qE '^permissions:' "$f" || { bad "2.2.2 no top-level permissions in $(basename "$f")"; noperm=1; }
+done
+[ "$noperm" = "0" ] && info "[ok]   2.2.2 all workflows declare least-privilege permissions"
+
+# 1.5.1 — secret scanning + push protection (free on public repos)
+if [ "$SEC" = "null" ]; then
+  bad "1.5.1 GitHub secret scanning / push protection NOT enabled"
+else
+  info "[ok]   1.5.1 secret scanning + push protection enabled"
+fi
+
 say "Summary"
 if [ "$died" = "0" ]; then
   cat <<'EOF'
