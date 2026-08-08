@@ -80,6 +80,7 @@ how**, once, so the method does not drift across the five places that reference 
 | Skill | Load it when |
 |---|---|
 | **Discovery & refinement** | |
+| `artifact-intake` | Input is a spec, wireframe, mockup, PDF, or schema rather than prose |
 | `story-splitting` | Decomposing an epic, or a story is too large to estimate |
 | `writing-acceptance-criteria` | Refining a story, running G1, judging whether criteria are testable |
 | **Design** | |

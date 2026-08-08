@@ -10,7 +10,8 @@ Run refinement per `docs/03-refinement.md`. Delegate to the `product-owner` agen
 `architect` where technical feasibility affects the split.
 
 **Skills:** `story-splitting` for the decomposition · `writing-acceptance-criteria` for each
-resulting story.
+resulting story · **`artifact-intake` if the source is a spec, wireframe, or schema** rather
+than an accepted text idea.
 
 ## Preconditions
 

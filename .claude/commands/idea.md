@@ -1,12 +1,17 @@
 ---
-description: Capture a raw idea and walk it back to a problem statement, evidence, and a RICE size (G0 intake)
-argument-hint: <the raw idea, in the requester's own words>
+description: Capture a raw idea and walk it back to a problem statement, evidence, and a RICE size (G0 intake). Accepts prose or a path to a spec/wireframe.
+argument-hint: <the raw idea in the requester's own words, OR a path to a spec/wireframe>
 allowed-tools: Read, Grep, Glob, Write, Edit, Bash, WebSearch, Task
 ---
 
 # Intake: `$ARGUMENTS`
 
 Run G0 intake per `docs/02-intake-and-discovery.md`. Delegate to the `product-owner` agent.
+
+**If the argument is a path** (a file or directory — spec, wireframe, mockup, PDF, schema):
+load the `artifact-intake` skill and run `/spec` first. A wireframe shows the happy path in
+one state; the intake skill is what surfaces the 80% it cannot show. Come back here with the
+extracted problem once the blocking questions are answered.
 
 ## Critical framing
 
