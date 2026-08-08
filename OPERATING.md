@@ -12,6 +12,7 @@ One command, `./keel`. Learn these five:
 ./keel fast "msg"     # trivial change (docs/config): commit, no ceremony
 ./keel ship           # check, then push the current branch
 ./keel status         # open PRs, their state, open findings
+./keel dash           # visual dashboard: needs-a-human, CI health, controls, findings
 ./keel secure         # control posture + guard self-test
 ```
 

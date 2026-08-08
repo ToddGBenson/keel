@@ -10,6 +10,7 @@
 #   ./keel secure         guard self-test + platform integrity + gaps
 #   ./keel evals          agent structural assurance (AIC-12, automated part)
 #   ./keel status         where everything sits: PRs, checks, findings
+#   ./keel dash           generate + open a visual dashboard (backlog, CI, controls)
 #   ./keel new  [args]     bootstrap a fresh fork into a project
 #   ./keel harden          apply GitHub-side controls (branch protection, envs)
 #   ./keel sync            what changed upstream (--apply to take it)
@@ -174,6 +175,7 @@ cmd_evals() {
 }
 
 # ── the rest: thin wrappers over the real scripts ───────────────────────────
+cmd_dash()   { "$PY" scripts/dashboard.py --open "$@"; }
 cmd_new()    { bash scripts/bootstrap.sh "$@"; }
 cmd_harden() { bash scripts/configure-github.sh "$@"; }
 cmd_sync()   { [ "${1:-}" = "--apply" ] && bash scripts/sync-platform.sh || bash scripts/sync-platform.sh --check; }
@@ -204,6 +206,7 @@ case "${1:-help}" in
   sync)   shift; cmd_sync "$@" ;;
   setup)  shift; cmd_setup "$@" ;;
   status) shift; cmd_status "$@" ;;
+  dash)   shift; cmd_dash "$@" ;;
   help|-h|--help) cmd_help ;;
   *) die "unknown command '$1' — try ./keel help" ;;
 esac
