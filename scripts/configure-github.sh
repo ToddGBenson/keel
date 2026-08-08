@@ -259,13 +259,21 @@ if [ "$DRY" = "1" ]; then
   info "would require ${#CHECKS[@]} status checks"
 else
   ctx=$(printf '"%s",' "${CHECKS[@]}"); ctx="[${ctx%,}]"
+  # PATCH on the sub-resource 404s when required_status_checks has never been set — the
+  # parent object does not exist yet, which is the normal state on a fresh repo. Try the
+  # PATCH, then fall back to a full protection PUT that includes the checks.
   if gh api -X PATCH "repos/$REPO/branches/$BRANCH/protection/required_status_checks" \
        -H "Accept: application/vnd.github+json" \
        --input - <<< "{\"strict\":true,\"contexts\":$ctx}" >/dev/null 2>&1; then
     info "${#CHECKS[@]} required status checks configured"
+  elif printf '%s' "$PROT_JSON" \
+       | sed "s|\"required_status_checks\": null|\"required_status_checks\": {\"strict\":true,\"contexts\":$ctx}|" \
+       | gh api -X PUT "repos/$REPO/branches/$BRANCH/protection" \
+           -H "Accept: application/vnd.github+json" --input - >/dev/null 2>&1; then
+    info "${#CHECKS[@]} required status checks configured (via full protection PUT)"
   else
-    warn "could not set status checks — they must run at least once first."
-    warn "Open a PR, let CI run, then re-run this script."
+    warn "could not set status checks — a check must have reported at least once."
+    warn "Open a PR, let CI run, then re-run this script. CIS 1.1.7 is NOT satisfied."
   fi
 fi
 
@@ -310,7 +318,14 @@ print(str(cur).lower() if cur is not None else 'absent')" 2>/dev/null)"
   chk '.allow_deletions.enabled'                                    false "branch deletion blocked"
   chk '.required_linear_history.enabled'                            true  "linear history"
   chk '.required_conversation_resolution.enabled'                   true  "conversations resolved"
-  chk '.required_signatures.enabled'                                true  "signed commits (SI-7, CM-14)"
+  # Conditional on the capability probe in step 4b. Reporting FAIL here when signing was
+  # deliberately not enabled — because the operator has no key — is a false failure, and a
+  # verifier that cries wolf gets ignored (L0007). Report the honest state instead.
+  if [ "$CAN_SIGN" = "1" ]; then
+    chk '.required_signatures.enabled'                              true  "signed commits (SI-7, CM-14)"
+  else
+    chk '.required_signatures.enabled'                              false "signed commits NOT required — no signing capability (SI-7 unsatisfied, see POA&M)"
+  fi
 fi
 
 # Plan-dependent features. Report their absence as a FINDING, not a failure of this run —

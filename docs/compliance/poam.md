@@ -33,10 +33,11 @@ assurance that everything else relies on.
 | POAM-002 | Secret guard used keyword matching; blocked all security tooling | AIC-5, IA-5 | Medium | *unassigned* | 2026-08-07 | **Closed** — fixed + regression test |
 | POAM-003 | Secret guard matched its own patterns; blocked its own repair | AIC-5 | Medium | *unassigned* | 2026-08-07 | **Closed** — fixed + regression test |
 | POAM-004 | Without `jq`, guard scanned `old_string`; blocked removing a secret | AIC-5, IA-5 | **High** | *unassigned* | 2026-08-07 | **Closed** — fixed |
-| POAM-005 | GitHub secret scanning + push protection unavailable (private repo, Free plan) | IA-5, SI-7 | Medium | *unassigned* | on plan change | Open — compensated |
-| POAM-006 | `production` environment has no required reviewers — **G5 is not technically enforced** | CM-3, AC-5 | **High** | *unassigned* | on plan change | Open — compensated |
+| POAM-005 | GitHub secret scanning + push protection unavailable (private repo, Free plan) | IA-5, SI-7 | Medium | Todd Benson | 2026-08-08 | **Closed** — repo made public; verified enabled |
+| POAM-006 | `production` environment has no required reviewers — **G5 is not technically enforced** | CM-3, AC-5 | **High** | Todd Benson | 2026-08-08 | **Closed** — public repo; environment reviewer set and verified |
 | POAM-007 | Verification routine in `configure-github.sh` reported 5 false failures | CA-2 | Medium | *unassigned* | 2026-08-07 | **Closed** — fixed + re-verified |
 | POAM-008 | **Solo operation — AC-5 separation of duties cannot be satisfied** | AC-5, CM-5 | **High** | Todd Benson | on 2nd team member | Open — accepted with compensating controls |
+| POAM-009 | Commit signing not registered with GitHub — SI-7/CM-14 unsatisfied | SI-7, CM-14 | Medium | Todd Benson | next session | Open — control correctly NOT enabled (L0010) |
 
 ### POAM-008 — Separation of duties under solo operation
 
@@ -50,9 +51,12 @@ joining — not at the next convenient moment. The window where the team has gro
 controls have not is exactly when "someone reviewed this" becomes false without anyone
 noticing.
 
-**Scope of the relaxation — one control only.** Still enforced: `enforce_admins` (no admin
-bypass), CODEOWNER routing, signed commits, linear history, no force-push, no deletion,
-conversation resolution, and all required status checks. Letting the admin bypass protection
+**Scope of the relaxation — one control, three settings.** GitHub enforces independent
+approval in three places (`required_approving_review_count`, `require_code_owner_reviews`,
+`require_last_push_approval`); all three are structurally impossible for a single owner and
+all three are cleared. Still enforced: `enforce_admins` (no admin bypass), CODEOWNER
+routing (advisory), linear history, no force-push, no deletion, conversation resolution,
+and **10 required status checks**. Commit signing is separately unsatisfied — see POAM-009. Letting the admin bypass protection
 was considered and **rejected**: it would remove every control simultaneously rather than
 the one that is structurally impossible.
 
@@ -74,15 +78,30 @@ and untested paths well. It catches **misunderstood requirements poorly**, becau
 the same requirement the author did. A solo operator will not catch their own misreading, and
 no configuration fixes that.
 
-**Free remediation available.** Making the repository public would close POAM-005 and
-POAM-006 at no cost (secret-scanning push protection and environment reviewers are free on
-public repos). It does not close this entry — that needs a second person.
+**Note.** Publishing the repository (done 2026-08-08) closed POAM-005 and POAM-006. It does
+not touch this entry — separation of duties needs a second person, not a plan change.
 
 **Reference:** `docs/13-solo-operation.md`
 
 ---
 
-### POAM-005 — Server-side secret scanning unavailable
+### POAM-009 — Commit signing capability incomplete
+
+**Weakness.** An SSH signing key is generated and git is configured, but the key is not
+registered with GitHub — `gh ssh-key add --type signing` requires the
+`admin:ssh_signing_key` OAuth scope, which needs an interactive `gh auth refresh`.
+GitHub therefore reports `verified=false reason=unknown_key`.
+
+**Status of the control.** `required_signatures` is deliberately **not** enabled. Per L0010,
+enabling a control the operator cannot satisfy makes every PR permanently unmergeable. The
+script probes the capability and refuses. SI-7/CM-14 are honestly unsatisfied rather than
+falsely claimed.
+
+**Remediation.** `gh auth refresh -h github.com -s admin:ssh_signing_key`, then
+`gh ssh-key add ~/.ssh/id_ed25519_signing.pub --type signing`, then re-run
+`configure-github.sh --solo`. Two minutes, requires an interactive browser auth.
+
+### POAM-005 — Server-side secret scanning unavailable ✅ CLOSED 2026-08-08
 
 **Weakness.** GitHub secret scanning and push protection require GitHub Advanced Security,
 which is free only on **public** repositories. This repo is private on a Free plan, so
@@ -93,10 +112,12 @@ which is free only on **public** repositories. This repo is private on a Free pl
 credential-shaped content at the agent layer. Coverage is good; what is missing is the
 server-side *push* block — the last line of defence if a contributor skips local hooks.
 
-**Remediation.** Make the repository public, or move to a plan including Advanced Security.
-Until then this is a real gap and is recorded as one.
+**Remediation — DONE.** Repository made public 2026-08-08. Secret scanning, push protection,
+Dependabot security updates, and vulnerability alerts verified enabled via the API. The
+server-side push block — the last line of defence if a contributor skips local hooks — now
+exists. **Evidence of closure:** `configure-github.sh` CIS check 1.5.1 reports ok.
 
-### POAM-006 — G5 human authorization is not technically enforced
+### POAM-006 — G5 human authorization is not technically enforced ✅ CLOSED 2026-08-08
 
 **Weakness.** Required reviewers on a deployment environment need a paid plan for private
 repositories. The `production` environment could not be created with a reviewer gate, so the
@@ -110,9 +131,10 @@ rather than a mechanism — precisely the overstatement `docs/lessons/0006` warn
 deliberate human trigger. `guard-bash.sh` blocks agents from triggering releases. Branch
 protection prevents un-reviewed code reaching `main`.
 
-**Remediation.** Make the repo public (environments with reviewers are free on public repos)
-or upgrade the plan. **Until then, do not claim CM-3 approval enforcement in the SSP** —
-claim the compensating controls and cite this entry.
+**Remediation — DONE.** Repository made public 2026-08-08. The `production` environment now
+has a required reviewer, so the deploy job in `release.yml` blocks awaiting human approval
+and the approval record is the CM-3 evidence. **G5 is now technically enforced.**
+**Evidence of closure:** environment created and reviewer confirmed via the API.
 
 ### POAM-007 — Control verifier reported false failures
 
