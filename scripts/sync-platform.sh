@@ -47,18 +47,28 @@ git rev-parse --verify "$UPSTREAM_REF" >/dev/null 2>&1 || UPSTREAM_REF="upstream
 info "$(git log -1 --format='%h %s' "$UPSTREAM_REF")"
 
 # ── Parse the manifest ───────────────────────────────────────────────────────
+# DEFECT FIXED 2026-08-08: on Windows, Python's text-mode stdout translates \n to \r\n.
+# Every path therefore arrived with a trailing carriage return, and `git diff -- 'path/\r'`
+# matched nothing — so the sync reported "already current" on a fork that was behind.
+#
+# Two mitigations, deliberately belt-and-braces because the failure mode is SILENT and the
+# consequence is a fork that never receives control improvements:
+#   1. Python writes with an explicit "\n" via sys.stdout.buffer (no translation).
+#   2. The shell strips any stray CR anyway, in case a future edit reintroduces print().
 read_section() { # section name -> newline-separated paths
-  python - "$1" <<'PY'
+  python - "$1" <<'PY' | tr -d '\r'
 import sys, re, pathlib
 section = sys.argv[1]
 txt = pathlib.Path("platform/MANIFEST.yml").read_text(encoding="utf-8")
 m = re.search(rf"^{section}:\n((?:\s*-\s+.*\n|\s*#.*\n|\n)*)", txt, re.M)
 if not m:
     sys.exit(0)
+out = []
 for line in m.group(1).split("\n"):
     s = line.strip()
     if s.startswith("- "):
-        print(s[2:].split("#")[0].strip())
+        out.append(s[2:].split("#")[0].strip())
+sys.stdout.buffer.write(("\n".join(out) + "\n").encode("utf-8"))
 PY
 }
 
@@ -68,14 +78,27 @@ MERGE_PATHS="$(read_section merge_required)"
 # ── 1. Platform-owned: fast-forward ──────────────────────────────────────────
 say "Platform-owned paths"
 changed=0
+# DEFECT FIXED 2026-08-08 — the first time this script was ever run against a real fork.
+#
+# The loop began with an existence guard:
+#     git cat-file -e "$UPSTREAM_REF:$p" || git ls-tree -d "$UPSTREAM_REF" -- "$p" || continue
+# Both halves failed for every directory entry in the manifest, so EVERY platform path was
+# skipped and the script cheerfully reported "already current" while the fork was several
+# commits behind. A sync tool that says you are up to date when you are not is worse than
+# no sync tool — the fork silently stops receiving control improvements.
+#
+# Two causes, either sufficient:
+#   1. `git ls-tree -d <ref> -- 'path/'` returns nothing when the pathspec has a trailing
+#      slash, and every directory in MANIFEST.yml has one.
+#   2. On Windows/Git Bash, MSYS path conversion mangles the `<ref>:<path>` argument —
+#      `upstream/main:.claude/agents/` became `upstream\main;.claude\agents\`.
+#
+# The guard was never needed: `git diff` against a path that does not exist upstream simply
+# reports no difference, which is the behaviour we want anyway.
 while IFS= read -r p; do
   [ -z "$p" ] && continue
-  git cat-file -e "$UPSTREAM_REF:$p" 2>/dev/null || \
-    git ls-tree -d "$UPSTREAM_REF" -- "$p" >/dev/null 2>&1 || continue
-  if git diff --quiet HEAD "$UPSTREAM_REF" -- "$p" 2>/dev/null; then
-    continue
-  fi
   n=$(git diff --name-only HEAD "$UPSTREAM_REF" -- "$p" 2>/dev/null | wc -l | tr -d ' ')
+  [ "${n:-0}" -eq 0 ] && continue
   info "$p  ($n file(s) differ)"
   changed=$((changed+n))
   if [ "$CHECK_ONLY" = "0" ]; then
@@ -89,14 +112,14 @@ say "Merge-required paths (a human decides these)"
 needs_merge=0
 while IFS= read -r p; do
   [ -z "$p" ] && continue
-  if git diff --quiet HEAD "$UPSTREAM_REF" -- "$p" 2>/dev/null; then continue; fi
-  files=$(git diff --name-only HEAD "$UPSTREAM_REF" -- "$p" 2>/dev/null)
-  [ -z "$files" ] && continue
-  needs_merge=1
-  info "$p"
-  while IFS= read -r f; do
-    [ -n "$f" ] && printf '      %s\n' "$f"
-  done <<< "$files"
+  files=$(git diff --name-only HEAD "$UPSTREAM_REF" -- "$p" 2>/dev/null || true)
+  if [ -n "$files" ]; then
+    needs_merge=1
+    info "$p"
+    while IFS= read -r f; do
+      [ -n "$f" ] && printf '      %s\n' "$f"
+    done <<< "$files"
+  fi
 done <<< "$MERGE_PATHS"
 if [ "$needs_merge" = "0" ]; then
   info "nothing to merge"
