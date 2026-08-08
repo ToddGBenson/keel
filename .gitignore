@@ -65,3 +65,6 @@ desktop.ini
 *.log
 tmp/
 temp/
+
+# Generated dashboard snapshot (regenerate with: ./keel dash)
+dashboard.html
