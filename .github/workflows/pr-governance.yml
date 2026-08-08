@@ -126,6 +126,48 @@ jobs:
               });
             }
 
+            // ---- SOLO MODE: the self-review artifact replaces a reviewer's approval ----
+            // In solo mode required_approving_review_count is 0, so nothing else forces a
+            // second look. This check is the compensating control from POAM-008: if no one
+            // else approved, the author must have produced a self-review record.
+            // Without this, "solo mode" is just "no review".
+            const reviews = await github.paginate(github.rest.pulls.listReviews, {
+              owner: context.repo.owner, repo: context.repo.repo, pull_number: pr.number,
+            });
+            const approvedByOther = reviews.some(
+              r => r.state === 'APPROVED' && r.user && r.user.login !== pr.user.login);
+
+            if (!approvedByOther) {
+              const hasSelfReview = /##\s*Self-review/i.test(body)
+                                 || /evidence\/[^\s)]*\/self-review\.md/i.test(body);
+              const hasVerified = /verified independently[^\n]*\n(?:[^\n]*\n){0,2}?\s*[-*]\s*\S{20,}/i.test(body);
+
+              if (!hasSelfReview) {
+                failures.push(
+                  'No approving review from another identity, and no self-review record. ' +
+                  'In solo mode the self-review artifact IS the review evidence (POAM-008, ' +
+                  'docs/13-solo-operation.md). Run `/self-review ' + pr.number + '` and link ' +
+                  'evidence/<issue>/g3/self-review.md in the PR body.');
+              } else if (!hasVerified) {
+                warnings.push(
+                  'Self-review present but "verified independently" looks thin. State the ' +
+                  'specific claims you checked, not that you reviewed it.');
+              }
+
+              // Cooling-off. A PR opened and merged in the same session has been re-read by
+              // the person who just wrote it, holding the same mental model — not reviewed.
+              const ageHours = (Date.now() - new Date(pr.created_at).getTime()) / 3.6e6;
+              if (ageHours < 4) {
+                warnings.push(
+                  `This PR is ${ageHours.toFixed(1)}h old and has no independent approval. ` +
+                  'Cooling-off: do not merge the session you opened it. A cold read is the ' +
+                  'cheapest review capacity a solo operator has, and it is free.');
+              }
+              core.summary.addRaw(
+                `\n> **Solo mode** — no independent approval. Self-review record: ` +
+                `${hasSelfReview ? 'present' : 'MISSING'}. PR age: ${ageHours.toFixed(1)}h.\n`);
+            }
+
             // ---- Report -----------------------------------------------------------
             const lines = [];
             if (failures.length) {
@@ -186,7 +228,33 @@ jobs:
       # Fails on NEW High/Critical vulnerabilities and disallowed licenses.
       # Gating on new-only is deliberate: gating on the absolute count in a real
       # codebase means the pipeline is red forever and everyone learns to ignore it.
+      # Dependency review needs the dependency graph, which requires GitHub Advanced
+      # Security on PRIVATE repositories (it is free on public ones). Rather than failing
+      # the gate for a licensing reason — or, worse, hiding it behind continue-on-error and
+      # reporting green — detect the condition and say so. GP-4: detection fails open,
+      # LOUDLY. The compensating control is the grype filesystem scan in security.yml,
+      # which works on any repo.
+      - name: Is dependency review available?
+        id: depcap
+        run: |
+          priv='${{ github.event.repository.private }}'
+          if [ "$priv" = "true" ]; then
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            {
+              echo "### Dependency review SKIPPED"
+              echo ""
+              echo "Requires GitHub Advanced Security on private repositories."
+              echo "**This means PR-time dependency review is NOT running (RA-5, SR-3).**"
+              echo ""
+              echo "Compensating: grype filesystem scan in \`security.yml\`, plus Dependabot."
+              echo "Tracked as POAM-005. Making the repo public would close it at no cost."
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Dependency review
+        if: steps.depcap.outputs.available == 'true'
         uses: actions/dependency-review-action@3b139cfc5fae8b618d3eae3675e383bb1769c019 # v4.5.0
         with:
           fail-on-severity: high

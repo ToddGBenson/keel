@@ -92,6 +92,21 @@ How to undo this. Any data migration and whether it is reversible.
 
 Where you want scrutiny, and what you are least sure about.
 
+## Self-review — required if nobody else approves (solo mode, POAM-008)
+
+Delete this section if another identity approved. Otherwise it **is** the review evidence,
+and `pr-governance.yml` will block the merge without it. Run `/self-review <PR>`.
+
+- **Record:** `evidence/<issue>/g3/self-review.md`
+- **Opened / reviewed:** `<timestamp>` → `<timestamp>` (cooling-off: don't merge same session)
+- **Verified independently:** *specific claims you checked, not "reviewed it"*
+- **Agent findings:** developer · security-engineer · qa-engineer
+- **Not verified:** *say "unverified", never "passed"*
+- **Cold-read notes:** *what you saw on the second, later look*
+
+> A self-review with nothing in "Not verified" or "Cold-read notes" is a self-review that did
+> not happen. See `docs/13-solo-operation.md` for what this control does and does not cover.
+
 ---
 
 **Reviewer:** you are approving as an identity that is **not the author** (AC-5). State what

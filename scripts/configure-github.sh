@@ -18,15 +18,22 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-DRY=0; YES=0
+DRY=0; YES=0; MODE="team"
 while [ $# -gt 0 ]; do
   case "$1" in
     --dry-run) DRY=1; shift ;;
     --yes|-y)  YES=1; shift ;;
+    --solo)    MODE="solo"; shift ;;
+    --team)    MODE="team"; shift ;;
     -h|--help) sed -n '2,20p' "$0"; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 1 ;;
   esac
 done
+
+# Required approving reviews. GitHub forbids approving your own PR, so with 1 required a
+# solo operator can never merge anything. Solo mode drops the COUNT and nothing else —
+# see docs/13-solo-operation.md and POAM-008.
+if [ "$MODE" = "solo" ]; then REVIEW_COUNT=0; else REVIEW_COUNT=1; fi
 
 say()  { printf '\n\033[1m%s\033[0m\n' "$1"; }
 info() { printf '  %s\n' "$1"; }
@@ -42,7 +49,15 @@ REPO="$(gh repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null)" || {
   echo "  gh repo create <name> --private --source=. --push" >&2
   exit 1
 }
-BRANCH="$(git symbolic-ref --short HEAD 2>/dev/null || echo main)"
+# DEFECT FIXED 2026-08-07: this used `git symbolic-ref --short HEAD`, i.e. whatever branch
+# you happen to be standing on. Run from a feature branch, it protected the FEATURE branch
+# and silently left the default branch alone — the exact inverse of the intent, reported as
+# success. Always ask the API for the repository's default branch.
+BRANCH="$(gh repo view --json defaultBranchRef --jq .defaultBranchRef.name 2>/dev/null || echo main)"
+CURRENT="$(git symbolic-ref --short HEAD 2>/dev/null || echo '')"
+if [ -n "$CURRENT" ] && [ "$CURRENT" != "$BRANCH" ]; then
+  printf '  (on branch %s; configuring the default branch %s)\n' "$CURRENT" "$BRANCH"
+fi
 say "Repository: $REPO   default branch: $BRANCH"
 
 run() { # description, gh args...
@@ -107,22 +122,43 @@ else
 fi
 
 # ── 4. Branch protection (AC-5, CM-5, SI-7) ──────────────────────────────────
-say "4. Branch protection on '$BRANCH'"
-info "Required review from a CODEOWNER, stale dismissal, signed commits,"
-info "linear history, no force-push, NO ADMIN BYPASS."
+say "4. Branch protection on '$BRANCH'  [mode: $MODE]"
+info "CODEOWNER routing, stale dismissal, signed commits, linear history,"
+info "no force-push, NO ADMIN BYPASS."
+if [ "$MODE" = "solo" ]; then
+  info ""
+  info "SOLO MODE: required_approving_review_count = 0"
+  info "           require_code_owner_reviews      = false"
+  info "           require_last_push_approval      = false"
+  info ""
+  info "  Three SETTINGS, one CONTROL: independent human approval. GitHub forbids"
+  info "  approving your own PR, and code-owner review is required regardless of the"
+  info "  count — so with a single owner all three are structurally impossible, not"
+  info "  merely inconvenient. Leaving any of them on means nothing can ever merge."
+  info ""
+  info "  CODEOWNERS still routes and auto-requests review; it is no longer blocking."
+  info "  enforce_admins stays TRUE — letting the admin bypass would remove every"
+  info "  protection at once, not just this one."
+  info ""
+  info "  Compensating controls (docs/13-solo-operation.md, POAM-008):"
+  info "    - /self-review artifact REQUIRED by pr-governance.yml"
+  info "    - cooling-off: do not merge the session you opened it"
+  info "    - all status checks required"
+  info "    - quarterly external review of a random sample"
+fi
 info ""
 info "Status checks are added in step 5, after they have run at least once."
 confirm
 
-PROT_JSON=$(cat <<'JSON'
+PROT_JSON=$(cat <<JSON
 {
   "required_status_checks": null,
   "enforce_admins": true,
   "required_pull_request_reviews": {
     "dismiss_stale_reviews": true,
-    "require_code_owner_reviews": true,
-    "required_approving_review_count": 1,
-    "require_last_push_approval": true
+    "require_code_owner_reviews": $([ "$MODE" = solo ] && echo false || echo true),
+    "required_approving_review_count": $REVIEW_COUNT,
+    "require_last_push_approval": $([ "$MODE" = solo ] && echo false || echo true)
   },
   "restrictions": null,
   "required_linear_history": true,
@@ -181,19 +217,56 @@ else
 fi
 
 # ── 6. Verify (CA-2: test beats examine) ─────────────────────────────────────
+#
+# DEFECT FIXED 2026-08-07 (L0007, third recurrence): the previous implementation had a
+# leftover no-op `gh api /dev/null` call and an eval-based JSON walk that returned null
+# for every field. It reported FIVE FALSE FAILURES against controls that were correctly
+# applied — which is worse than not verifying at all, because the operator's rational
+# response is to distrust the verifier and then ignore it.
+#
+# Now: one API call, jq paths, no eval.
 say "6. Verification"
 info "A control you have not seen block anything is a control you are assuming."
+
 P="$(gh api "repos/$REPO/branches/$BRANCH/protection" 2>/dev/null || echo '{}')"
-chk() { # jq path, expected, label
-  local got; got="$(printf '%s' "$P" | gh api --method GET /dev/null 2>/dev/null || true)"
-  got="$(printf '%s' "$P" | python -c "import sys,json;d=json.load(sys.stdin);print(json.dumps(eval('d$1',{'d':d}) if True else None))" 2>/dev/null || echo null)"
-  if [ "$got" = "$2" ]; then info "[ok]   $3"; else bad "$3 (got: $got)"; fi
-}
-chk "['enforce_admins']['enabled']"                                   "true"  "no admin bypass"
-chk "['required_pull_request_reviews']['require_code_owner_reviews']" "true"  "CODEOWNER review required"
-chk "['required_pull_request_reviews']['dismiss_stale_reviews']"      "true"  "stale approvals dismissed"
-chk "['allow_force_pushes']['enabled']"                               "false" "force push blocked"
-chk "['required_linear_history']['enabled']"                          "true"  "linear history"
+if [ "$P" = "{}" ] || printf '%s' "$P" | grep -q '"message"'; then
+  bad "branch protection is not readable — treat every item below as NOT configured"
+else
+  chk() { # jq-path expected label
+    local got
+    got="$(printf '%s' "$P" | jq -r "$1 // \"absent\"" 2>/dev/null \
+        || printf '%s' "$P" | python -c "
+import sys,json
+d=json.load(sys.stdin)
+cur=d
+for k in '''$1'''.strip('.').split('.'):
+    cur = (cur or {}).get(k)
+print(str(cur).lower() if cur is not None else 'absent')" 2>/dev/null)"
+    got="$(printf '%s' "$got" | tr '[:upper:]' '[:lower:]')"
+    if [ "$got" = "$2" ]; then info "[ok]   $3"; else bad "$3 (got: $got)"; fi
+  }
+  chk '.enforce_admins.enabled'                                     true  "no admin bypass"
+  chk '.required_pull_request_reviews.required_approving_review_count' "$REVIEW_COUNT" "approving reviews = $REVIEW_COUNT ($MODE mode)"
+  if [ "$MODE" = "team" ]; then
+    chk '.required_pull_request_reviews.require_code_owner_reviews' true  "CODEOWNER review required"
+  else
+    chk '.required_pull_request_reviews.require_code_owner_reviews' false "CODEOWNER review advisory (solo — routes, does not block)"
+  fi
+  chk '.required_pull_request_reviews.dismiss_stale_reviews'        true  "stale approvals dismissed"
+  chk '.allow_force_pushes.enabled'                                 false "force push blocked"
+  chk '.allow_deletions.enabled'                                    false "branch deletion blocked"
+  chk '.required_linear_history.enabled'                            true  "linear history"
+  chk '.required_conversation_resolution.enabled'                   true  "conversations resolved"
+  chk '.required_signatures.enabled'                                true  "signed commits (SI-7, CM-14)"
+fi
+
+# Plan-dependent features. Report their absence as a FINDING, not a failure of this run —
+# they are a licensing constraint, and the honest response is a POA&M entry, not a retry.
+SEC="$(gh api "repos/$REPO" --jq '.security_and_analysis // "null"' 2>/dev/null || echo null)"
+if [ "$SEC" = "null" ]; then
+  warn "Secret scanning / push protection unavailable on this plan+visibility."
+  warn "  -> pre-commit + CI gitleaks still run. Record the gap: POA&M, control IA-5."
+fi
 
 say "Summary"
 if [ "$died" = "0" ]; then

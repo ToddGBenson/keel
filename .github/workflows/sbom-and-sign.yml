@@ -73,7 +73,7 @@ jobs:
           subject-path: 'sbom.cdx.json'   # ADAPT: point at your real build output
 
       - name: Attest the SBOM
-        uses: actions/attest-sbom@bd218ad0dbcb3e146bd073d1d9c6d78e08aa8a0b # v2.2.0
+        uses: actions/attest-sbom@115c3be05ff3974bcbd596578934b3f9ce39bf68 # v2.2.0
         with:
           subject-path: 'sbom.cdx.json'   # ADAPT
           sbom-path: 'sbom.cdx.json'

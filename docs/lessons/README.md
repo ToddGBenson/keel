@@ -86,4 +86,5 @@ it `superseded-by:` and stop carrying it. The ledger is a working set, not an ar
 | [L0005](0005-test-beats-examine.md) | Test the control; reading it finds nothing | promotable | GP-5, control-assessment |
 | [L0006](0006-enforcement-strength-is-not-uniform.md) | State enforcement strength honestly per control | promotable | AIC-3 table, POAM-001 |
 | [L0007](0007-checkers-that-cry-wolf-get-muted.md) | A checker with false positives gets muted | promotable | validate-platform.py |
+| [L0009](0009-scanners-need-a-no-input-path.md) | Every scanner needs an explicit no-input path | promotable | security.yml scan jobs |
 | [L0008](0008-fixes-must-be-propagated-to-siblings.md) | A fix in one control is not a fix in its siblings | promotable | guard-bash.sh, selftest.sh |
