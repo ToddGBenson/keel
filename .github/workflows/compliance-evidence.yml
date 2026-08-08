@@ -110,6 +110,12 @@ jobs:
       - name: Guard hook self-test (CA-2)
         run: bash .claude/hooks/selftest.sh
 
+      # AIC-12 structural half: every agent still carries its documented boundary, and the
+      # seeded behavioral cases are present. The behavioral half needs a live model and is
+      # run by the operator monthly (evals/agents/README.md) — not faked here.
+      - name: Agent assurance (AIC-12 structural)
+        run: bash evals/run-agent-evals.sh
+
       - name: Role / artifact mismatch audit (POAM-001 compensating control)
         run: |
           echo "ADAPT: sample merged PRs; cross-check the declared producing agent against"
