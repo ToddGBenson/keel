@@ -90,3 +90,4 @@ it `superseded-by:` and stop carrying it. The ledger is a working set, not an ar
 | [L0008](0008-fixes-must-be-propagated-to-siblings.md) | A fix in one control is not a fix in its siblings | promotable | guard-bash.sh, selftest.sh |
 | [L0010](0010-verify-capability-before-enabling-control.md) | Verify the capability before enabling the control | promotable | configure-github.sh step 4b |
 | [L0011](0011-unexecuted-code-is-a-plan.md) | Unexecuted code is not code — it is a plan | promotable | bootstrap.sh, sync-platform.sh |
+| [L0012](0012-artifacts-are-silent-about-the-hard-parts.md) | A spec is silent about exactly the parts that break | promotable | artifact-intake skill, /spec |
