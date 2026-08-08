@@ -88,3 +88,4 @@ it `superseded-by:` and stop carrying it. The ledger is a working set, not an ar
 | [L0007](0007-checkers-that-cry-wolf-get-muted.md) | A checker with false positives gets muted | promotable | validate-platform.py |
 | [L0009](0009-scanners-need-a-no-input-path.md) | Every scanner needs an explicit no-input path | promotable | security.yml scan jobs |
 | [L0008](0008-fixes-must-be-propagated-to-siblings.md) | A fix in one control is not a fix in its siblings | promotable | guard-bash.sh, selftest.sh |
+| [L0010](0010-verify-capability-before-enabling-control.md) | Verify the capability before enabling the control | promotable | configure-github.sh step 4b |

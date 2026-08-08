@@ -186,8 +186,61 @@ else
   fi
 fi
 
-run "signed commits required (SI-7, CM-14)" \
-  gh api -X POST "repos/$REPO/branches/$BRANCH/protection/required_signatures"
+# ── Signed commits: verify the CAPABILITY before enabling the CONTROL ────────
+# DEFECT FIXED 2026-08-08 (L0010): this enabled required_signatures unconditionally. If the
+# operator has no signing key configured — the default — every subsequent commit is unsigned
+# and every PR is permanently unmergeable, with a `BLOCKED` status that names no reason.
+# It cost a long diagnosis on the very first PR.
+#
+# Never enable a control the operator cannot yet satisfy. Check first, and if the capability
+# is missing, say exactly how to get it rather than enabling a trap.
+say "4b. Signed commits (SI-7, CM-14)"
+SIGN_FMT="$(git config --get gpg.format || echo gpg)"
+SIGN_KEY="$(git config --get user.signingkey || echo '')"
+SIGN_ON="$(git config --get commit.gpgsign || echo false)"
+CAN_SIGN=0
+
+if [ -n "$SIGN_KEY" ] && [ "$SIGN_ON" = "true" ]; then
+  # Prove it: sign a throwaway object rather than trusting the config.
+  if git commit-tree -S -m probe "$(git rev-parse HEAD^{tree})" >/dev/null 2>&1; then
+    # Configured AND working locally. Is the key registered with GitHub?
+    KEY_KIND=$([ "$SIGN_FMT" = "ssh" ] && echo ssh_signing_keys || echo gpg_keys)
+    if gh api "user/$KEY_KIND" >/dev/null 2>&1; then
+      CAN_SIGN=1
+      info "signing works locally and the key list is readable"
+    else
+      warn "signing works locally, but the key may not be registered with GitHub."
+      warn "  Register it, or GitHub will report 'unknown_key' and block every merge:"
+      if [ "$SIGN_FMT" = "ssh" ]; then
+        warn "    gh auth refresh -h github.com -s admin:ssh_signing_key"
+        warn "    gh ssh-key add \"${SIGN_KEY}\" --type signing --title 'git signing'"
+      fi
+    fi
+  else
+    warn "user.signingkey is set but signing FAILED. Not enabling required signatures."
+  fi
+else
+  warn "No commit signing configured. NOT enabling required_signatures —"
+  warn "doing so would make every PR permanently unmergeable (L0010)."
+  warn ""
+  warn "  To enable it (SSH signing, no GPG needed):"
+  warn "    ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519_signing -N \"\""
+  warn "    gh auth refresh -h github.com -s admin:ssh_signing_key"
+  warn "    gh ssh-key add ~/.ssh/id_ed25519_signing.pub --type signing --title 'git signing'"
+  warn "    git config gpg.format ssh"
+  warn "    git config user.signingkey ~/.ssh/id_ed25519_signing.pub"
+  warn "    git config commit.gpgsign true"
+  warn "  Then re-run this script. Until then SI-7/CM-14 are NOT satisfied — POA&M it."
+fi
+
+if [ "$CAN_SIGN" = "1" ]; then
+  run "signed commits required (SI-7, CM-14)" \
+    gh api -X POST "repos/$REPO/branches/$BRANCH/protection/required_signatures"
+else
+  # Actively REMOVE it if a previous run turned it on without the capability.
+  gh api -X DELETE "repos/$REPO/branches/$BRANCH/protection/required_signatures" >/dev/null 2>&1 \
+    && warn "required_signatures disabled — capability missing (record as a finding)"
+fi
 
 # ── 5. Required status checks ────────────────────────────────────────────────
 say "5. Required status checks"
