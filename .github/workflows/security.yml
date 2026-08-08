@@ -86,7 +86,7 @@ jobs:
           queries: security-extended,security-and-quality
       - uses: github/codeql-action/autobuild@6bb031afdd8eb862ea3fc1848194185e076637e5 # v3.28.11
         if: steps.src.outputs.present == 'true'
-      - uses: github/codeql-action/analyze@6bb031afdd8eb862ea3fc1848194185e076637e5 # v3.28.11
+      - uses: github/codeql-action/analyze@5595ccaf912efad79be6eef63a5619ff05969be3 # v4.37.6
         if: steps.src.outputs.present == 'true'
         with:
           category: "/language:${{ matrix.language }}"
