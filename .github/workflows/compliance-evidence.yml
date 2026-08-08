@@ -96,7 +96,7 @@ jobs:
           echo "ADAPT: flag components past end-of-life or without a maintenance signal."
           echo "These enter intake as scheduled chores — scheduled, not deferred."
 
-      - uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38 # v5.4.0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.12'
       - run: pip install pyyaml
