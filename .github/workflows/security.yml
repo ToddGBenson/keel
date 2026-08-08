@@ -44,7 +44,7 @@ jobs:
         # ADAPT: your languages.
         language: ['javascript-typescript']
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       # THIRD occurrence of the same defect class in this workflow (L0008): a scanner
       # configured for input that is not present fails on plumbing, and a red gate for a
@@ -79,14 +79,14 @@ jobs:
             } >> "$GITHUB_STEP_SUMMARY"
           fi
 
-      - uses: github/codeql-action/init@6bb031afdd8eb862ea3fc1848194185e076637e5 # v3.28.11
+      - uses: github/codeql-action/init@c4dd10e44af883a891fe31ced449bcb4a6728b9b # v3.37.6
         if: steps.src.outputs.present == 'true'
         with:
           language: ${{ matrix.language }}
           queries: security-extended,security-and-quality
-      - uses: github/codeql-action/autobuild@6bb031afdd8eb862ea3fc1848194185e076637e5 # v3.28.11
+      - uses: github/codeql-action/autobuild@c4dd10e44af883a891fe31ced449bcb4a6728b9b # v3.37.6
         if: steps.src.outputs.present == 'true'
-      - uses: github/codeql-action/analyze@6bb031afdd8eb862ea3fc1848194185e076637e5 # v3.28.11
+      - uses: github/codeql-action/analyze@c4dd10e44af883a891fe31ced449bcb4a6728b9b # v3.37.6
         if: steps.src.outputs.present == 'true'
         with:
           category: "/language:${{ matrix.language }}"
@@ -102,12 +102,12 @@ jobs:
       pull-requests: read   # gitleaks lists PR commits; without this it 403s and the job
                             # fails for a permissions reason that looks like a scan failure
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0   # full history — a secret deleted in a later commit is still leaked
 
       - name: gitleaks
-        uses: gitleaks/gitleaks-action@83373cf2f8c4db6e24b41c1a9b086bb9619e9cd3 # v2.3.7
+        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         # Any hit fails. If one fires, the correct response is to ROTATE the credential,
@@ -120,7 +120,7 @@ jobs:
       contents: read
       security-events: write
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       # Same "nothing to scan" case as the IaC job below. A repo with no dependency
       # manifest is legitimate; the scan must say so rather than fail on plumbing or,
@@ -148,7 +148,7 @@ jobs:
 
       - name: Scan dependencies
         if: steps.deps.outputs.present == 'true'
-        uses: anchore/scan-action@7c05671ae9be166aeb155bad2d7df9121823df32 # v6.1.0
+        uses: anchore/scan-action@1638637db639e0ade3258b51db49a9a137574c3e # v6.5.1
         id: grype
         with:
           path: "."
@@ -158,7 +158,7 @@ jobs:
 
       - name: Upload SARIF
         if: always() && steps.grype.outputs.sarif != '' && hashFiles(steps.grype.outputs.sarif) != ''
-        uses: github/codeql-action/upload-sarif@6bb031afdd8eb862ea3fc1848194185e076637e5 # v3.28.11
+        uses: github/codeql-action/upload-sarif@c4dd10e44af883a891fe31ced449bcb4a6728b9b # v3.37.6
         with:
           sarif_file: ${{ steps.grype.outputs.sarif }}
           category: dependency-scan
@@ -170,7 +170,7 @@ jobs:
       contents: read
       security-events: write
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       # Is there any IaC to scan? A repo with no Terraform/CloudFormation/K8s/Dockerfile is
       # a legitimate state, and the scan must say "nothing to scan" rather than either
@@ -195,7 +195,7 @@ jobs:
       - name: Checkov
         if: steps.iac.outputs.present == 'true'
         id: checkov
-        uses: bridgecrewio/checkov-action@d6369fdf8a2897ebc8936a03ea82f61d6b28a166 # v12.2996.0
+        uses: bridgecrewio/checkov-action@9b70310bcd306d11740313070b940167d6b23085 # v12.3115.0
         with:
           quiet: true
           soft_fail: true           # gate on the findings below, not on the action's exit
@@ -208,7 +208,7 @@ jobs:
       # to ignore it — L0007. Upload only when the file exists.
       - name: Upload SARIF
         if: steps.iac.outputs.present == 'true' && hashFiles('checkov.sarif') != ''
-        uses: github/codeql-action/upload-sarif@6bb031afdd8eb862ea3fc1848194185e076637e5 # v3.28.11
+        uses: github/codeql-action/upload-sarif@c4dd10e44af883a891fe31ced449bcb4a6728b9b # v3.37.6
         with:
           sarif_file: checkov.sarif
           category: iac-scan
@@ -232,19 +232,19 @@ jobs:
       contents: read
       security-events: write
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Build image
         run: |
           echo "ADAPT: docker build -t local/app:${{ github.sha }} ."
       - name: Trivy
-        uses: aquasecurity/trivy-action@18f2510ee396bbf400402947b394f2dd8c87dbb0 # v0.29.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: local/app:${{ github.sha }}
           format: sarif
           output: trivy.sarif
           severity: HIGH,CRITICAL
           ignore-unfixed: true      # gate on what you can actually act on
-      - uses: github/codeql-action/upload-sarif@6bb031afdd8eb862ea3fc1848194185e076637e5 # v3.28.11
+      - uses: github/codeql-action/upload-sarif@c4dd10e44af883a891fe31ced449bcb4a6728b9b # v3.37.6
         if: always()
         with:
           sarif_file: trivy.sarif
@@ -254,7 +254,7 @@ jobs:
     name: Suppression audit
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       # A suppression with no rationale and no expiry is a control failure. Blanket
       # suppressions are how a scanner quietly stops being a control.
