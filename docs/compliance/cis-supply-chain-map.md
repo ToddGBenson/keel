@@ -26,9 +26,9 @@ which controls are achievable — recorded honestly below rather than marked sat
 | 1.1.4 | Dismiss stale approvals | ✅ | `dismiss_stale_reviews: true` |
 | 1.1.5 | Code owners are set and approve | 🟡 | CODEOWNERS present and routes; **advisory** in solo mode (cannot self-approve) |
 | 1.1.6 | Inactive branches reviewed and removed | 🟡 | Trunk-based, short-lived branches; no automated pruning yet |
-| 1.1.7 | All checks passed before merge | ✅ | Required status checks on the default branch |
+| 1.1.7 | All checks passed before merge | ✅ | **10 required status checks** registered on `main`, strict mode |
 | 1.1.8 | Open comments resolved before merge | ✅ | `required_conversation_resolution: true` |
-| 1.1.9 | Verify signed commits before merge | ✅ | `required_signatures` — enabled **only after** capability is probed (L0010) |
+| 1.1.9 | Verify signed commits before merge | 🟡 | Capability probed and found incomplete, so **deliberately not enabled** (L0010). POAM-009 |
 | 1.1.10 | Linear history required | ✅ | `required_linear_history: true` |
 | 1.1.11 | Branch protection on the default branch | ✅ | Applied and verified 9/9 by `configure-github.sh` |
 | 1.1.12 | Branch rules enforced on administrators | ✅ | **`enforce_admins: true`** — never relaxed, including in solo mode |
@@ -75,7 +75,7 @@ which controls are achievable — recorded honestly below rather than marked sat
 
 | CIS | Control | Status | Implementation |
 |---|---|---|---|
-| 1.5.1 | **Secret scanning** | ✅ | gitleaks full-history in CI + pre-commit + GitHub push protection (free once public) |
+| 1.5.1 | **Secret scanning** | ✅ | gitleaks full-history in CI + pre-commit + **GitHub push protection enabled and verified** |
 | 1.5.2 | **SAST** | ✅ | CodeQL `security-extended`, with an explicit no-source skip that says the control is unsatisfied rather than passing green (L0009) |
 | 1.5.3 | IaC scanning | ✅ | Checkov, with the same no-input honesty |
 | 1.5.4 | **Vulnerability scanning** | ✅ | grype on PR, daily rescan of deployed artifacts |
@@ -139,14 +139,17 @@ which controls are achievable — recorded honestly below rather than marked sat
 | 5.1.2 | Deployment config audited | ✅ | Weekly drift detection against baseline |
 | 5.1.3 | Secrets not in deployment config | ✅ | Environment secrets; scanning on every PR |
 | 5.2.1 | Deployments automated | ✅ | Pipeline-executed; agents and humans never deploy by hand |
-| 5.2.2 | **Deployment approval required** | 🟡 | GitHub Environment reviewers (free once public). Until confirmed, POAM-006 |
+| 5.2.2 | **Deployment approval required** | ✅ | `production` environment with a required reviewer — verified via API 2026-08-08. POAM-006 closed |
 | 5.2.3 | Rollback capability | ✅ | **Rehearsed and evidenced at G5** — an untested rollback is a hypothesis |
 
 ---
 
 ## Honest summary
 
-**Fully implemented: 47.** **Partial: 12.** **Not applicable with reason: 6.** **Gaps: 0.**
+**Fully implemented: 48.** **Partial: 12.** **Not applicable with reason: 6.** **Gaps: 0.**
+
+*Recount 2026-08-08 after publication: 5.2.2 and 1.5.1 moved to implemented; 1.1.9 moved to
+partial when the signing capability probe correctly refused to enable an unsatisfiable control.*
 
 Read that with the profile in mind. Several ✅ are ✅ *because this is a solo public repo* —
 "admin count minimised" is trivially satisfied at one. The controls that took real work are
@@ -158,8 +161,9 @@ references), 1.5.x (the five scanners and their no-input honesty), 3.2.1 (AIC-7)
 - **1.1.2 / 1.1.3 / 1.1.5 — approval and two-person review.** Structurally impossible solo.
   Not a configuration failure and not fixable by configuration. POAM-008, with four
   compensating controls, one mechanically enforced.
-- **5.2.2 — deployment approval.** Enforceable once public. Re-run
-  `configure-github.sh --solo` after publishing to close it.
+- **1.1.9 — signed commits.** Key generated and git configured, but not registered with
+  GitHub (needs an interactive OAuth scope). The control is correctly *not* enabled rather
+  than falsely claimed. POAM-009.
 - **2.4.4 — reproducible builds.** Aspirational per stack; claimed only where true.
 
 **Nothing here is marked satisfied on the strength of a policy document.** Every ✅ traces to
