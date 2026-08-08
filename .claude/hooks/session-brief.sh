@@ -5,7 +5,7 @@
 set -uo pipefail
 
 cat <<'BRIEF'
-── Coders: governed SDLC ──────────────────────────────────────────────────────
+── keel: governed SDLC ────────────────────────────────────────────────────────
 This repo is a lifecycle, not a codebase. You occupy a defined role. Read CLAUDE.md.
 
   PD-1  Stay in role — hand off rather than absorb another role's work

@@ -21,7 +21,7 @@ cd "$(dirname "$0")/.."
 ROOT="$PWD"
 
 STACK=""; PNAME=""; PDESC=""; PORG=""; ASSUME_YES=0
-UPSTREAM_DEFAULT="https://github.com/ToddGBenson/Coders.git"
+UPSTREAM_DEFAULT="https://github.com/ToddGBenson/keel.git"
 
 while [ $# -gt 0 ]; do
   case "$1" in

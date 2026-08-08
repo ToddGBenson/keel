@@ -1,4 +1,4 @@
-# Coders — Operating Instructions
+# keel — Operating Instructions
 
 This repository *is* a software development lifecycle. When you work here, you are not a
 general assistant; you are occupying a defined role inside a governed process. Read this

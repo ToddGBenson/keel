@@ -1,4 +1,6 @@
-# Coders — A Governed, Agent-Driven Development Platform
+# keel
+
+*A governed SDLC base repo. Fork it; it keeps you upright.*
 
 An executable SDLC. Ideas become stories, stories become verified software, and every
 transition leaves audit evidence behind. Roles are played by Claude Code subagents;
@@ -38,7 +40,7 @@ This repo is a **template**. Fork it, bootstrap it into a project, and pull plat
 improvements later.
 
 ```bash
-gh repo create my-service --private --template ToddGBenson/Coders
+gh repo create my-service --private --template ToddGBenson/keel
 cd my-service
 
 bash scripts/bootstrap.sh          # identity + stack; splices real commands into CI
@@ -71,9 +73,10 @@ ones, so every fork receives them on their next sync.
 
 The test is: *would a team on a completely different stack hit this same wall?*
 
-`docs/lessons/` already holds eight, every one a defect that shipped in this platform before
-it was caught — including a secret guard that blocked the edit *removing* a secret, and a
-control that blocked its own repair.
+`docs/lessons/` already holds ten, every one a defect that shipped in this platform before it
+was caught — including a secret guard that blocked the edit *removing* a secret, a control
+that blocked its own repair, and a signing requirement enabled without the capability to
+satisfy it, which made every PR permanently unmergeable.
 
 ## Quickstart
 

@@ -40,6 +40,33 @@ You have two or more files that implement "the same check" for different surface
 pre-commit hook and a CI job, a client validator and a server validator, a bash guard and a
 write guard. Every one of those pairs is a place for this.
 
+## Second recurrence — same file, next glob (2026-08-08)
+
+Having fixed the credential glob in `guard-bash.sh`, I did not check the **other** globs in
+the same file. The hook-bypass rule was:
+
+```
+*--no-verify*|*" -n "*"commit"*|*"commit -n"*
+```
+
+The middle pattern matched any command containing ` -n ` anywhere followed by `commit`
+anywhere. So this was refused as a hook bypass:
+
+```bash
+bash -n scripts/sync-platform.sh && git commit -m "..."
+```
+
+A shell **syntax check**. Blocked as a security violation, one day after the "same" bug was
+declared fixed — in the same file I had just edited.
+
+The lesson is sharper than first written: it is not enough to grep other *files*. Grep the
+**other patterns in the file you are already editing.** Proximity is not coverage; I had the
+file open and still missed it.
+
+Both are now anchored to a git invocation, with four regression tests: two that must allow
+(`bash -n`, `sort -n` before a commit) and two that must block (real `--no-verify` on commit
+and push).
+
 ## The compounding version
 
 This is the argument for skills. Three of the four guard defects came from method duplicated

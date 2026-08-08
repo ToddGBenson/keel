@@ -31,7 +31,7 @@ git rev-parse --git-dir >/dev/null 2>&1 || { echo "Not a git repository." >&2; e
 
 if ! git remote get-url upstream >/dev/null 2>&1; then
   echo "No 'upstream' remote. Set it to the platform base repo:" >&2
-  echo "  git remote add upstream https://github.com/ToddGBenson/Coders.git" >&2
+  echo "  git remote add upstream https://github.com/ToddGBenson/keel.git" >&2
   exit 1
 fi
 
@@ -125,7 +125,7 @@ fi
 if [ "$CHECK_ONLY" = "0" ] && [ "$changed" != "0" ]; then
   say "Verifying"
   bash .claude/hooks/selftest.sh >/dev/null 2>&1 \
-    && info "guard self-test: 20/20" \
+    && info "guard self-test: passed" \
     || warn "guard self-test FAILED after sync — investigate before committing"
   python scripts/validate-platform.py --quiet >/dev/null 2>&1 \
     && info "platform validation: pass" \

@@ -36,10 +36,19 @@ block() {
 # ── Hook bypass ─────────────────────────────────────────────────────────────
 # If a hook blocks you, the hook is working correctly. Bypassing it defeats the
 # pre-commit secret scan, which is the last cheap chance to stop a credential leak.
-case "$cmd" in
-  *--no-verify*|*" -n "*"commit"*|*"commit -n"*)
-    block "hook bypass (--no-verify). Fix the cause the hook found." "AIC-3, IA-5" ;;
-esac
+#
+# GP-2 APPLIED 2026-08-08 (L0008, second recurrence in this file). The previous globs were:
+#     *--no-verify*|*" -n "*"commit"*|*"commit -n"*
+# The middle one matched ANY command containing " -n " anywhere followed by "commit"
+# anywhere — so `bash -n script.sh && git commit ...` (a syntax check!) was blocked as a
+# hook bypass. I fixed the credential glob for exactly this reason and did not check the
+# siblings in the same file, which is the definition of L0008.
+#
+# Now anchored: the flag must belong to a git commit/push invocation.
+if printf '%s' "$cmd" | grep -qE '(^|[|;&[:space:]])git[[:space:]]+[^|;&]*(commit|push|merge)[^|;&]*[[:space:]]--no-verify\b' \
+   || printf '%s' "$cmd" | grep -qE '(^|[|;&[:space:]])git[[:space:]]+(commit|push)[[:space:]]+[^|;&]*[[:space:]]-[a-zA-Z]*n([[:space:]]|$)'; then
+  block "hook bypass (--no-verify / -n on a git commit). Fix the cause the hook found." "AIC-3, IA-5"
+fi
 
 # ── Destructive git ─────────────────────────────────────────────────────────
 case "$cmd" in

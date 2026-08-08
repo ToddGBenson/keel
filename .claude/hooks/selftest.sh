@@ -72,6 +72,12 @@ check "writing docs about secrets" allow "$(payload 'cat > lesson.md <<EOF
 named credentials require a value
 EOF')"                                                                                    guard-bash.sh
 check "grepping for the word"     allow "$(payload 'grep -r credentials docs/')"          guard-bash.sh
+# L0008 second recurrence — the bypass glob matched ANY ' -n ' followed by 'commit'
+# anywhere, so a shell syntax check chained before a commit was refused as a bypass.
+check "bash -n then commit"       allow "$(payload 'bash -n script.sh && git commit -m x')" guard-bash.sh
+check "sort -n in a pipeline"     allow "$(payload 'sort -n f.txt && git commit -m x')"   guard-bash.sh
+check "real --no-verify"          block "$(payload 'git commit --no-verify -m x')"        guard-bash.sh
+check "real push --no-verify"     block "$(payload 'git push --no-verify')"               guard-bash.sh
 
 echo ""
 echo "guard-write.sh — must BLOCK (AU-9, AIC-5)"
