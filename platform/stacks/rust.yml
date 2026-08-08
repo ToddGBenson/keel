@@ -1,0 +1,63 @@
+# Stack profile: Rust
+name: rust
+display: "Rust"
+detect: ["Cargo.toml"]
+
+setup: |
+  - uses: dtolnay/rust-toolchain@1482605bfc5719782e1267fd0c0cc350fe7646b8 # stable
+    with:
+      toolchain: stable
+      components: clippy, rustfmt
+  - uses: Swatinem/rust-cache@f0deed1e0edfc6a9be95417288c0e1099b1eeec3 # v2.7.7
+
+install: |
+  cargo fetch --locked        # the lockfile is authoritative — SR-3, SR-4
+
+build: |
+  cargo build --locked --all-targets
+
+lint: |
+  cargo clippy --locked --all-targets -- -D warnings
+
+typecheck: |
+  cargo check --locked --all-targets
+
+format_check: |
+  cargo fmt --check
+
+unit_test: |
+  cargo test --locked --lib
+
+integration_test: |
+  cargo test --locked --test '*'
+
+e2e_test: |
+  cargo test --locked --features e2e --test e2e
+
+coverage_check: |
+  cargo llvm-cov --locked --fail-under-lines "$COVERAGE_THRESHOLD"
+
+# CodeQL has no first-class Rust analysis; clippy plus cargo-audit carry SA-11(1) here.
+# State that honestly in the control map rather than implying CodeQL coverage.
+sast_language: ""
+sast_alternative: |
+  cargo clippy --locked --all-targets -- -D warnings
+  cargo audit
+
+license_check: |
+  cargo deny check licenses
+
+precommit: |
+  changed_rs=$(printf '%s' "$staged" | grep '[.]rs$' || true)
+  if [ -n "$changed_rs" ]; then
+    cargo fmt --check || fail=1
+    cargo clippy --all-targets -- -D warnings || fail=1
+  fi
+
+test_artifacts:
+  - "target/nextest/**"
+  - "lcov.info"
+
+gitignore_extra: |
+  target/
+  **/*.rs.bk

@@ -1,0 +1,87 @@
+# Stack profile: Python
+# Spliced into .github/workflows/ by scripts/bootstrap.sh, replacing ADAPT: placeholders.
+
+name: python
+display: "Python"
+detect: ["pyproject.toml", "requirements.txt", "setup.py"]
+
+setup: |
+  - uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38 # v5.4.0
+    with:
+      python-version: '3.12'
+      cache: 'pip'
+
+install: |
+  python -m pip install --upgrade pip
+  # Prefer hash-pinned installs. Integrity verification is a supply-chain control
+  # (SR-3, SR-4), not a nicety.
+  if [ -f requirements.txt ]; then
+    pip install -r requirements.txt
+  else
+    pip install -e ".[dev]"
+  fi
+
+build: |
+  python -m build --wheel
+
+lint: |
+  ruff check .
+
+typecheck: |
+  mypy .
+
+format_check: |
+  ruff format --check .
+
+unit_test: |
+  pytest tests/unit --cov --cov-report=xml --cov-report=term
+
+integration_test: |
+  # Against the REAL engine. Unit-mocked authz proves the mock; mocked persistence
+  # proves nothing about migrations.
+  pytest tests/integration --cov --cov-append --cov-report=xml
+
+e2e_test: |
+  pytest tests/e2e
+
+coverage_check: |
+  coverage report --fail-under="$COVERAGE_THRESHOLD"
+
+sast_language: python
+
+license_check: |
+  pip-licenses --fail-on 'GPL-3.0;AGPL-3.0'
+
+precommit: |
+  changed_py=$(printf '%s' "$staged" | grep '[.]py$' || true)
+  if [ -n "$changed_py" ]; then
+    ruff check $changed_py || fail=1
+    ruff format --check $changed_py || fail=1
+  fi
+
+test_artifacts:
+  - "coverage.xml"
+  - "htmlcov/**"
+  - "junit*.xml"
+
+# Postgres service for integration tests. Uncomment in ci.yml if your project needs it.
+services: |
+  postgres:
+    image: postgres:17
+    env:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: test
+    ports: ['5432:5432']
+    options: >-
+      --health-cmd pg_isready --health-interval 10s
+      --health-timeout 5s --health-retries 5
+
+gitignore_extra: |
+  __pycache__/
+  *.py[cod]
+  .venv/
+  .mypy_cache/
+  .ruff_cache/
+  .pytest_cache/
+  dist/
+  *.egg-info/

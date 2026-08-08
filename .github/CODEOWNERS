@@ -1,0 +1,83 @@
+# CODEOWNERS — mechanical separation of duties (NIST AC-5, CM-5, AIC-2)
+#
+# CODEOWNERS is what turns "the author doesn't approve" from a convention into a control.
+# Combined with branch protection ("Require review from Code Owners" + "Dismiss stale
+# approvals" + no administrator bypass), a PR cannot merge without an approval from an
+# identity other than the author.
+#
+# Base repo: single owner. Forks get their org substituted by scripts/bootstrap.sh.
+# Order matters: the LAST matching pattern wins.
+
+# ---------------------------------------------------------------------------
+# Default — every change needs an engineering review by a non-author
+# ---------------------------------------------------------------------------
+*                               @ToddGBenson
+
+# ---------------------------------------------------------------------------
+# The process itself. Changing the rules requires the people accountable for them.
+# ---------------------------------------------------------------------------
+/CLAUDE.md                      @ToddGBenson
+/docs/                          @ToddGBenson
+/docs/compliance/               @ToddGBenson
+/docs/11-ai-agent-controls.md   @ToddGBenson
+/docs/12-ai-feature-governance.md@ToddGBenson
+/process/gates/                 @ToddGBenson
+
+# ---------------------------------------------------------------------------
+# THE PIPELINE GATES ITSELF. A PR that edits workflows can disable every other
+# control in this repo, so it requires security review without exception. (CM-5)
+# ---------------------------------------------------------------------------
+/.github/workflows/             @ToddGBenson
+/.github/CODEOWNERS             @ToddGBenson
+/.github/dependabot.yml         @ToddGBenson
+
+# ---------------------------------------------------------------------------
+# Agent and command definitions are configuration items under change control.
+# An edit here can relax a control as effectively as editing a workflow — this is
+# the quietest way to weaken the system. (AIC-8)
+# ---------------------------------------------------------------------------
+/.claude/agents/                @ToddGBenson
+/.claude/commands/              @ToddGBenson
+/.claude/settings.json          @ToddGBenson
+
+# ---------------------------------------------------------------------------
+# Security-relevant code paths. Adjust to your actual layout — these patterns are
+# the point, not the specific directory names.
+# ---------------------------------------------------------------------------
+**/auth/**                      @ToddGBenson
+**/authn/**                     @ToddGBenson
+**/authz/**                     @ToddGBenson
+**/session/**                   @ToddGBenson
+**/crypto/**                    @ToddGBenson
+**/secrets/**                   @ToddGBenson
+**/middleware/**                @ToddGBenson
+**/migrations/**                @ToddGBenson
+
+# Infrastructure and configuration (CM-6, CM-7)
+/infra/                         @ToddGBenson
+/terraform/                     @ToddGBenson
+**/Dockerfile                   @ToddGBenson
+**/*.tf                         @ToddGBenson
+
+# Dependency manifests — supply chain (SR-3, SR-4, SR-11, AIC-7)
+**/package.json                 @ToddGBenson
+**/package-lock.json            @ToddGBenson
+**/requirements*.txt            @ToddGBenson
+**/pyproject.toml               @ToddGBenson
+**/go.mod                       @ToddGBenson
+**/Cargo.toml                   @ToddGBenson
+
+# ---------------------------------------------------------------------------
+# AI feature code. Prompts are code — a prompt change is a behavior change that
+# ships to production, and it gets the same review as any other. (AIC-8)
+# ---------------------------------------------------------------------------
+**/prompts/**                   @ToddGBenson
+**/evals/**                     @ToddGBenson
+**/guardrails/**                @ToddGBenson
+**/*.prompt.*                   @ToddGBenson
+
+# ---------------------------------------------------------------------------
+# Evidence is an audit artifact. It is generated, never hand-edited — a hand-edited
+# scan report is a fabrication regardless of intent. (AU-9)
+# ---------------------------------------------------------------------------
+/evidence/                      @ToddGBenson

@@ -1,0 +1,67 @@
+# ── Secrets — never commit. If one lands here, ROTATE it; deletion is not mitigation.
+# (IA-5, SC-28, AIC-5)
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+credentials
+.aws/
+.ssh/
+secrets/
+*secret*.json
+*credentials*.json
+
+# ── Generated evidence that CI produces. The narrative records (.md) ARE committed —
+# they are the audit trail. Raw scan output is regenerated, never hand-edited (AU-9).
+evidence/**/*.sarif
+evidence/**/*.xml
+evidence/**/*.json
+!evidence/**/eval-report.json
+!evidence/**/metrics.json
+!evidence/**/sbom.cdx.json
+
+# ── Local Claude Code state (project settings ARE committed — they carry controls)
+.claude/settings.local.json
+.claude/*.local.json
+.hook-probe.json
+
+# ── Build and dependency output
+node_modules/
+dist/
+build/
+target/
+out/
+*.egg-info/
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+vendor/
+
+# ── Test and coverage artifacts
+coverage/
+.coverage
+htmlcov/
+.pytest_cache/
+.tox/
+test-results/
+*.lcov
+
+# ── Editor and OS
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Logs and temp
+*.log
+tmp/
+temp/

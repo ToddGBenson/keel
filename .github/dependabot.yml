@@ -1,0 +1,70 @@
+# Dependency updates — supply chain hygiene on a schedule.
+# Controls: RA-5, SI-2, SR-3, SR-5, SA-22
+#
+# Dependency updates are "Standard" changes (docs/07-release-and-change.md): pre-authorized,
+# low risk, repeatable, automatically verified. They still go through CI and still require a
+# non-author approval — pre-authorized means no per-change *risk* review, not no review.
+#
+# Grouping is deliberate. Twenty individual PRs a week produce rubber-stamping; one grouped
+# PR gets read. Security updates stay ungrouped so they are visible and can move on their own
+# SLA (Critical 7d / High 30d).
+
+version: 2
+updates:
+  # ── GitHub Actions ─────────────────────────────────────────────────────────
+  # Actions are pinned to full commit SHAs throughout this repo. A tag is mutable, and a
+  # compromised action tag is a supply-chain compromise of everything it touches (SR-3,
+  # SR-11). Dependabot maintains the SHAs and the version comments.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore"
+      include: "scope"
+    labels: ["dependencies", "github-actions"]
+    groups:
+      actions-minor-patch:
+        update-types: ["minor", "patch"]
+    reviewers:
+      # Workflow changes require security review — the pipeline gates everything else,
+      # so a change here can disable every other control (CM-5). Solo project: the
+      # single owner. A team fork gets its org substituted by scripts/bootstrap.sh.
+      - "ToddGBenson"
+
+  # ── ADAPT: enable the ecosystems you actually use ──────────────────────────
+  # - package-ecosystem: "npm"
+  #   directory: "/"
+  #   schedule:
+  #     interval: "weekly"
+  #     day: "monday"
+  #   open-pull-requests-limit: 10
+  #   versioning-strategy: increase       # keeps the lockfile authoritative
+  #   commit-message:
+  #     prefix: "chore"
+  #     prefix-development: "chore"
+  #     include: "scope"
+  #   labels: ["dependencies"]
+  #   groups:
+  #     production-minor-patch:
+  #       dependency-type: "production"
+  #       update-types: ["minor", "patch"]
+  #     development:
+  #       dependency-type: "development"
+  #   ignore:
+  #     # Majors are Normal changes, not Standard — they get a story, an impact
+  #     # assessment, and real review rather than an auto-merge path.
+  #     - dependency-name: "*"
+  #       update-types: ["version-update:semver-major"]
+
+  # - package-ecosystem: "pip"
+  #   directory: "/"
+  #   schedule: { interval: "weekly", day: "monday" }
+  #   labels: ["dependencies"]
+
+  # - package-ecosystem: "docker"
+  #   directory: "/"
+  #   schedule: { interval: "weekly", day: "monday" }
+  #   labels: ["dependencies", "container"]

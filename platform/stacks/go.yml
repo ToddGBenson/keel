@@ -1,0 +1,61 @@
+# Stack profile: Go
+name: go
+display: "Go"
+detect: ["go.mod"]
+
+setup: |
+  - uses: actions/setup-go@f111f3307d8850f501ac008e886eec1fd1932a34 # v5.3.0
+    with:
+      go-version: '1.23'
+      cache: true
+
+install: |
+  go mod download
+  go mod verify              # integrity verification — SR-3, SR-4
+
+build: |
+  go build ./...
+
+lint: |
+  golangci-lint run ./...
+
+typecheck: |
+  go vet ./...
+
+format_check: |
+  test -z "$(gofmt -l .)" || { echo "gofmt found unformatted files:"; gofmt -l .; exit 1; }
+
+unit_test: |
+  go test -short -race -coverprofile=coverage.out ./...
+
+integration_test: |
+  go test -race -tags=integration ./...
+
+e2e_test: |
+  go test -tags=e2e ./test/e2e/...
+
+coverage_check: |
+  pct=$(go tool cover -func=coverage.out | tail -1 | awk '{print substr($3,1,length($3)-1)}')
+  awk -v p="$pct" -v t="$COVERAGE_THRESHOLD" 'BEGIN{exit !(p+0 >= t+0)}' \
+    || { echo "coverage $pct% below threshold $COVERAGE_THRESHOLD%"; exit 1; }
+
+sast_language: go
+
+license_check: |
+  go-licenses check ./... --disallowed_types=forbidden,restricted
+
+precommit: |
+  changed_go=$(printf '%s' "$staged" | grep '[.]go$' || true)
+  if [ -n "$changed_go" ]; then
+    test -z "$(gofmt -l $changed_go)" || { echo "gofmt: unformatted"; fail=1; }
+    go vet ./... || fail=1
+  fi
+
+test_artifacts:
+  - "coverage.out"
+  - "test-results/**"
+
+gitignore_extra: |
+  bin/
+  vendor/
+  coverage.out

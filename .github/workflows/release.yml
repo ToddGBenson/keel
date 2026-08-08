@@ -1,0 +1,163 @@
+# Release — G5. The human authorization gate, expressed as a technical control.
+# Controls: CM-3, CM-4, CM-5, SI-7, SR-4(3), CP-10, AU-2, AC-5
+#
+# ── THE GATE IS THE ENVIRONMENT, NOT THE DOCUMENT ─────────────────────────────
+# The `production` environment must be configured in repo settings with REQUIRED REVIEWERS.
+# The deploy job then physically cannot start until a human approves in the GitHub UI, and
+# that approval is recorded with identity and timestamp. THAT record is the CM-3 evidence.
+#
+# Without the environment protection rule configured, this workflow is documentation.
+# Configure it: Settings → Environments → production → Required reviewers.
+#
+# Agents never deploy. The pipeline identity deploys. A hand deployment has no attestation,
+# no verification, and no audit trail.
+
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g. v1.4.0)'
+        required: true
+        type: string
+      change_record:
+        description: 'Path or URL to the G5 change record'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    name: Preflight — G5 evidence check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Verify the change record exists and is complete
+        run: |
+          echo "ADAPT: assert the change record at ${{ inputs.change_record }} exists and"
+          echo "contains all 13 required sections (docs/07-release-and-change.md)."
+
+      - name: Verify every included item cleared G4
+        run: |
+          echo "ADAPT: for each issue in scope, assert evidence/<issue>/g4/ contains"
+          echo "independent QA, security, and (if AI-relevant) AI pass records."
+          echo ""
+          echo "Anything without G4 clearance is REMOVED from the release, not waived."
+          echo "Scope shrinks; gates do not. This is the item most often pressured, and"
+          echo "holding it is what makes every upstream gate mean something."
+
+      - name: Verify no open Critical or High findings in scope
+        run: |
+          echo "ADAPT: query the finding register and POA&M."
+          echo "Open Critical or High in scope is a hard block, overridable only by a"
+          echo "documented, time-boxed, human-approved risk acceptance with a POA&M entry."
+
+      - name: Verify rollback was rehearsed
+        run: |
+          echo "ADAPT: assert a rollback rehearsal record exists for this artifact."
+          echo "An untested rollback plan is a hypothesis; this gate asks for a fact."
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@d7d6bc7722e3daa8354c50bcb52f4837da5e9b6a # v3.8.1
+
+      - name: Verify artifact signature and provenance — HARD BLOCK
+        run: |
+          echo "ADAPT: cosign verify + gh attestation verify."
+          echo "Failure here stops the release. A signature nobody verifies is decoration,"
+          echo "and this is the place the verification has to actually happen (SR-4(3), SI-7)."
+
+  staging:
+    name: Deploy to staging
+    needs: preflight
+    runs-on: ubuntu-latest
+    environment:
+      name: staging
+    permissions:
+      contents: read
+      id-token: write   # OIDC federation — no long-lived cloud keys (IA-5)
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Deploy the SAME artifact
+        run: |
+          echo "ADAPT: deploy by DIGEST, not by tag. Never rebuild — the artifact tested"
+          echo "here must be byte-identical to the one that reaches production."
+
+      - name: DAST (SA-11(8))
+        run: |
+          echo "ADAPT: dynamic scan against staging"
+
+      - name: E2E + performance vs. NFR
+        run: |
+          echo "ADAPT: critical journeys; assert the stated NFR thresholds"
+
+      - name: Configuration drift check (CM-2, CM-6)
+        run: |
+          echo "ADAPT: diff running configuration against the baseline"
+
+      - name: Rollback rehearsal (CP-10)
+        run: |
+          echo "ADAPT: actually roll back, verify, then roll forward."
+          echo "Include the data path. Record the window — that number goes in the"
+          echo "change record and the approver needs it."
+
+  authorize-and-deploy:
+    name: G5 — Production (HUMAN AUTHORIZATION REQUIRED)
+    needs: staging
+    runs-on: ubuntu-latest
+    # ── This is the gate. Required reviewers on this environment mean the job blocks
+    #    until a human approves in the GitHub UI. The approval record — identity and
+    #    timestamp — is the CM-3 change-approval evidence.
+    environment:
+      name: production
+      url: ${{ vars.PRODUCTION_URL }}
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Record the authorization
+        run: |
+          {
+            echo "### G5 authorization"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Version | ${{ inputs.version }} |"
+            echo "| Change record | ${{ inputs.change_record }} |"
+            echo "| Authorized by | ${{ github.actor }} (environment approval) |"
+            echo "| Run | ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Verify signature again, immediately before deploy
+        run: |
+          echo "ADAPT: re-verify. Time passed between preflight and authorization;"
+          echo "verify what you are about to run, not what you checked an hour ago."
+
+      - name: Progressive deploy — canary
+        run: |
+          echo "ADAPT: deploy to a small traffic slice."
+          echo "Watch error rate, latency, saturation against defined thresholds for a"
+          echo "defined bake time, then expand."
+          echo ""
+          echo "Automated rollback on threshold breach — no human decision in the loop,"
+          echo "because the human decision arrives ten minutes late every time."
+
+      - name: Post-deploy verification
+        run: |
+          echo "ADAPT: smoke tests, health checks, error rate vs. pre-deploy baseline"
+
+      - name: Write the deployment record
+        run: |
+          echo "ADAPT: write evidence/releases/${{ inputs.version }}/deployment-record.md"
+          echo "Then schedule the 24-hour check: did the success metric from the ORIGINAL"
+          echo "idea record actually move? That step closes the loop nearly everyone skips,"
+          echo "and it is why backlogs fill with features nobody uses."
