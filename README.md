@@ -34,6 +34,19 @@ NIST AI RMF 1.0 + AI 600-1 Generative AI Profile · OWASP LLM Top 10 · ISO/IEC 
 Each gate is a **checklist + an approver + an evidence artifact**. No gate is passed by
 assertion; it is passed by producing the evidence the gate names. See `process/gates/`.
 
+## Start here
+
+New to this repo, or just want to *use* it? **`OPERATING.md`** is the one-page on-ramp — the
+five commands you type daily, the two speeds (fast lane vs. full flow), and the four rules
+that never bend. The rest of the docs are reference.
+
+```bash
+./keel check          # fast local mirror of CI — run constantly
+./keel fast "docs: …" # trivial change, no ceremony (docs/config only)
+./keel ship           # check, then push
+./keel help           # everything else
+```
+
 ## Use it as a base for a new project
 
 This repo is a **template**. Fork it, bootstrap it into a project, and pull platform

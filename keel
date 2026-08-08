@@ -1,0 +1,201 @@
+#!/usr/bin/env bash
+# keel — the one command a solo operator actually types.
+#
+# The 72k words of docs are reference. This is the daily driver. Everything a
+# personal DevSecOps loop needs, wrapped so you never hand-type four scripts:
+#
+#   ./keel check          fast local mirror of CI — run this constantly
+#   ./keel fast "<msg>"    the trivial-change lane (docs/config only, no ceremony)
+#   ./keel ship           check, then push the current branch
+#   ./keel secure         guard self-test + platform integrity + gaps
+#   ./keel evals          agent structural assurance (AIC-12, automated part)
+#   ./keel status         where everything sits: PRs, checks, findings
+#   ./keel new  [args]     bootstrap a fresh fork into a project
+#   ./keel harden          apply GitHub-side controls (branch protection, envs)
+#   ./keel sync            what changed upstream (--apply to take it)
+#   ./keel help            this
+#
+# Design goals, in priority order: fast (check is <5s), honest (never green on a
+# skipped step), portable (pure bash + the tools already required). Learned the
+# hard way — see docs/lessons/. This script obeys them: no `set -e` foot-guns
+# around greps, CR-tolerant, quoted paths.
+
+set -uo pipefail
+cd "$(dirname "$0")"
+ROOT="$PWD"
+
+# ── presentation ─────────────────────────────────────────────────────────────
+if [ -t 1 ]; then B=$'\033[1m'; R=$'\033[0m'; G=$'\033[32m'; Y=$'\033[33m'; X=$'\033[31m'; D=$'\033[2m'
+else B=; R=; G=; Y=; X=; D=; fi
+say()  { printf '%s%s%s\n' "$B" "$1" "$R"; }
+ok()   { printf '  %s✓%s %s\n' "$G" "$R" "$1"; }
+warn() { printf '  %s!%s %s\n' "$Y" "$R" "$1"; }
+die()  { printf '  %s✗ %s%s\n' "$X" "$1" "$R" >&2; exit 1; }
+have() { command -v "$1" >/dev/null 2>&1; }
+PY="$(command -v python3 || command -v python || echo python)"
+
+# ── check: the fast local mirror of what CI gates on ────────────────────────
+# Run this before every push. If it is green, CI is green — no round-trip.
+cmd_check() {
+  local fail=0
+  say "keel check — local CI mirror"
+
+  # 1. Workflows and config parse (the failure that wastes a CI round-trip)
+  if "$PY" - <<'PYEOF' 2>/dev/null; then ok "workflows + settings parse"; else warn "YAML/JSON parse issues"; fail=1; fi
+import glob, json, sys
+try:
+    import yaml
+except ImportError:
+    sys.exit(0)  # yaml optional locally; CI is authoritative
+bad = 0
+for f in glob.glob(".github/**/*.yml", recursive=True):
+    try: yaml.safe_load(open(f, encoding="utf-8"))
+    except Exception as e: print("  " + f + ": " + str(e)[:70]); bad = 1
+try: json.load(open(".claude/settings.json"))
+except Exception as e: print("  settings.json: " + str(e)[:70]); bad = 1
+sys.exit(bad)
+PYEOF
+
+  # 2. Platform integrity (tool-grant drift, skill registration, SHA pins)
+  if "$PY" scripts/validate-platform.py --quiet >/dev/null 2>&1; then
+    ok "platform integrity"
+  else
+    warn "platform integrity — run: $PY scripts/validate-platform.py"; fail=1
+  fi
+
+  # 3. Guard hooks still block what they should (and don't over-block)
+  if bash .claude/hooks/selftest.sh >/dev/null 2>&1; then
+    ok "guard hooks (self-test)"
+  else
+    warn "guard self-test FAILED — a control is misbehaving"; fail=1
+  fi
+
+  # 4. Secrets in the working tree (cheap, catches the expensive mistake)
+  if have gitleaks; then
+    if gitleaks detect --no-banner --redact -s . >/dev/null 2>&1; then ok "no secrets (gitleaks)"
+    else warn "gitleaks flagged a potential secret — ROTATE, don't just delete"; fail=1; fi
+  else
+    warn "gitleaks not installed — secret scanning is CI-only locally"
+  fi
+
+  echo
+  [ "$fail" -eq 0 ] && say "${G}green — safe to push${R}" || die "not green — fix the above before pushing"
+}
+
+# ── fast: the trivial-change lane (tiered rigor, done safely) ────────────────
+# For docs, comments, formatting, config-within-policy. NOT for logic, and NEVER
+# for anything security- or AI-relevant. Guarded by the automated checks; skips
+# the issue/PR/self-review ceremony. Refuses loudly if the diff doesn't qualify.
+FASTLANE_MAX_LINES=40
+FASTLANE_ISSUE="$(git config keel.housekeepingIssue 2>/dev/null || echo '')"
+cmd_fast() {
+  local msg="${1:-}"
+  [ -n "$msg" ] || die "usage: ./keel fast \"docs: fix a typo\""
+  git diff --cached --quiet && git add -A  # stage everything if nothing staged yet
+
+  local files; files="$(git diff --cached --name-only)"
+  [ -n "$files" ] || die "nothing to commit"
+
+  # Disqualifiers — any one sends you to the full flow. Fail CLOSED.
+  local blocked=""
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    case "$f" in
+      *.md|*.txt|*.rst|docs/*|*.gitignore|*.gitattributes|LICENSE|NOTICE|*.json|*.yml|*.yaml|*.toml|*.cfg|*.ini) : ;;
+      *) blocked="$blocked $f (code — logic changes are not trivial)" ;;
+    esac
+    case "$f" in
+      *auth*|*authz*|*authn*|*session*|*crypto*|*secret*|*middleware*|*migration*|\
+      *prompt*|*guardrail*|*/evals/*|.github/workflows/*|.claude/hooks/*|.claude/agents/*|\
+      .claude/settings.json|process/gates/*|docs/compliance/*)
+        blocked="$blocked $f (security/AI/control-relevant)" ;;
+    esac
+  done <<< "$files"
+
+  local added; added="$(git diff --cached --numstat | awk '{s+=$1} END{print s+0}')"
+  if [ -n "$blocked" ]; then
+    warn "fast lane refused — these need the full flow (/idea → /implement → /review):"
+    for b in $blocked; do printf '      %s\n' "$b"; done
+    die "not a trivial change"
+  fi
+  if [ "$added" -gt "$FASTLANE_MAX_LINES" ]; then
+    die "fast lane refused — ${added} lines added (limit ${FASTLANE_MAX_LINES}). Larger changes get a PR."
+  fi
+
+  # Traceability without ceremony: reference a standing housekeeping issue (CM-3).
+  local ref=""
+  [ -n "$FASTLANE_ISSUE" ] && ref="Refs: #${FASTLANE_ISSUE}"$'\n' \
+    || warn "no housekeeping issue set — see: git config keel.housekeepingIssue <n>"
+
+  say "fast lane: ${added} line(s), $(printf '%s' "$files" | wc -l | tr -d ' ') file(s)"
+  git commit -q -m "$(printf '%s\n\n%sFast-Lane: docs/config, %s lines\nAI-Assisted: keel fast' "$msg" "$ref" "$added")" \
+    && ok "committed (hooks ran: secrets, format, commit-msg)" \
+    || die "commit blocked by a hook — that's the hook working; fix the cause"
+  echo
+  say "pushed nowhere yet. './keel ship' to push, or keep batching fast commits."
+}
+
+# ── ship: the pre-push gate ──────────────────────────────────────────────────
+cmd_ship() {
+  cmd_check
+  local br; br="$(git symbolic-ref --short HEAD 2>/dev/null || echo '')"
+  [ "$br" = "main" ] && die "on main — branch first: git switch -c <type>/<issue>-<slug>"
+  echo
+  say "pushing $br"
+  git push -u origin "$br" && ok "pushed — open a PR when ready: gh pr create"
+}
+
+# ── secure: the security posture at a glance ─────────────────────────────────
+cmd_secure() {
+  say "keel secure — control posture"
+  bash .claude/hooks/selftest.sh 2>&1 | tail -2
+  echo
+  "$PY" scripts/validate-platform.py 2>&1 | sed -n '/Workflow hardening/,/Guard hooks/p' | head -6
+  echo
+  say "deeper: docs/compliance/  ·  POA&M: docs/compliance/poam.md"
+}
+
+# ── evals: agent structural assurance (AIC-12, the part CI can run) ──────────
+cmd_evals() {
+  say "keel evals — agent assurance (AIC-12)"
+  if [ -x evals/run-agent-evals.sh ] || [ -f evals/run-agent-evals.sh ]; then
+    bash evals/run-agent-evals.sh
+  else
+    die "no agent-eval harness at evals/run-agent-evals.sh"
+  fi
+}
+
+# ── the rest: thin wrappers over the real scripts ───────────────────────────
+cmd_new()    { bash scripts/bootstrap.sh "$@"; }
+cmd_harden() { bash scripts/configure-github.sh "$@"; }
+cmd_sync()   { [ "${1:-}" = "--apply" ] && bash scripts/sync-platform.sh || bash scripts/sync-platform.sh --check; }
+cmd_setup()  { bash scripts/install-hooks.sh; }
+
+cmd_status() {
+  have gh || die "gh CLI not found"
+  say "keel status"
+  gh pr list --json number,title,mergeStateStatus \
+    --jq '.[] | "  PR #\(.number)  \(.mergeStateStatus)  \(.title)"' 2>/dev/null || warn "no open PRs / not a gh repo"
+  local open; open="$(grep -c '| POAM-[0-9]* .* Open' docs/compliance/poam.md 2>/dev/null || echo 0)"
+  printf '  open POA&M findings: %s  (docs/compliance/poam.md)\n' "$open"
+}
+
+cmd_help() {
+  sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'
+}
+
+# ── dispatch ─────────────────────────────────────────────────────────────────
+case "${1:-help}" in
+  check)  shift; cmd_check "$@" ;;
+  fast)   shift; cmd_fast "$@" ;;
+  ship)   shift; cmd_ship "$@" ;;
+  secure) shift; cmd_secure "$@" ;;
+  evals)  shift; cmd_evals "$@" ;;
+  new)    shift; cmd_new "$@" ;;
+  harden) shift; cmd_harden "$@" ;;
+  sync)   shift; cmd_sync "$@" ;;
+  setup)  shift; cmd_setup "$@" ;;
+  status) shift; cmd_status "$@" ;;
+  help|-h|--help) cmd_help ;;
+  *) die "unknown command '$1' — try ./keel help" ;;
+esac

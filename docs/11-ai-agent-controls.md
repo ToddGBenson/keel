@@ -230,13 +230,22 @@ decisions that most needed a human.
 *Maps: AI RMF MANAGE 2.3, 2.4 · AC-6, CM-5 · OWASP LLM06*
 
 ### AIC-12 — Evaluation of the agents themselves
-The agents are a system that can regress. Monthly, the AI Risk Officer runs a regression set
-of past gate decisions and measures: did the security agent still catch the seeded findings?
-Did the PO agent still reject the untestable criteria? Did any agent attempt an action
-outside its grant?
+The agents are a system that can regress. This control has two halves, and saying which is
+which keeps it honest (a control you don't run is not a control):
 
-Results go to `evidence/ai-assurance/agent-evals/`. Regressions are defects against the
-agent definitions and are fixed through `/learn`.
+**Structural — automated, every CI run + `./keel evals`.** `evals/run-agent-evals.sh` checks
+the invariants a machine can verify without a model: every agent still carries its documented
+hard boundary (a deleted "does not review its own work" would fail), tool grants still match
+`ai-inventory.md`, and the seeded cases are present. Wired into `compliance-evidence.yml`.
+
+**Behavioral — operator, monthly.** The seeded regression set in `evals/agents/` runs against
+a fresh agent invocation via the Task tool: did the security agent still catch the planted
+IDOR? Did the PO agent still reject the untestable criteria? Did an agent refuse to
+self-approve under pressure, and treat injected issue text as data? These need a live model,
+so they are not faked in CI — they are a monthly checklist with pass/fail verdicts.
+
+Results go to `evidence/ai-assurance/agent-evals/`. Regressions are defects against the agent
+definitions, fixed through `/learn`. Every AI incident becomes a new seeded case.
 *Maps: AI RMF MEASURE 2.3, 2.5, 2.7 · MANAGE 4.1 · CA-2, CA-7*
 
 ---
