@@ -80,7 +80,7 @@ jobs:
 
       # ── CM-14 / SR-11: signing ───────────────────────────────────────────────
       - name: Install cosign
-        uses: sigstore/cosign-installer@d7d6bc7722e3daa8354c50bcb52f4837da5e9b6a # v3.8.1
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
 
       - name: Sign the artifact (keyless, OIDC)
         run: |
@@ -96,7 +96,7 @@ jobs:
       id-token: write
     steps:
       - name: Install cosign
-        uses: sigstore/cosign-installer@d7d6bc7722e3daa8354c50bcb52f4837da5e9b6a # v3.8.1
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
 
       # This job exists because a signature nobody verifies is decoration. The same
       # verification MUST run in the deploy path and MUST refuse on mismatch — verifying

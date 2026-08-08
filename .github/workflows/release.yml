@@ -65,7 +65,7 @@ jobs:
           echo "An untested rollback plan is a hypothesis; this gate asks for a fact."
 
       - name: Install cosign
-        uses: sigstore/cosign-installer@d7d6bc7722e3daa8354c50bcb52f4837da5e9b6a # v3.8.1
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
 
       - name: Verify artifact signature and provenance — HARD BLOCK
         run: |
