@@ -38,6 +38,31 @@ jobs:
             const failures = [];
             const warnings = [];
 
+            // ---- Automated dependency PRs: exempt from HUMAN-oriented governance --
+            // Dependabot updates are Standard changes (docs/07). A bot can't produce a
+            // self-review, an AI-authorship declaration, or a linked issue — demanding them
+            // permanently blocks the repo's own supply-chain hygiene, which is worse than
+            // the ceremony it skips. These PRs are STILL gated by the real controls: the
+            // Dependency review job (SR-3/SR-4/AIC-7), Platform integrity (verifies every
+            // action SHA still resolves — the hallucinated-SHA guard), and every scanner.
+            // We exempt them here, and rely on those + a human clicking merge.
+            const BOT_AUTHORS = ['dependabot[bot]', 'renovate[bot]', 'github-actions[bot]'];
+            if (BOT_AUTHORS.includes(pr.user.login)) {
+              // The one thing we still check: a conventional-commit title, so the changelog
+              // stays clean. Everything else is delegated to the scan/integrity jobs.
+              const okTitle = /^(feat|fix|chore|build|ci|deps)(\([^)]+\))?!?:\s.+/i.test(pr.title)
+                           || /^(bump|update)\s/i.test(pr.title);  // Dependabot's default phrasing
+              const note = okTitle
+                ? '✅ Automated dependency PR — human governance checks exempted (Standard '
+                  + 'change). Still gated by Dependency review, Platform integrity (SHA '
+                  + 'resolution), and all scanners. A human merges.'
+                : '⚠️ Automated dependency PR with a non-conventional title — merge is fine, '
+                  + 'but the changelog will be untidy.';
+              core.summary.addRaw('### Governance (bot exemption)\n\n' + note + '\n').write();
+              core.info(note);
+              return;  // skip the human-oriented checks below
+            }
+
             // ---- CM-3 / CM-5: all change traces to a work item -------------------
             // Accept "Closes #123", "Refs: #123", "Fixes #123", or a bare "#123".
             const issueRef = /(?:closes|fixes|resolves|refs?)\s*:?\s*#(\d+)/i.test(body)
