@@ -67,3 +67,5 @@ is worth respecting. Widen it and you have one lane again, the slow one, that ev
 
 Emergency security fixes are **not** fast-lane changes — they follow the expedited path in
 `docs/07`, which compresses timing but removes no control.
+
+<!-- fast-lane test 357636f -->

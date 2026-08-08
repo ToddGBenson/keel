@@ -91,31 +91,39 @@ FASTLANE_ISSUE="$(git config keel.housekeepingIssue 2>/dev/null || echo '')"
 cmd_fast() {
   local msg="${1:-}"
   [ -n "$msg" ] || die "usage: ./keel fast \"docs: fix a typo\""
-  git diff --cached --quiet && git add -A  # stage everything if nothing staged yet
 
+  # Operates on STAGED changes only. No auto `git add -A` — that sweeps whatever happens to
+  # be in the tree into the commit, which is exactly the accident a fast path must not make.
+  # Stage what you mean, then run this. (Caught the first time the happy path was tested.)
   local files; files="$(git diff --cached --name-only)"
-  [ -n "$files" ] || die "nothing to commit"
+  if [ -z "$files" ]; then
+    warn "nothing staged. Stage your trivial change first, e.g.:"
+    warn "    git add docs/whatever.md  &&  ./keel fast \"docs: fix a typo\""
+    die "nothing to commit"
+  fi
 
   # Disqualifiers — any one sends you to the full flow. Fail CLOSED.
+  # Reasons are newline-delimited (not space) so multi-word reasons don't word-split
+  # in the display — a small bug caught the first time the refusal path ran.
   local blocked=""
   while IFS= read -r f; do
     [ -n "$f" ] || continue
     case "$f" in
-      *.md|*.txt|*.rst|docs/*|*.gitignore|*.gitattributes|LICENSE|NOTICE|*.json|*.yml|*.yaml|*.toml|*.cfg|*.ini) : ;;
-      *) blocked="$blocked $f (code — logic changes are not trivial)" ;;
-    esac
-    case "$f" in
       *auth*|*authz*|*authn*|*session*|*crypto*|*secret*|*middleware*|*migration*|\
       *prompt*|*guardrail*|*/evals/*|.github/workflows/*|.claude/hooks/*|.claude/agents/*|\
       .claude/settings.json|process/gates/*|docs/compliance/*)
-        blocked="$blocked $f (security/AI/control-relevant)" ;;
+        blocked="${blocked}${f} — security/AI/control-relevant"$'\n'; continue ;;
+    esac
+    case "$f" in
+      *.md|*.txt|*.rst|docs/*|*.gitignore|*.gitattributes|LICENSE|NOTICE|*.json|*.yml|*.yaml|*.toml|*.cfg|*.ini) : ;;
+      *) blocked="${blocked}${f} — code, logic changes are not trivial"$'\n' ;;
     esac
   done <<< "$files"
 
   local added; added="$(git diff --cached --numstat | awk '{s+=$1} END{print s+0}')"
   if [ -n "$blocked" ]; then
     warn "fast lane refused — these need the full flow (/idea → /implement → /review):"
-    for b in $blocked; do printf '      %s\n' "$b"; done
+    printf '%s' "$blocked" | while IFS= read -r b; do [ -n "$b" ] && printf '      %s\n' "$b"; done
     die "not a trivial change"
   fi
   if [ "$added" -gt "$FASTLANE_MAX_LINES" ]; then
