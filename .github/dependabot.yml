@@ -28,6 +28,13 @@ updates:
     groups:
       actions-minor-patch:
         update-types: ["minor", "patch"]
+    # Major action bumps are NOT auto-opened. A major version of a CI action can carry
+    # breaking changes and, more importantly here, a new SHA that must be verified against
+    # the API (the hallucinated-SHA lesson, L0006/AIC-7). Those are reviewed deliberately —
+    # bump them by hand when you mean to, not on Dependabot's schedule.
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
     reviewers:
       # Workflow changes require security review — the pipeline gates everything else,
       # so a change here can disable every other control (CM-5). Solo project: the
