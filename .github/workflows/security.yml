@@ -148,7 +148,7 @@ jobs:
 
       - name: Scan dependencies
         if: steps.deps.outputs.present == 'true'
-        uses: anchore/scan-action@7c05671ae9be166aeb155bad2d7df9121823df32 # v6.1.0
+        uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7.4.0
         id: grype
         with:
           path: "."
