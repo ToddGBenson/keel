@@ -95,6 +95,13 @@ kinds = sorted(k for k, _ in nh)
 check("classifies clean/blocked/unowned; ignores drafts",
       kinds == ["assign", "fix", "merge"], f"got {kinds}")
 
+# ── POA&M markdown must not leak into the rendered page ─────────────────────
+html = dash.render(base_data(
+    poam={"open": [{"id": "POAM-8", "weakness": "w", "risk": "High",
+                    "owner": "unassigned", "status": "Open"}], "closed": 0}))
+check("risk renders without markdown asterisks", "**High**" not in html)
+check("unowned still detected after stripping", "unowned findings" in html and ">1<" in html)
+
 # ── theme correctness: no colour defined ONLY in a theme block ──────────────
 import re
 root = re.search(r":root\{(.*?)\}", html, re.S).group(1)

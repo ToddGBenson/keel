@@ -74,9 +74,16 @@ def collect() -> dict:
             if "closed" in status.lower():
                 poam["closed"] += 1
             else:
+                # Strip markdown emphasis — the POA&M is a markdown table, so risk and
+                # owner arrive as "**High**" / "*unassigned*". Rendering the asterisks
+                # made the dashboard look broken and, worse, made "**High**" not match a
+                # plain "High" comparison anywhere downstream.
+                def demd(s: str) -> str:
+                    return re.sub(r"[*_`]", "", s).strip()
+
                 poam["open"].append({
-                    "id": pid, "weakness": weakness.strip("* "), "risk": risk,
-                    "owner": owner or "unassigned", "status": status,
+                    "id": pid, "weakness": demd(weakness), "risk": demd(risk),
+                    "owner": demd(owner) or "unassigned", "status": demd(status),
                 })
     d["poam"] = poam
 
