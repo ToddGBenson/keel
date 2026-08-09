@@ -37,7 +37,7 @@ assurance that everything else relies on.
 | POAM-006 | `production` environment has no required reviewers — **G5 is not technically enforced** | CM-3, AC-5 | **High** | Todd Benson | 2026-08-08 | **Closed** — public repo; environment reviewer set and verified |
 | POAM-007 | Verification routine in `configure-github.sh` reported 5 false failures | CA-2 | Medium | *unassigned* | 2026-08-07 | **Closed** — fixed + re-verified |
 | POAM-008 | **Solo operation — AC-5 separation of duties cannot be satisfied** | AC-5, CM-5 | **High** | Todd Benson | on 2nd team member | Open — accepted with compensating controls |
-| POAM-009 | Commit signing not registered with GitHub — SI-7/CM-14 unsatisfied | SI-7, CM-14 | Medium | Todd Benson | next session | Open — control correctly NOT enabled (L0010) |
+| POAM-009 | Commit signing not registered with GitHub — SI-7/CM-14 unsatisfied | SI-7, CM-14 | Medium | Todd Benson | 2026-08-08 | **Closed** — key registered; GitHub verifies commits; required_signatures enabled |
 
 ### POAM-008 — Separation of duties under solo operation
 
@@ -85,7 +85,7 @@ not touch this entry — separation of duties needs a second person, not a plan 
 
 ---
 
-### POAM-009 — Commit signing capability incomplete
+### POAM-009 — Commit signing capability incomplete ✅ CLOSED 2026-08-08
 
 **Weakness.** An SSH signing key is generated and git is configured, but the key is not
 registered with GitHub — `gh ssh-key add --type signing` requires the
@@ -97,9 +97,20 @@ enabling a control the operator cannot satisfy makes every PR permanently unmerg
 script probes the capability and refuses. SI-7/CM-14 are honestly unsatisfied rather than
 falsely claimed.
 
-**Remediation.** `gh auth refresh -h github.com -s admin:ssh_signing_key`, then
-`gh ssh-key add ~/.ssh/id_ed25519_signing.pub --type signing`, then re-run
-`configure-github.sh --solo`. Two minutes, requires an interactive browser auth.
+**Remediation — DONE 2026-08-08.** The OAuth device flow proved unusable in this
+environment (it hung twice). The key was registered instead through the **web UI**
+(`https://github.com/settings/ssh/new`, Key type = Signing Key), which needs **no CLI scope
+at all** — a simpler path that was available the whole time.
+
+**Evidence of closure:** GitHub reports `verified=true, reason=valid` on commit `faa2af5`;
+`gpg.ssh.allowedSignersFile` configured so local verification also passes (`%G? = G`);
+`required_signatures` enabled and verified against the live API (9/9 controls).
+
+**Defect found while closing it.** The capability probe tested `gh api user/ssh_signing_keys`
+— i.e. *can I list keys*, which needs `admin:ssh_signing_key`. A correctly registered key
+therefore reported as MISSING whenever that read scope was absent, conflating "I lack a
+scope" with "the control is unsatisfiable". Now tests the thing that actually matters:
+does GitHub mark a real signed commit as verified. Needs only `repo`.
 
 ### POAM-005 — Server-side secret scanning unavailable ✅ CLOSED 2026-08-08
 
