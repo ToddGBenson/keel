@@ -110,10 +110,10 @@ fail=0
 case "$subject" in Merge*|Revert*|fixup!*|squash!*) exit 0 ;; esac
 
 # Conventional Commits — SA-15.
-if ! printf '%s' "$subject" | grep -qE '^(feat|fix|chore|docs|refactor|test|sec|perf|build|ci)([(][a-z0-9._-]+[)])?!?: .+'; then
+if ! printf '%s' "$subject" | grep -qE '^(feat|fix|chore|docs|refactor|test|sec|perf|build|ci|revert)([(][a-z0-9._-]+[)])?!?: .+'; then
   echo "[FAIL] Subject is not a Conventional Commit."
   echo "       Expected: <type>(<scope>): <summary>"
-  echo "       Types: feat fix chore docs refactor test sec perf build ci"
+  echo "       Types: feat fix chore docs refactor test sec perf build ci revert"
   fail=1
 fi
 
