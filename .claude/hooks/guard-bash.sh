@@ -101,7 +101,14 @@ g '(^|[|;&[:space:]])gh[[:space:]]+api[[:space:]]+[^|;&]*-X[[:space:]]+DELETE[^|
 # guard-write.sh; fixed there and not propagated here, which is its own lesson.
 #
 # The patterns now anchor on the FILE ARGUMENT of a reader command, not on vocabulary.
-if printf '%s' "$cmd" | grep -qE '(^|[|;&[:space:]])(cat|less|more|head|tail|bat|type)[[:space:]]+[^|;&]*([.]env([.][A-Za-z0-9_-]+)?|[.]pem|[.]p12|[.]pfx|[.]key|/[.]ssh/|/[.]aws/|id_rsa|id_ed25519)([[:space:]]|$|"|'"'"')'; then
+#
+# EXEMPTION 2026-08-08: `.pub` files are PUBLIC by construction — that is their entire
+# purpose. Blocking them stopped a legitimate task (showing the operator their own SSH
+# signing key so they could register it) and taught nothing, since the private half is a
+# different file and still blocked. Over-blocking a control teaches people to work around
+# it (L0007), so the exemption is explicit and narrow: the path must END in .pub.
+if printf '%s' "$cmd" | grep -qE '(^|[|;&[:space:]])(cat|less|more|head|tail|bat|type)[[:space:]]+[^|;&]*([.]env([.][A-Za-z0-9_-]+)?|[.]pem|[.]p12|[.]pfx|[.]key|/[.]ssh/|/[.]aws/|id_rsa|id_ed25519)([[:space:]]|$|"|'"'"')' \
+   && ! printf '%s' "$cmd" | grep -qE '[.]pub([[:space:]]|$|"|'"'"')'; then
   block "reading credential material into the context. Rotate rather than inspect." "AIC-5, IA-5, SC-28"
 fi
 case "$cmd" in
