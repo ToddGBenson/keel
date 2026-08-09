@@ -44,6 +44,8 @@ bad()  { printf '  [FAIL] %s\n' "$1"; died=1; }
 command -v gh >/dev/null || { echo "gh CLI not found." >&2; exit 1; }
 gh auth status >/dev/null 2>&1 || { echo "gh not authenticated. Run: gh auth login" >&2; exit 1; }
 
+PYBIN="$(command -v python3 || command -v python || echo python)"
+
 REPO="$(gh repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null)" || {
   echo "No GitHub remote. Create one first:" >&2
   echo "  gh repo create <name> --private --source=. --push" >&2
@@ -150,9 +152,21 @@ info ""
 info "Status checks are added in step 5, after they have run at least once."
 confirm
 
+# DEFECT FIXED 2026-08-08: this always sent `required_status_checks: null`, so every re-run
+# of the script WIPED the registered checks — the branch went from 10 required checks to 0
+# while reporting success. A setup script that silently destroys its own controls on a second
+# run is worse than one that fails loudly. Caught by the dashboard reading the live API,
+# not by the script's own verification, which never checked this field.
+#
+# Preserve whatever is already configured; step 5 then adds any missing contexts.
+EXISTING_CHECKS="$(gh api "repos/$REPO/branches/$BRANCH/protection" \
+  --jq 'if .required_status_checks then {strict: .required_status_checks.strict, contexts: .required_status_checks.contexts} else null end' \
+  2>/dev/null || echo null)"
+[ -z "$EXISTING_CHECKS" ] && EXISTING_CHECKS=null
+
 PROT_JSON=$(cat <<JSON
 {
-  "required_status_checks": null,
+  "required_status_checks": $EXISTING_CHECKS,
   "enforce_admins": true,
   "required_pull_request_reviews": {
     "dismiss_stale_reviews": true,
@@ -203,18 +217,34 @@ CAN_SIGN=0
 if [ -n "$SIGN_KEY" ] && [ "$SIGN_ON" = "true" ]; then
   # Prove it: sign a throwaway object rather than trusting the config.
   if git commit-tree -S -m probe "$(git rev-parse HEAD^{tree})" >/dev/null 2>&1; then
-    # Configured AND working locally. Is the key registered with GitHub?
-    KEY_KIND=$([ "$SIGN_FMT" = "ssh" ] && echo ssh_signing_keys || echo gpg_keys)
-    if gh api "user/$KEY_KIND" >/dev/null 2>&1; then
+    # DEFECT FIXED 2026-08-08: this asked `gh api user/ssh_signing_keys` — i.e. "can I LIST
+    # signing keys", which needs the admin:ssh_signing_key scope. A correctly registered key
+    # therefore reported as MISSING whenever that scope was absent, conflating "I lack a
+    # read scope" with "the control is unsatisfiable". Same false-negative family as L0007.
+    #
+    # The authoritative test is the one that matters end to end: does GitHub actually mark
+    # a real signed commit as verified? That needs only `repo`, and it tests the capability
+    # rather than a proxy for it.
+    VERIFIED=""
+    for ref in "$(git rev-parse HEAD)" "$BRANCH"; do
+      [ -n "$ref" ] || continue
+      VERIFIED="$(gh api "repos/$REPO/commits/$ref" --jq '.commit.verification.verified' 2>/dev/null || echo '')"
+      [ "$VERIFIED" = "true" ] && break
+    done
+
+    if [ "$VERIFIED" = "true" ]; then
       CAN_SIGN=1
-      info "signing works locally and the key list is readable"
+      info "signing works locally AND GitHub verifies a real commit (end-to-end)"
+    elif gh api "user/$([ "$SIGN_FMT" = "ssh" ] && echo ssh_signing_keys || echo gpg_keys)" >/dev/null 2>&1; then
+      # Fallback when the scope IS present but no signed commit exists yet to check.
+      CAN_SIGN=1
+      info "signing works locally and the registered key list is readable"
     else
-      warn "signing works locally, but the key may not be registered with GitHub."
-      warn "  Register it, or GitHub will report 'unknown_key' and block every merge:"
-      if [ "$SIGN_FMT" = "ssh" ]; then
-        warn "    gh auth refresh -h github.com -s admin:ssh_signing_key"
-        warn "    gh ssh-key add \"${SIGN_KEY}\" --type signing --title 'git signing'"
-      fi
+      warn "signing works locally, but no commit is verified by GitHub yet."
+      warn "  Either the key is not registered, or no signed commit has been pushed."
+      warn "  Register the PUBLIC key (no CLI scope needed): https://github.com/settings/ssh/new"
+      warn "    -> set 'Key type' to Signing Key, paste ${SIGN_KEY}"
+      warn "  Then push one signed commit and re-run this script."
     fi
   else
     warn "user.signingkey is set but signing FAILED. Not enabling required signatures."
@@ -254,6 +284,10 @@ CHECKS=(
   "SCA — dependency vulnerabilities (RA-5, SR-3)"
   "IaC & configuration (CM-6, CM-7)"
   "Suppression audit"
+  # NOTE: matrix jobs report with the matrix value appended. A required context that omits
+  # it can NEVER be satisfied and blocks every PR forever (L0010). Keep this in sync with
+  # the language matrix in security.yml — and if you change the matrix, change this.
+  "SAST — CodeQL (SA-11(1)) (javascript-typescript)"
 )
 if [ "$DRY" = "1" ]; then
   info "would require ${#CHECKS[@]} status checks"
@@ -318,6 +352,25 @@ print(str(cur).lower() if cur is not None else 'absent')" 2>/dev/null)"
   chk '.allow_deletions.enabled'                                    false "branch deletion blocked"
   chk '.required_linear_history.enabled'                            true  "linear history"
   chk '.required_conversation_resolution.enabled'                   true  "conversations resolved"
+  # Verify the field this script previously wiped on every re-run. A verification step that
+  # does not check what the script writes is not verification.
+  #
+  # jq is NOT assumed — it is absent on stock Git-for-Windows, and the first version of this
+  # line used it unconditionally and reported a FALSE FAILURE against 11 healthy checks.
+  # Third recurrence of L0007 in this script. Same python fallback the guards use.
+  N_NOW="$(printf '%s' "$P" | { jq -r '(.required_status_checks.contexts // []) | length' 2>/dev/null \
+        || "$PYBIN" -c "
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    print(len((d.get('required_status_checks') or {}).get('contexts') or []))
+except Exception:
+    print(0)" 2>/dev/null; })"
+  if [ "${N_NOW:-0}" -gt 0 ]; then
+    info "[ok]   ${N_NOW} required status checks"
+  else
+    bad "NO required status checks — CIS 1.1.7 unsatisfied; merges are not gated on CI"
+  fi
   # Conditional on the capability probe in step 4b. Reporting FAIL here when signing was
   # deliberately not enabled — because the operator has no key — is a false failure, and a
   # verifier that cries wolf gets ignored (L0007). Report the honest state instead.
