@@ -110,9 +110,13 @@ def needs_human(d: dict) -> list[tuple[str, str]]:
 def ci_health(runs: list) -> dict:
     done = [r for r in runs if r.get("status") == "completed"]
     ok = sum(1 for r in done if r.get("conclusion") == "success")
+    SHOWN = 8
     return {"total": len(done), "pass": ok,
             "rate": round(100 * ok / len(done)) if done else None,
-            "recent": done[:8]}
+            "recent": done[:SHOWN],
+            # Carry the hidden count so the table can say what it dropped, rather than
+            # implying the 8 rows are the whole story.
+            "hidden": max(0, len(done) - SHOWN)}
 
 
 # ── render ───────────────────────────────────────────────────────────────────
@@ -213,12 +217,23 @@ def render(d: dict) -> str:
              f'<code>python scripts/dashboard.py</code></p>')
 
     # ── needs a human — first, always
+    # DEFECT FIXED 2026-08-08 (found in this feature's own self-review): this capped at 10
+    # with NO indicator, so a busy repo silently dropped items — the exact quiet omission
+    # this project treats as a defect everywhere else. A truncation that does not announce
+    # itself reads as "that's everything".
+    NH_SHOWN = 10
     h.append("<h2>Needs a human</h2>")
     if nh:
         h.append('<ul class="plain card">')
-        for kind, text in nh[:10]:
+        for kind, text in nh[:NH_SHOWN]:
             cls = {"merge": "c-ok", "fix": "c-bad", "assign": "c-warn", "risk": "c-bad"}.get(kind, "c-mute")
             h.append(f'<li><span class="chip {cls}">{esc(kind)}</span><span>{esc(text)}</span></li>')
+        if len(nh) > NH_SHOWN:
+            hidden = len(nh) - NH_SHOWN
+            h.append(f'<li><span class="chip c-warn">+{hidden}</span>'
+                     f'<span><strong>{hidden} more not shown.</strong> '
+                     f'{len(nh)} items need a human — run <code>./keel status</code> for the '
+                     f'full list.</span></li>')
         h.append("</ul>")
     else:
         h.append('<div class="card empty">Nothing blocked on a person. Queue is clear.</div>')
@@ -256,6 +271,10 @@ def render(d: dict) -> str:
             h.append(f'<tr><td>{esc(r.get("name",""))}</td>'
                      f'<td><span class="chip {chip}">{esc(c)}</span></td>'
                      f'<td class="mono">{esc((r.get("createdAt") or "")[:16].replace("T"," "))}</td></tr>')
+        if ci.get("hidden"):
+            h.append(f'<tr><td colspan="3" class="mono" style="color:var(--muted)">'
+                     f'+{ci["hidden"]} older run(s) not shown — rate above covers all '
+                     f'{ci["total"]}</td></tr>')
         h.append("</table>")
     else:
         h.append('<div class="empty">No completed runs found.</div>')

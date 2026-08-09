@@ -71,7 +71,16 @@ PYEOF
     warn "guard self-test FAILED — a control is misbehaving"; fail=1
   fi
 
-  # 4. Secrets in the working tree (cheap, catches the expensive mistake)
+  # 4. Platform's own unit tests (the dashboard generator has real logic worth testing)
+  if [ -f test/dashboard.test.py ]; then
+    if "$PY" test/dashboard.test.py >/dev/null 2>&1; then
+      ok "dashboard generator tests"
+    else
+      warn "dashboard tests FAILED — run: $PY test/dashboard.test.py"; fail=1
+    fi
+  fi
+
+  # 5. Secrets in the working tree (cheap, catches the expensive mistake)
   if have gitleaks; then
     if gitleaks detect --no-banner --redact -s . >/dev/null 2>&1; then ok "no secrets (gitleaks)"
     else warn "gitleaks flagged a potential secret — ROTATE, don't just delete"; fail=1; fi

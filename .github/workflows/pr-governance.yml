@@ -243,6 +243,12 @@ jobs:
       - name: Guard hook self-test
         run: bash .claude/hooks/selftest.sh
 
+      # The dashboard generator has real logic (truncation disclosure, escaping, degraded
+      # rendering). Its tests are mutation-verified — removing the truncation notice or the
+      # escaper each fails 2 assertions.
+      - name: Dashboard generator tests
+        run: python test/dashboard.test.py
+
   dependency-review:
     name: Dependency review (SR-3, SR-4, AIC-7)
     runs-on: ubuntu-latest
