@@ -13,6 +13,7 @@ One command, `./keel`. Learn these five:
 ./keel ship           # check, then push the current branch
 ./keel status         # open PRs, their state, open findings
 ./keel dash           # visual dashboard: needs-a-human, CI health, controls, findings
+./keel sprint         # describe an idea in sprint/inbox/ -> tested PR (you merge)
 ./keel secure         # control posture + guard self-test
 ```
 
@@ -89,6 +90,7 @@ record is in `docs/lessons/`.
 | The controls, mapped | `docs/compliance/` (800-53, CIS, SSDF, AI RMF) |
 | AI-specific governance | `docs/11-ai-agent-controls.md`, `docs/12-ai-feature-governance.md` |
 | Solo-operator specifics | `docs/13-solo-operation.md` |
+| Autonomous sprint runner | `docs/16-sprint-automation.md` |
 | What broke and why | `docs/lessons/` |
 
 Everything else is reference. This page and `./keel help` are the on-ramp.
