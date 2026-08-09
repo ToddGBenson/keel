@@ -189,8 +189,33 @@ PRBODY
 }
 
 say "keel sprint"
-git switch -q main 2>/dev/null
+
+# DEFECT FIXED 2026-08-09: this unconditionally ran `git switch main` at startup — including
+# for --dry-run. Anyone running a "dry run" to see what was queued was silently moved off
+# their working branch, and their next commit landed on main. It bit the author twice, in
+# #24 and again while restoring this file: a commit meant for a feature branch went to
+# local main, which is protected and cannot be pushed.
+#
+# A read-only flag must be read-only. And a tool must never move the operator's branch as a
+# side effect — that is their state, not the tool's.
+STARTED_ON="$(git symbolic-ref --short HEAD 2>/dev/null || echo '')"
+restore_branch() {
+  local now; now="$(git symbolic-ref --short HEAD 2>/dev/null || echo '')"
+  if [ -n "$STARTED_ON" ] && [ "$now" != "$STARTED_ON" ]; then
+    git switch -q "$STARTED_ON" 2>/dev/null && info "returned you to $STARTED_ON"
+  fi
+}
+trap restore_branch EXIT
+
 git fetch -q origin 2>/dev/null
+if [ "$DRY" = "1" ]; then
+  info "dry run — no branch changes, nothing written"
+else
+  # Real runs need a clean base, but only after confirming there is work to do.
+  if [ -n "$(git status --porcelain)" ]; then
+    die "working tree is dirty — commit or stash first; the runner creates branches"
+  fi
+fi
 
 if [ -n "$ONE" ]; then
   [ -f "$ONE" ] || die "no such description: $ONE"
