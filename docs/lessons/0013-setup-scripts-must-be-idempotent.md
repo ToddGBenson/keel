@@ -55,3 +55,22 @@ While fixing this I added the missing assertion using `jq` — which is **not in
 stock Git-for-Windows. It reported a false failure against 11 healthy checks: the third
 recurrence of L0007 in this one script. The fix that verifies a control must itself be
 verified, on the platform it actually runs on.
+
+
+## Postscript — enabling the control changed the merge strategy
+
+Turning on `required_signatures` immediately broke **rebase merges**:
+
+```
+Base branch requires signed commits.
+Rebase merges cannot be automatically signed by GitHub.  (HTTP 405)
+```
+
+GitHub signs merge and squash commits with its own web-flow key, but a rebase *replays* your
+commits and cannot re-sign them. So the repo's merge strategy had to change to **squash**
+(still linear, so `required_linear_history` is satisfied).
+
+Worth stating as its own small rule: **enabling a control can invalidate an unrelated
+workflow.** The control was correct, the setup script was correct, and the merge still broke —
+because nothing had asked "what else assumes the old behaviour?" Check the adjacent workflows
+after any control change, not just the control itself.

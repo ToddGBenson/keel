@@ -48,6 +48,12 @@ git switch -c feat/<n>-slug
 Not every change needs every gate — the tailoring table in `docs/00` says which. A bug skips
 G0/G2; a chore skips most of it; only behavior/security/AI changes get the full run.
 
+## Merging
+
+**Squash merges only.** `required_signatures` is enforced on `main`, and GitHub cannot sign a
+rebase merge (it replays your commits rather than creating one). Squash produces a single
+GitHub-signed commit and still satisfies `required_linear_history`.
+
 ## The rules that never bend
 
 Four, and only four, are worth memorizing:
