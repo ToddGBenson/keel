@@ -17,7 +17,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
-import dailycheck as dc  # noqa: E402
+import dailycheck as dc  # noqa: E402 (#13) — import follows the sys.path insert above
 
 failures = []
 

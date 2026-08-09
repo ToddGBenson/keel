@@ -74,7 +74,8 @@ def safe_probe(name: str, fn) -> Result:
         return Result(name, "SKIPPED", f"unavailable: {e}")
     except subprocess.TimeoutExpired:
         return Result(name, "SKIPPED", f"probe timed out after {PROBE_TIMEOUT}s")
-    except Exception as e:  # noqa: BLE001 — a broken probe must not end the run
+    except Exception as e:  # noqa: BLE001 (#13) — deliberate: a broken probe must not
+        # end the daily run. This is the T5 control, not an oversight; see the threat model.
         return Result(name, "SKIPPED", f"probe error: {type(e).__name__}: {e}")
 
 
