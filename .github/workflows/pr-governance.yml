@@ -115,12 +115,12 @@ jobs:
             }
 
             // ---- Conventional commit title ---------------------------------------
-            if (!/^(feat|fix|chore|docs|refactor|test|sec|perf|build|ci)(\([^)]+\))?!?:\s.+/
+            if (!/^(feat|fix|chore|docs|refactor|test|sec|perf|build|ci|revert)(\([^)]+\))?!?:\s.+/
                   .test(pr.title)) {
               failures.push(
                 'PR title is not a Conventional Commit. Expected ' +
                 '"<type>(<scope>): <summary>" with type in ' +
-                'feat|fix|chore|docs|refactor|test|sec|perf|build|ci.');
+                'feat|fix|chore|docs|refactor|test|sec|perf|build|ci|revert.');
             }
 
             // ---- Review-quality signal: oversized PRs -----------------------------
