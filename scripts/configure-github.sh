@@ -284,6 +284,10 @@ CHECKS=(
   "SCA — dependency vulnerabilities (RA-5, SR-3)"
   "IaC & configuration (CM-6, CM-7)"
   "Suppression audit"
+  # NOTE: matrix jobs report with the matrix value appended. A required context that omits
+  # it can NEVER be satisfied and blocks every PR forever (L0010). Keep this in sync with
+  # the language matrix in security.yml — and if you change the matrix, change this.
+  "SAST — CodeQL (SA-11(1)) (javascript-typescript)"
 )
 if [ "$DRY" = "1" ]; then
   info "would require ${#CHECKS[@]} status checks"
