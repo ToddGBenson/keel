@@ -81,6 +81,7 @@ how**, once, so the method does not drift across the five places that reference 
 |---|---|
 | **Discovery & refinement** | |
 | `artifact-intake` | Input is a spec, wireframe, mockup, PDF, or schema rather than prose |
+| `backlog-prioritization` | Deciding what to build next, running `/plan`, grouping stories into an epic |
 | `story-splitting` | Decomposing an epic, or a story is too large to estimate |
 | `writing-acceptance-criteria` | Refining a story, running G1, judging whether criteria are testable |
 | **Design** | |

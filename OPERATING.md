@@ -93,6 +93,7 @@ record is in `docs/lessons/`.
 | Autonomous sprint runner | `docs/16-sprint-automation.md` |
 | Running it overnight | `docs/17-unattended-operation.md` |
 | Rules an automated run must meet | `docs/18-automation-policy.md` |
+| Grouping work, and verifying it in batches | `docs/19-batched-verification.md` |
 | What broke and why | `docs/lessons/` |
 
 Everything else is reference. This page and `./keel help` are the on-ramp.

@@ -1,0 +1,69 @@
+name: Epic
+description: A coherent group of 3-5 stories, selected together and verified together
+title: "[Epic] "
+labels: ["epic"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Produced by `/plan` from the ranked backlog, and approved by a human before creation.
+
+        An epic is a **grouping, not an iteration**. No dates, no velocity, no points
+        (ADR-0002 D6). Attach its stories as **native sub-issues**, not as a checklist —
+        a checkbox in a description is prose; the sub-issue relationship is data the
+        eligibility check can read.
+
+  - type: textarea
+    id: surface
+    attributes:
+      label: The shared surface
+      description: >
+        What makes these one group rather than a list — the same component, data set, user
+        journey, or trust boundary. This is what the batched review examines the seams of.
+        If you cannot name it in a sentence, this is a list and should be split.
+      placeholder: "All five touch the sprint runner's policy-loading path and the values it evals."
+    validations:
+      required: true
+
+  - type: textarea
+    id: rationale
+    attributes:
+      label: Why these, why now
+      description: Ranking rationale from `/plan`, including any coherence-over-rank trade you made.
+    validations:
+      required: true
+
+  - type: textarea
+    id: deferred
+    attributes:
+      label: What was deferred, and why
+      description: >
+        Required. A plan that shows only the chosen work hides the decision. Distinguish
+        *lower value* from *blocked* from *not coherent with this group — leads the next one*;
+        the third is not a demotion.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: batch_eligible
+    attributes:
+      label: Batch verification eligible?
+      description: >
+        Do NOT answer from memory — run `bash scripts/check-batch-eligibility.sh <this issue>`
+        after attaching the sub-issues, and record what it said.
+      options:
+        - "Yes — check passed, G4 runs once over the group"
+        - "No — contains flagged stories; they take G2 up front and their own G4"
+        - "Not yet run"
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: constraints
+    attributes:
+      label: Constraints
+      options:
+        - label: Every story still passes G1 on its own — membership in this epic confers no readiness
+          required: true
+        - label: No risk flag was removed from any story to make this epic batch-eligible (PD-7)
+          required: true
