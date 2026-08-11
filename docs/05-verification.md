@@ -1,5 +1,8 @@
 # 05 — Verification & Validation (→ G4)
 
+**Scope:** G4 runs per story by default, or once over an epic's stories as a batch
+when `scripts/check-batch-eligibility.sh` permits it — see `docs/19-batched-verification.md`.
+
 **Owners:** QA, Security, AI Risk · **Commands:** `/qa-gate`, `/security-gate`, `/ai-gate`
 **Gate:** `process/gates/g4-verified.md`
 

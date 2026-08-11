@@ -11,6 +11,7 @@
 #   ./keel evals          agent structural assurance (AIC-12, automated part)
 #   ./keel status         where everything sits: PRs, checks, findings
 #   ./keel dash           generate + open a visual dashboard (backlog, CI, controls)
+#   ./keel batch <epic>   may this epic be verified as one batch? (ADR-0002)
 #   ./keel sprint         describe an idea in sprint/inbox -> tested PR (you merge)
 #                         --preflight (ready for unattended?)  --max N  --dry-run
 #   ./keel new  [args]     bootstrap a fresh fork into a project
@@ -231,6 +232,7 @@ case "${1:-help}" in
   setup)  shift; cmd_setup "$@" ;;
   status) shift; cmd_status "$@" ;;
   dash)   shift; cmd_dash "$@" ;;
+  batch)  shift; bash scripts/check-batch-eligibility.sh "$@" ;;
   sprint) shift; cmd_sprint "$@" ;;
   help|-h|--help) cmd_help ;;
   *) die "unknown command '$1' — try ./keel help" ;;
