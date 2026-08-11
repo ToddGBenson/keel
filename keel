@@ -12,6 +12,7 @@
 #   ./keel status         where everything sits: PRs, checks, findings
 #   ./keel dash           generate + open a visual dashboard (backlog, CI, controls)
 #   ./keel sprint         describe an idea in sprint/inbox -> tested PR (you merge)
+#                         --preflight (ready for unattended?)  --max N  --dry-run
 #   ./keel new  [args]     bootstrap a fresh fork into a project
 #   ./keel harden          apply GitHub-side controls (branch protection, envs)
 #   ./keel sync            what changed upstream (--apply to take it)

@@ -18,10 +18,15 @@ set -uo pipefail
 cd "$(dirname "$0")/.."
 ROOT="$PWD"
 
-INBOX="sprint/inbox"; DONE="sprint/done"; DRY=0; ONE=""
+INBOX="sprint/inbox"; DONE="sprint/done"; DRY=0; ONE=""; PREFLIGHT=0
+# Cap items per run. Unattended, an inbox of twelve descriptions is an unbounded bill
+# arriving at 3am. Three is enough to make progress and small enough to survive a mistake.
+MAX_ITEMS="${KEEL_SPRINT_MAX:-3}"
 while [ $# -gt 0 ]; do
   case "$1" in
     --dry-run) DRY=1; shift ;;
+    --preflight) PREFLIGHT=1; shift ;;
+    --max) MAX_ITEMS="$2"; shift 2 ;;
     --one) ONE="$2"; shift 2 ;;
     -h|--help) sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 1 ;;
@@ -35,6 +40,41 @@ info() { printf '  %s\n' "$1"; }
 ok()   { printf '  %s✓%s %s\n' "$G" "$R" "$1"; }
 warn() { printf '  %s!%s %s\n' "$Y" "$R" "$1"; }
 die()  { printf '  %s✗ %s%s\n' "$X" "$1" "$R" >&2; exit 1; }
+
+# ── preflight: everything unattended operation depends on, checked before you trust it ──
+if [ "$PREFLIGHT" = "1" ]; then
+  say "keel sprint --preflight"
+  pf_fail=0
+  pf() { if eval "$2" >/dev/null 2>&1; then ok "$1"; else printf '  %s✗%s %s
+' "$X" "$R" "$1"; pf_fail=1; fi; }
+
+  pf "claude CLI present"            "command -v claude"
+  pf "gh CLI present"                "command -v gh"
+  pf "gh authenticated"              "gh auth status"
+  pf "git identity configured"       "test -n \"$(git config user.email)\""
+  pf "on a clean working tree"       "test -z \"$(git status --porcelain)\""
+  pf "origin reachable"              "git ls-remote --exit-code origin HEAD"
+  pf "guard hooks pass"              "bash .claude/hooks/selftest.sh"
+
+  n=$(find "$INBOX" -name '*.md' 2>/dev/null | wc -l | tr -d ' ')
+  info ""
+  info "queued: $n description(s); this run would process at most $MAX_ITEMS"
+  [ "$n" -gt "$MAX_ITEMS" ] && warn "$((n - MAX_ITEMS)) would wait for the next run"
+
+  info ""
+  info "Bounded by: ${MAX_ITEMS} items/run · 45-min CI timeout · protected-path abandonment"
+  info "Cannot: merge, deploy, force-push, or handle credentials"
+  info ""
+  if [ "$pf_fail" = "0" ]; then
+    say "ready"
+    info "Unattended runs are still only as safe as your LAST supervised run."
+    info "If you have never watched one finish, do that before scheduling it."
+  else
+    say "NOT ready — fix the above before scheduling"
+    exit 1
+  fi
+  exit 0
+fi
 
 command -v claude >/dev/null || die "claude CLI not found — required for the runner"
 command -v gh >/dev/null || die "gh CLI not found"
@@ -224,9 +264,45 @@ else
   shopt -s nullglob
   files=("$INBOX"/*.md)
   [ ${#files[@]} -eq 0 ] && { info "inbox empty — nothing to do"; exit 0; }
-  info "${#files[@]} description(s) queued"
-  for f in "${files[@]}"; do process_one "$f"; done
+  info "${#files[@]} description(s) queued; processing at most $MAX_ITEMS"
+  if [ ${#files[@]} -gt "$MAX_ITEMS" ]; then
+    # Say what was deferred. A cap that truncates silently reads as "that was everything"
+    # — the same defect the dashboard had (L0007).
+    warn "$(( ${#files[@]} - MAX_ITEMS )) will wait for the next run (raise with --max)"
+  fi
+  count=0
+  for f in "${files[@]}"; do
+    [ "$count" -ge "$MAX_ITEMS" ] && break
+    process_one "$f"; count=$((count + 1))
+  done
 fi
 
+# ── run summary — the only thing an unattended operator sees in the morning ──
+SUMMARY="sprint/done/last-run.md"
+{
+  printf '# Sprint run — %s
+
+' "$(date -u +'%Y-%m-%d %H:%M UTC')"
+  printf 'Processed: %s
+' "${count:-1}"
+  blocked=$(find "$DONE" -name '*.BLOCKED.md' -newermt '-1 day' 2>/dev/null | wc -l | tr -d ' ')
+  printf 'Stopped deliberately: %s
+' "$blocked"
+  printf 'Still queued: %s
+
+' "$(find "$INBOX" -name '*.md' 2>/dev/null | wc -l | tr -d ' ')"
+  if command -v gh >/dev/null 2>&1; then
+    printf '## Open PRs awaiting you
+
+'
+    gh pr list --state open --json number,title,mergeStateStatus       --jq '.[] | "- #\(.number) [\(.mergeStateStatus)] \(.title)"' 2>/dev/null || printf '(none)
+'
+  fi
+  [ "$blocked" != "0" ] && printf '
+**%s run(s) stopped for a human decision — see sprint/done/*.BLOCKED.md.**
+' "$blocked"
+} > "$SUMMARY" 2>/dev/null
+
 say "done"
+info "summary: $SUMMARY"
 info "Review the PRs. Merging stays a human act — that is the control, not an oversight."

@@ -81,4 +81,5 @@ If the defaults are wrong, say so on the PR and re-queue; the description is sti
 
 Scheduled runs: `.github/workflows/sprint.yml` (needs `ANTHROPIC_API_KEY` as a repo secret —
 **you** add it; agents never handle credentials), or a local cron calling `./keel sprint`.
-See `docs/16-sprint-automation.md`.
+See `docs/16-sprint-automation.md`, and `docs/17-unattended-operation.md`
+before scheduling it overnight.
