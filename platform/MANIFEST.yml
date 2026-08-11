@@ -33,6 +33,7 @@ platform_owned:
   - docs/10-definitions.md
   - docs/11-ai-agent-controls.md
   - docs/12-ai-feature-governance.md
+  - docs/18-automation-policy.md
   - docs/templates/
   - docs/compliance/nist-800-53-control-map.md
   - docs/compliance/ssdf-crosswalk.md
@@ -79,6 +80,9 @@ merge_required:
   - .claude/settings.json
   - CLAUDE.md
   - .gitignore
+  # Platform ships the schema and its meanings; the fork supplies its own environment and
+  # test commands. Both sides legitimately change it, so a human merges the diff.
+  - automation-policy.yml
 
 # ── BOOTSTRAP-ONLY ───────────────────────────────────────────────────────────
 # Consumed by scripts/bootstrap.sh and removed from the fork afterwards. These describe

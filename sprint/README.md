@@ -79,6 +79,10 @@ If the defaults are wrong, say so on the PR and re-queue; the description is sti
 ./keel sprint --dry-run       # show what it would pick up
 ```
 
-Scheduled runs: `.github/workflows/sprint.yml` (needs `ANTHROPIC_API_KEY` as a repo secret —
+Scheduled runs: `automation-policy.yml` (needs `ANTHROPIC_API_KEY` as a repo secret —
 **you** add it; agents never handle credentials), or a local cron calling `./keel sprint`.
-See `docs/16-sprint-automation.md`.
+This inbox is for **supervised** runs only — a scheduled run reads `ready`-labelled
+issues instead, never these files (`docs/18-automation-policy.md`).
+
+See `docs/16-sprint-automation.md`, and `docs/17-unattended-operation.md`
+before scheduling it overnight.
