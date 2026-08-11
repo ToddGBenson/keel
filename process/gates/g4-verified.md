@@ -10,6 +10,41 @@ Three independent verdicts, not one combined sign-off. Any fail blocks.
 
 ---
 
+## Scope: per story, or per epic
+
+G4 runs over **one story** by default. It may instead run **once over an epic's stories as a
+batch** — the same items, assessed across a group (ADR-0002).
+
+**Eligibility is not a judgement call. Run the check:**
+
+```bash
+bash scripts/check-batch-eligibility.sh <epic-number>
+```
+
+It refuses the batch if any story carries `security-relevant` or `ai-relevant`, or if the epic
+exceeds 5 stories. A refused batch means those stories are verified **individually**, at full
+ceremony — it does not mean verify them less.
+
+**Removing a risk flag to pass this check is falsifying a triage decision (PD-7).** If a flag
+looks wrong, that is a re-triage on the issue with a reason recorded, not a label deletion in
+service of a green gate.
+
+When running batched, three things change and nothing else does:
+
+- **Item 15** (adversarial read) is performed over the **combined** surface. This is the point
+  of batching — the question a per-story review structurally cannot ask is *what did these
+  stories do to each other?* An endpoint added in story 3 consuming a field left unvalidated by
+  story 1 is invisible when each is read alone. Look at the seams first.
+- **Item 16/17** (scan results) covers everything accumulated since the epic opened, triaged
+  once rather than N times.
+- **Item 1** (traceability) must still resolve **per story** — every AC of every story has its
+  test and result. A batch verdict that cannot be decomposed back to individual stories is not
+  evidence, it is an average.
+
+Everything in Parts A–C is assessed as written. The gate did not get smaller; its unit did.
+
+---
+
 ## Part A — QA verification
 
 | # | Item | Evidence |
