@@ -92,6 +92,7 @@ record is in `docs/lessons/`.
 | Solo-operator specifics | `docs/13-solo-operation.md` |
 | Autonomous sprint runner | `docs/16-sprint-automation.md` |
 | Running it overnight | `docs/17-unattended-operation.md` |
+| Rules an automated run must meet | `docs/18-automation-policy.md` |
 | What broke and why | `docs/lessons/` |
 
 Everything else is reference. This page and `./keel help` are the on-ramp.

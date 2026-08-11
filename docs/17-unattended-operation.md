@@ -1,6 +1,6 @@
 # 17 — Running the Sprint Runner Unattended
 
-**Check first:** `./keel sprint --preflight` · **Controls:** AIC-11, AC-5, CM-3
+**Policy:** `docs/18-automation-policy.md` · **Check:** `./keel sprint --preflight` · **Controls:** AIC-11, AC-5, CM-3
 
 ## The precondition
 
@@ -13,38 +13,46 @@ earned it, not instead of earning it.
 
 Run `./keel sprint --one sprint/inbox/something-small.md` while watching. Then schedule.
 
-## Two places it can run — the cost difference is the deciding factor
+The *refusal* path is tested — preflight and `--unattended` both correctly decline when a
+parameter is unmet. The *success* path is not. That asymmetry is the whole risk.
 
-| | GitHub Actions | Local (Task Scheduler / cron) |
-|---|---|---|
-| Machine must be awake | No | **Yes** |
-| Billing | **`ANTHROPIC_API_KEY` — per-token API billing, separate from a Claude subscription** | Your existing `claude` login (subscription) |
-| Logs | Retained, artifact-uploaded | Wherever you redirect them |
-| Isolation | Fresh ephemeral runner | Your machine, your filesystem |
-| Secrets | Repo secret, scoped to the job | Your local session |
+## The agreed parameters come first
 
-**If you already pay for Claude, the local path likely costs you nothing extra and the CI
-path bills separately per token.** That is usually the deciding factor, not the technology.
+Five parameters govern any automated run — CLI credential, dev-ready stories only, a
+non-prod environment, a human gate on what is running there, and all three test suites
+enabled. They live in `automation-policy.yml` and are documented in
+**`docs/18-automation-policy.md`**. Read that before this.
 
-If you go local, the machine has to be awake at the scheduled time. Sleep is the most common
-reason a "scheduled" job never ran.
+```
+./keel sprint --preflight
+```
 
-## Option A — GitHub Actions
+Every failing line is a precondition, not a warning. `--unattended` re-checks them at start
+of run and refuses if any is unmet.
 
-1. Add `ANTHROPIC_API_KEY` as a repository secret (Settings → Secrets and variables →
-   Actions). **You do this** — agents never handle credentials (AIC-5).
-2. Set the cron in `.github/workflows/sprint.yml`. Default is weekly; `'0 6 * * 1'`.
-   For nightly at 02:00 your time, convert to UTC and use e.g. `'0 7 * * *'`.
-3. Trigger once manually first: Actions → Sprint Runner → Run workflow.
+## It runs locally, via the CLI — there is no CI option
 
-Without the key the workflow exits early with an explanation rather than failing obscurely.
+The scheduled GitHub Actions runner has been **removed**, not disabled. P1 prohibits a
+standing `ANTHROPIC_API_KEY`: a long-lived credential running unattended with no session
+boundary is a worse risk than the isolation CI would have bought. A workflow that must never
+be enabled is a trap, and a disabled trap is still a trap.
 
-## Option B — Local, overnight (Windows Task Scheduler)
+Two consequences you are accepting:
+
+- **The machine has to be awake.** Sleep is the most common reason a "scheduled" job never
+  ran, and it fails silently.
+- **The run inherits your local session and filesystem** rather than a fresh ephemeral
+  runner. Isolation is weaker than CI's. That is the trade P1 makes deliberately.
+
+Billing follows the credential: the CLI login uses your existing Claude subscription, so if
+you already pay for it, a local run likely costs nothing extra.
+
+## Scheduling it (Windows Task Scheduler)
 
 ```powershell
 # Run nightly at 02:00. Adjust the path.
 $action  = New-ScheduledTaskAction -Execute "C:\Program Files\Git\bin\bash.exe" `
-           -Argument "-lc './keel sprint >> sprint/done/nightly.log 2>&1'" `
+           -Argument "-lc './keel sprint --unattended >> sprint/done/nightly.log 2>&1'" `
            -WorkingDirectory "C:\Users\tgb_\Documents\Projects\Coders"
 
 $trigger = New-ScheduledTaskTrigger -Daily -At 2am
@@ -63,17 +71,19 @@ Register-ScheduledTask -TaskName "keel-sprint" -Action $action `
 
 macOS/Linux equivalent:
 ```cron
-0 2 * * *  cd /path/to/keel && ./keel sprint >> sprint/done/nightly.log 2>&1
+0 2 * * *  cd /path/to/keel && ./keel sprint --unattended >> sprint/done/nightly.log 2>&1
 ```
 
 ## What bounds an unattended run
 
 | Bound | Value | Why |
 |---|---|---|
-| Items per run | **3** (`--max N`, or `KEEL_SPRINT_MAX`) | An inbox of twelve is an unbounded bill arriving at 3am |
-| Wall clock | 45 min (CI) / 1 h (Task Scheduler) | A runaway loop costs money |
+| Items per run | **3** (`max_items_per_run`) | An inbox of twelve is an unbounded bill arriving at 3am |
+| Wall clock | 1 h (`-ExecutionTimeLimit`) | A runaway loop costs money |
 | Protected paths | Branch **abandoned** if it touched a control | A control change must be a deliberate human act |
-| Token scope (CI) | No `packages`, `deployments`, `id-token` | It *cannot* deploy — not merely told not to |
+| Gate entry | Starts at **G2** — never crosses G0/G1 | Deciding *what* to build stays human (P2) |
+| Deploy target | Only the environment `automation-policy.yml` names | Production stays blocked by `guard-bash.sh` (P3) |
+| Tests | Unit + functional + security, **re-run by the runner** | An agent's "tests pass" is an assertion, not evidence (P5) |
 | Merge | Never | AC-5 / POAM-008 |
 
 If the cap defers work, the run **says so** rather than truncating silently.
@@ -91,8 +101,8 @@ question with no safe default — and stopped instead of guessing.
 
 ## Honest risks of unattended operation
 
-- **Cost is the real one.** Each description is a full agent session. Three complex ones
-  overnight is a meaningful bill. Start with `--max 1`.
+- **Cost.** Each story is a full agent session. Three complex ones overnight is meaningful
+  usage. Start with `max_items_per_run: 1`.
 - **Nobody sees a stuck run until morning.** The timeouts bound it, but a run that dies at
   02:05 means a wasted night. The summary file is the mitigation, not a fix.
 - **An autonomous PR's self-review is written by the agent that wrote the code** — one

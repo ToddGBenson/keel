@@ -1,0 +1,54 @@
+# keel — automated run policy
+#
+# The preconditions an UNATTENDED run must satisfy. `./keel sprint --preflight` reads this
+# file and refuses to certify a schedule until every one is met.
+#
+# This is a CONTRACT, not configuration. Blank values are not defaults — they are unmet
+# preconditions, and they block unattended operation. A fork fills them in; keel itself
+# leaves them blank because a platform repo has no application to deploy, which is why
+# keel cannot lawfully run itself unattended (see docs/18-automation-policy.md).
+#
+# Flat keys on purpose: parsed without jq, yq, or python (L0009 — a checker with a
+# dependency is a checker that silently does not run).
+#
+# Controls: AIC-11 (bounded autonomy) · AC-5 (human authorizes) · CM-3 · SA-11 · SI-7
+# Project-owned. `scripts/sync-platform.sh` never overwrites this.
+
+version: 1
+
+# ── P1 — credential mode ─────────────────────────────────────────────────────
+# cli      = the local `claude` login. The only permitted value.
+# api_key  = PROHIBITED. A long-lived ANTHROPIC_API_KEY in CI is a standing credential
+#            that runs unattended with no session boundary; the CLI login is bounded by
+#            a session a human established. Setting this to api_key fails preflight.
+credential_mode: cli
+
+# ── P2 — only dev-ready stories are eligible ─────────────────────────────────
+# Unattended work starts at G2. It may NOT cross G0 or G1 — refinement decides what to
+# build, and that judgement stays human. The runner implements decisions; it does not
+# make them.
+ready_label: ready
+require_g1_evidence: true          # the issue must carry a G1 pass comment
+
+# ── P3 — non-prod environment ────────────────────────────────────────────────
+# The change is deployed and exercised here BEFORE a human is asked to approve it.
+# Blank = no environment = no unattended runs.
+nonprod_name:
+nonprod_deploy_command:
+nonprod_health_command:
+
+# ── P4 — final gate ──────────────────────────────────────────────────────────
+# A human approves what is RUNNING in the lower environment, not merely a diff.
+# human_after_nonprod is the only permitted value; there is no auto-merge mode and
+# adding one would falsify every AC-5 claim this repo makes.
+approval_mode: human_after_nonprod
+
+# ── P5 — required test suites ────────────────────────────────────────────────
+# All three must be declared AND pass. A blank command is a policy violation, not a
+# skip: "no security tests configured" must never render as green (L0007).
+test_unit_command:
+test_functional_command:
+test_security_command:
+
+# ── bounds ───────────────────────────────────────────────────────────────────
+max_items_per_run: 3

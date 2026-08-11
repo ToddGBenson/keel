@@ -4,6 +4,8 @@
 #   ./keel sprint              process the inbox
 #   ./keel sprint --dry-run    show what would be picked up
 #   ./keel sprint --one <file> process a single description
+#   ./keel sprint --preflight   are the agreed automation parameters met?
+#   ./keel sprint --unattended  scheduled mode: dev-ready issues only, policy enforced
 #
 # ── THE BOUNDARY ─────────────────────────────────────────────────────────────
 # This automates everything up to a PR. It does NOT merge, deploy, or touch
@@ -18,7 +20,16 @@ set -uo pipefail
 cd "$(dirname "$0")/.."
 ROOT="$PWD"
 
-INBOX="sprint/inbox"; DONE="sprint/done"; DRY=0; ONE=""; PREFLIGHT=0
+INBOX="sprint/inbox"; DONE="sprint/done"; DRY=0; ONE=""; PREFLIGHT=0; UNATTENDED=0
+POLICY="automation-policy.yml"
+
+# Read one flat scalar from the policy. Blank/absent are the SAME answer: unmet.
+# No jq, no yq, no python — a checker with a dependency is a checker that silently
+# does not run (L0009).
+pol() {
+  [ -f "$POLICY" ] || { printf ''; return; }
+  sed -n "s/^$1:[[:space:]]*//p" "$POLICY" | sed 's/[[:space:]]*#.*$//; s/[[:space:]]*$//' | head -1
+}
 # Cap items per run. Unattended, an inbox of twelve descriptions is an unbounded bill
 # arriving at 3am. Three is enough to make progress and small enough to survive a mistake.
 MAX_ITEMS="${KEEL_SPRINT_MAX:-3}"
@@ -26,6 +37,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --dry-run) DRY=1; shift ;;
     --preflight) PREFLIGHT=1; shift ;;
+    --unattended) UNATTENDED=1; shift ;;
     --max) MAX_ITEMS="$2"; shift 2 ;;
     --one) ONE="$2"; shift 2 ;;
     -h|--help) sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
@@ -56,24 +68,101 @@ if [ "$PREFLIGHT" = "1" ]; then
   pf "origin reachable"              "git ls-remote --exit-code origin HEAD"
   pf "guard hooks pass"              "bash .claude/hooks/selftest.sh"
 
+  # ── the five agreed parameters for an automated run (docs/18) ──
+  info ""
+  info "${B}automated-run policy ($POLICY)${R}"
+  if [ ! -f "$POLICY" ]; then
+    printf '  %s✗%s no %s — unattended runs are not permitted without one
+' "$X" "$R" "$POLICY"
+    pf_fail=1
+  else
+    # P1 — CLI credential, never a standing API key.
+    case "$(pol credential_mode)" in
+      cli) ok "P1 credential_mode: cli (no standing API key)" ;;
+      "")  printf '  %s✗%s P1 credential_mode unset
+' "$X" "$R"; pf_fail=1 ;;
+      *)   printf '  %s✗%s P1 credential_mode is not cli — API-key runs are prohibited
+' "$X" "$R"; pf_fail=1 ;;
+    esac
+    [ -n "${ANTHROPIC_API_KEY:-}" ] && { warn "ANTHROPIC_API_KEY is set in this shell — the CLI login is what P1 requires"; }
+
+    # P2 — dev-ready stories only. Unattended work starts at G2; refinement stays human.
+    rl="$(pol ready_label)"
+    if [ -z "$rl" ]; then
+      printf '  %s✗%s P2 ready_label unset — nothing marks a story dev-ready
+' "$X" "$R"; pf_fail=1
+    else
+      ok "P2 ready_label: $rl"
+      rn=$(gh issue list --label "$rl" --state open --json number --jq 'length' 2>/dev/null || echo 0)
+      if [ "${rn:-0}" -eq 0 ]; then
+        printf '  %s✗%s P2 no open issues labelled '"'"'%s'"'"' — an automated run needs ready work
+' "$X" "$R" "$rl"
+        pf_fail=1
+      else
+        ok "P2 $rn story/stories dev-ready"
+      fi
+    fi
+
+    # P3 — a lower environment to deploy and exercise in.
+    if [ -n "$(pol nonprod_name)" ] && [ -n "$(pol nonprod_deploy_command)" ] && [ -n "$(pol nonprod_health_command)" ]; then
+      ok "P3 non-prod environment: $(pol nonprod_name)"
+    else
+      printf '  %s✗%s P3 non-prod environment incomplete (need name, deploy and health commands)
+' "$X" "$R"
+      pf_fail=1
+    fi
+
+    # P4 — a human approves what is RUNNING, not a diff.
+    if [ "$(pol approval_mode)" = "human_after_nonprod" ]; then
+      ok "P4 approval: human, after non-prod deploy"
+    else
+      printf '  %s✗%s P4 approval_mode must be human_after_nonprod
+' "$X" "$R"; pf_fail=1
+    fi
+
+    # P5 — all three suites declared. Blank is a violation, never a skip (L0007).
+    for suite in unit functional security; do
+      if [ -n "$(pol "test_${suite}_command")" ]; then
+        ok "P5 ${suite} tests declared"
+      else
+        printf '  %s✗%s P5 no %s test command — "not configured" must never read as green
+' "$X" "$R" "$suite"
+        pf_fail=1
+      fi
+    done
+  fi
+
   n=$(find "$INBOX" -name '*.md' 2>/dev/null | wc -l | tr -d ' ')
   info ""
   info "queued: $n description(s); this run would process at most $MAX_ITEMS"
   [ "$n" -gt "$MAX_ITEMS" ] && warn "$((n - MAX_ITEMS)) would wait for the next run"
 
   info ""
-  info "Bounded by: ${MAX_ITEMS} items/run · 45-min CI timeout · protected-path abandonment"
-  info "Cannot: merge, deploy, force-push, or handle credentials"
+  info "Bounded by: ${MAX_ITEMS} items/run · protected-path abandonment · G2 start (no self-refinement)"
+  info "Cannot: merge, deploy to production, force-push, or handle credentials"
   info ""
   if [ "$pf_fail" = "0" ]; then
-    say "ready"
+    say "ready for an automated run"
     info "Unattended runs are still only as safe as your LAST supervised run."
     info "If you have never watched one finish, do that before scheduling it."
   else
     say "NOT ready — fix the above before scheduling"
+    info "Every ✗ above is a precondition you agreed to, not a warning."
     exit 1
   fi
   exit 0
+fi
+
+# An unattended run must not start unless the policy it claims to honour is actually met.
+# Checking at 3am, from the script itself, is the only check that counts — a human having
+# run --preflight last week proves nothing about tonight.
+if [ "$UNATTENDED" = "1" ]; then
+  if ! bash "$0" --preflight >/dev/null 2>&1; then
+    say "unattended run REFUSED — policy not met"
+    bash "$0" --preflight || true
+    exit 1
+  fi
+  MAX_ITEMS="$(pol max_items_per_run)"; MAX_ITEMS="${MAX_ITEMS:-3}"
 fi
 
 command -v claude >/dev/null || die "claude CLI not found — required for the runner"
@@ -257,7 +346,23 @@ else
   fi
 fi
 
-if [ -n "$ONE" ]; then
+if [ "$UNATTENDED" = "1" ]; then
+  # P2 -- the work list is dev-ready stories, NOT the inbox. The inbox holds unrefined
+  # ideas; feeding those to an unattended run would cross G1 with no human present.
+  RL="$(pol ready_label)"
+  mapfile -t ready < <(gh issue list --label "$RL" --state open \
+      --json number,title --jq '.[] | "\(.number)\t\(.title)"' 2>/dev/null)
+  [ ${#ready[@]} -eq 0 ] && { info "no dev-ready stories - nothing to do"; exit 0; }
+  info "${#ready[@]} dev-ready story/stories; processing at most $MAX_ITEMS"
+  if [ ${#ready[@]} -gt "$MAX_ITEMS" ]; then
+    warn "$(( ${#ready[@]} - MAX_ITEMS )) will wait for the next run (raise max_items_per_run)"
+  fi
+  count=0
+  for row in "${ready[@]}"; do
+    [ "$count" -ge "$MAX_ITEMS" ] && break
+    process_ready_issue "${row%%$'\t'*}" "${row#*$'\t'}"; count=$((count + 1))
+  done
+elif [ -n "$ONE" ]; then
   [ -f "$ONE" ] || die "no such description: $ONE"
   process_one "$ONE"
 else
@@ -276,6 +381,115 @@ else
     process_one "$f"; count=$((count + 1))
   done
 fi
+
+# --- unattended path: dev-ready stories only, starting at G2 -----------------
+# The supervised path above takes a raw description through G0/G1 itself. Unattended it
+# MAY NOT: refinement decides WHAT to build, and that judgement is human (P2). Here the
+# story is already G1-approved, so the runner starts at design and ends at a lower
+# environment a human can look at (P3/P4) -- never at a merge.
+process_ready_issue() {
+  local num="$1" title="$2"
+  local slug; slug="$(printf '%s' "$title" | tr '[:upper:]' '[:lower:]' | tr -cs '[:alnum:]' '-' | sed 's/^-*//; s/-*$//' | cut -c1-40)"
+
+  say "> #$num $title"
+  if [ "$DRY" = "1" ]; then info "(dry run - would implement)"; return 0; fi
+
+  # P2 -- G1 evidence must exist on the issue. "Labelled ready" is a claim; the gate
+  # record is the evidence (PD-3). Absent it, we stop rather than assume.
+  if [ "$(pol require_g1_evidence)" = "true" ]; then
+    if ! gh issue view "$num" --json comments --jq '.comments[].body' 2>/dev/null | grep -qi 'G1'; then
+      warn "#$num is labelled ready but carries no G1 evidence - skipping"
+      printf 'Issue #%s was labelled ready with no G1 gate record on it.\n\nThe label is a claim; the gate record is the evidence. Run /ready, or remove the label.\n' \
+        "$num" > "$DONE/issue-${num}.BLOCKED.md"
+      return 1
+    fi
+  fi
+
+  local branch="feat/${num}-${slug}"
+  git switch -q -c "$branch" 2>/dev/null || { warn "branch $branch exists - skipping"; return 1; }
+
+  info "implementing (this takes a while)..."
+  local log="$DONE/issue-${num}.log"
+  claude -p "$(cat <<PROMPT
+Implement issue #$num -- it has already passed G1, so the story and its acceptance criteria
+are SETTLED. Do not re-scope, re-split, or re-write them. If they look wrong, stop and write
+$DONE/issue-${num}.BLOCKED.md saying so; changing agreed scope unattended is out of bounds.
+
+Read the issue first. Then, loading each skill named:
+
+1. threat-modeling -- if the story is security-, privacy-, or AI-relevant. Allocate every
+   control to a named component before writing any code.
+2. test-strategy -- the FAILING test comes first, then the smallest implementation that
+   passes it. Every allocated control gets a negative-case test proving it DENIES.
+3. All three suites must exist and pass for this story (P5). A missing suite is a failure,
+   never a skip:
+     unit:       $(pol test_unit_command)
+     functional: $(pol test_functional_command)
+     security:   $(pol test_security_command)
+4. control-verification -- trace each control to a line and to its test. Mutation-check at
+   least one by removing it and confirming the tests fail.
+5. Write the design record and verification evidence to docs/product/.
+
+HARD LIMITS -- write $DONE/issue-${num}.BLOCKED.md and STOP instead of proceeding, if:
+ - a High or Critical finding appears
+ - the work needs a secret, credential, or production access
+ - it would modify .github/workflows/, .claude/hooks/, .claude/agents/, process/gates/,
+   docs/compliance/, or scripts/configure-github.sh
+ - the work exceeds the agreed acceptance criteria
+ - a blocking question has no safe default
+ - you have failed the same step three times
+
+Do NOT merge, deploy to production, force-push, or handle credentials.
+Commit with a Conventional Commit referencing "Refs: #$num" and an "AI-Assisted:" trailer.
+Do not open the PR -- the runner does that.
+PROMPT
+)" > "$log" 2>&1 || true
+
+  # Structural check -- the prompt above is advisory (AIC-3); this is what holds.
+  if git diff --name-only main...HEAD 2>/dev/null | grep -qE "$PROTECTED"; then
+    warn "#$num touched a control path - branch abandoned"
+    printf 'The run modified a protected path. Branch `%s` abandoned unmerged.\n' "$branch" \
+      > "$DONE/issue-${num}.BLOCKED.md"
+    git switch -q "$STARTED_ON" 2>/dev/null; return 1
+  fi
+  if [ -z "$(git log --oneline main..HEAD 2>/dev/null)" ]; then
+    warn "#$num produced no commits - see $log"; git switch -q "$STARTED_ON" 2>/dev/null; return 1
+  fi
+
+  # P5 -- re-run the suites here. The agent reporting green is an assertion; this is
+  # evidence (PD-3). Any failure means no PR.
+  local suite cmd
+  for suite in unit functional security; do
+    cmd="$(pol "test_${suite}_command")"
+    if ! eval "$cmd" >> "$log" 2>&1; then
+      warn "#$num failed the $suite suite - no PR opened"
+      printf 'Command `%s` failed. Branch `%s` left for inspection; see `%s`.\n' "$cmd" "$branch" "$log" \
+        > "$DONE/issue-${num}.BLOCKED.md"
+      git switch -q "$STARTED_ON" 2>/dev/null; return 1
+    fi
+    ok "$suite tests pass"
+  done
+
+  git push -q -u origin "$branch" 2>/dev/null || { warn "#$num push failed"; return 1; }
+
+  # P3 -- deploy to the lower environment so the human gate (P4) is a look at something
+  # RUNNING, not a read of a diff. Production stays unreachable: guard-bash blocks it, and
+  # this is the command the policy itself declared.
+  local deployed="not attempted"
+  if eval "$(pol nonprod_deploy_command)" >> "$log" 2>&1 && eval "$(pol nonprod_health_command)" >> "$log" 2>&1; then
+    deployed="deployed to $(pol nonprod_name) and healthy"; ok "$deployed"
+  else
+    deployed="**deploy or health check to $(pol nonprod_name) FAILED** - see \`$log\`"
+    warn "non-prod deploy/health failed for #$num"
+  fi
+
+  gh pr create --title "feat: $title" --base main --head "$branch" \
+    --body "$(printf 'Closes #%s\n\nImplemented by the unattended sprint runner from a G1-approved story.\n\n## Non-prod (P3)\n%s\n\n## Tests (P5)\nUnit, functional and security suites were re-run by the runner after the agent reported done. All passed, or this PR would not exist.\n\n## Your gate (P4)\nApprove what is RUNNING in `%s`, not this diff. The diff is how it got there; the environment is what you are accepting.\n\n## AI authorship (AIC-6)\n- [x] **Parts AI-authored:** all of it\n- [x] **Agent / model:** claude-opus-5 via the unattended runner\n\nGive this MORE scrutiny than a hand-written PR: no human watched it being written.\n' \
+      "$num" "$deployed" "$(pol nonprod_name)")" >/dev/null 2>&1 \
+    && ok "PR opened for #$num" || warn "#$num PR creation failed"
+
+  git switch -q "$STARTED_ON" 2>/dev/null
+}
 
 # ── run summary — the only thing an unattended operator sees in the morning ──
 SUMMARY="sprint/done/last-run.md"

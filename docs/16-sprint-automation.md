@@ -1,15 +1,28 @@
 # 16 — Sprint Automation
 
-**Command:** `./keel sprint` · **Runner:** `scripts/sprint.sh` · **Schedule:** `.github/workflows/sprint.yml`
+**Command:** `./keel sprint` · **Runner:** `scripts/sprint.sh` · **Policy:** `automation-policy.yml`
 **Controls:** CM-3 (traceability) · AIC-11 (bounded autonomy) · AC-5 / POAM-008 (a human merges)
 
 Describe an idea in `sprint/inbox/`. The runner takes it through the pipeline and leaves you a
 tested PR.
 
+## Two modes, and the difference is which gates a human holds
+
+| | `./keel sprint` (supervised) | `./keel sprint --unattended` |
+|---|---|---|
+| Input | `sprint/inbox/*.md` — raw ideas | Issues labelled `ready`, with G1 evidence |
+| Starts at | **G0** — does its own intake, splitting, G1 | **G2** — story and AC are settled |
+| Deploys | No | To the declared non-prod environment only |
+| Preconditions | You are watching | All five in `docs/18-automation-policy.md`, re-checked at start of run |
+
+Unattended runs may **not** cross G0 or G1. Deciding *what* to build is a scope judgement and
+stays human; the runner implements decisions rather than making them. The inbox is invisible
+to a scheduled run for exactly that reason.
+
 ## The boundary — read this before enabling the schedule
 
-The runner automates everything **up to a PR**. It does **not** merge, deploy, or handle
-credentials.
+The runner automates everything **up to a PR**. It does **not** merge, touch production, or
+handle credentials.
 
 That is not timidity. A human authorizing the change is the control that separates this
 platform from a system that writes code unsupervised, and it is the entire basis of the
@@ -24,7 +37,9 @@ limits that matter are **structural**:
 | Limit | How it is enforced |
 |---|---|
 | Cannot modify the controls | The runner **diffs its own output** and abandons the branch if it touched `.github/workflows/`, `.claude/hooks/`, `.claude/agents/`, `process/gates/`, `docs/compliance/`, or `configure-github.sh` |
-| Cannot deploy or publish | The workflow token omits `packages`, `deployments`, and `id-token`. Not "told not to" — *cannot* |
+| Cannot decide what to build | Unattended input is G1-approved issues; no G1 evidence on the issue means the story is skipped |
+| Cannot reach production | It may run only the deploy command `automation-policy.yml` declares; `guard-bash.sh` blocks production regardless of what that file says |
+| Cannot ship untested work | Unit, functional and security suites are re-run **by the runner**; any failure means no PR |
 | Cannot merge or force-push | `guard-bash.sh` blocks it, and branch protection backs that up |
 | Cannot run forever | 45-minute job timeout; `concurrency` prevents overlapping runs |
 | Cannot proceed past a real decision | Writes `sprint/done/<slug>.BLOCKED.md` and comments on the issue instead |
@@ -34,6 +49,8 @@ should decide — a High finding, a needed credential, scope creep, or a blockin
 no safe default. That is the system working, not failing.
 
 ## The flow
+
+Supervised, from a raw idea:
 
 ```
 sprint/inbox/thing.md
@@ -55,16 +72,20 @@ sprint/inbox/thing.md
       ▼  ← YOU merge
 ```
 
+Unattended, from a dev-ready story, the first three steps are already done by a human and the
+last two are added: deploy to non-prod, then **you approve what is running there** (P4).
+
 ## Enabling the schedule
 
-1. **Add `ANTHROPIC_API_KEY`** as a repository secret — Settings → Secrets and variables →
-   Actions. **You do this, not an agent**: agents never handle credentials (AIC-5). Without
-   it the workflow exits early and says so rather than failing obscurely.
-2. Adjust the cron in `.github/workflows/sprint.yml`. Default is weekly (Monday 06:00 UTC);
-   `'0 6 * * *'` makes it daily.
-3. **Watch the first run.** Do not schedule it unattended until you have seen one complete.
+1. **Fill in `automation-policy.yml`** — your non-prod environment and your three test
+   commands. Blank values are unmet preconditions, not defaults.
+2. **Label your G1-approved stories `ready`**, and make sure the G1 gate record is on the
+   issue. The label is a claim; the record is the evidence.
+3. `./keel sprint --preflight` — every failing line is a precondition.
+4. **Watch one full run** before scheduling anything. See `docs/17`.
 
-Locally: `./keel sprint` (whole inbox) or `./keel sprint --one sprint/inbox/x.md`.
+There is no GitHub Actions path: P1 prohibits a standing `ANTHROPIC_API_KEY`, so the
+scheduled workflow was removed rather than disabled.
 
 ## Reviewing an autonomous PR
 
@@ -88,5 +109,7 @@ catches mechanical defects well and misunderstood requirements poorly.
 - **Prompt-driven orchestration is less predictable than code.** The runner hands a long
   prompt to `claude -p`; the structural checks around it exist precisely because the prompt
   itself cannot be relied upon.
-- **Cost is unbounded per run** beyond the timeout. A complex description can consume
-  significant tokens. Start with small, well-scoped descriptions.
+- **Cost is unbounded per run** beyond the timeout. A complex story can consume significant
+  usage. Start with `max_items_per_run: 1`.
+- **Only the refusal path is tested.** Preflight and `--unattended` both correctly decline
+  when a parameter is unmet — verified. No run has completed successfully end to end.
