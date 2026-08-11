@@ -90,6 +90,18 @@ PYEOF
     warn "gitleaks not installed — secret scanning is CI-only locally"
   fi
 
+  # 5b. The allowlist itself. A green secret scan means nothing if .gitleaks.toml has
+  #     quietly stopped the scanner from reporting — which has happened here once already.
+  if [ -f .gitleaks.toml ]; then
+    if bash scripts/test-gitleaks-allowlist.sh 2>/dev/null | grep -q 'BOTH directions'; then
+      ok "gitleaks allowlist still detects real secrets"
+    elif bash scripts/test-gitleaks-allowlist.sh 2>/dev/null | grep -q '\[skip\]'; then
+      warn "gitleaks allowlist NOT verified (no gitleaks or docker) — CI verifies it"
+    else
+      warn "gitleaks allowlist failed verification — run scripts/test-gitleaks-allowlist.sh"; fail=1
+    fi
+  fi
+
   echo
   [ "$fail" -eq 0 ] && say "${G}green — safe to push${R}" || die "not green — fix the above before pushing"
 }

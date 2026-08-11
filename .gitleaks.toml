@@ -1,0 +1,54 @@
+# Gitleaks configuration — keel
+#
+# Controls: RA-5 (vulnerability monitoring) · IA-5 (authenticator management) · SI-7
+# Method: .claude/skills/scanner-triage/SKILL.md
+#
+# ── READ THIS BEFORE ADDING ANYTHING ─────────────────────────────────────────
+# A suppression is a claim that a control does not apply here. Per scanner-triage, every
+# entry below requires: what the scanner thinks is wrong, why it is not, an issue
+# reference, and an expiry date. Blanket file- or rule-level disables fail G4 — they are
+# not triage decisions, they are opting out of the control.
+#
+# `useDefault = true` is LOAD-BEARING. Without it gitleaks discards its entire ruleset and
+# runs with only what is in this file, which would report a clean scan while detecting
+# nothing at all. That is the failure mode where a scanner quietly stops being a control
+# (L0007) — and it shows GREEN, which is worse than showing red.
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = """
+Synthetic credential-shaped fixtures used by the guard-hook self-test.
+
+Scanner's claim: generic-api-key at .claude/hooks/selftest.sh:25 — a value assigned to an
+api-key-shaped identifier.
+
+Why it is not a finding: .claude/hooks/selftest.sh asserts that guard-write.sh BLOCKS
+credential assignments. To prove a guard denies something, the test must present the thing
+it denies, so the fixture is credential-shaped BY DESIGN. The value grants access to
+nothing: it is the alphabet a-j followed by the digits 0-9. There is no system in which it
+authenticates, so there is nothing to rotate.
+
+Scoped to the fixture's whole LINE, not to the file, the rule, or the bare value.
+
+The first attempt at this allowlist matched the value `abcdefghij0123456789` on its own.
+A canary test caught that suppressing a real planted `ghp_` token, because the alphabet
+run appears INSIDE it as a substring — a suppression narrow-looking enough to pass review
+that silently blinded the scanner to genuine secrets. Anchoring to the assignment line
+removes that. Do not loosen it back to a bare value.
+
+The fixture is also present in git history (commits 05a84ce, 3f92a21), which is why the
+fix is an allowlist rather than an edit: gitleaks scans history, and rewriting published
+history is prohibited.
+
+Refs: #32
+expires: 2027-02-11
+"""
+# Match against the whole source LINE, not the extracted secret. The secret alone is an
+# alphabet run that occurs as a substring inside plausible real tokens.
+regexTarget = "line"
+regexes = [
+  # The fixture assignment in .claude/hooks/selftest.sh, and nothing else.
+  '''ASSIGN_FAKE="api""_key = abcdefghij0123456789"''',
+]
