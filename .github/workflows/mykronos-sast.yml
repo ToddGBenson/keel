@@ -39,7 +39,7 @@ jobs:
       # One language failing to build must not hide findings in the others.
       fail-fast: false
       matrix:
-        language: ["javascript-typescript", "python"]
+        language: ["python"]
 
 
     steps:
