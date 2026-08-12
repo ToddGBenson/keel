@@ -46,7 +46,7 @@ jobs:
             // Dependency review job (SR-3/SR-4/AIC-7), Platform integrity (verifies every
             // action SHA still resolves — the hallucinated-SHA guard), and every scanner.
             // We exempt them here, and rely on those + a human clicking merge.
-            const BOT_AUTHORS = ['dependabot[bot]', 'renovate[bot]', 'github-actions[bot]'];
+            const BOT_AUTHORS = ['dependabot[bot]', 'renovate[bot]', 'github-actions[bot]', 'mykronos-platform[bot]'];
             if (BOT_AUTHORS.includes(pr.user.login)) {
               // The one thing we still check: a conventional-commit title, so the changelog
               // stays clean. Everything else is delegated to the scan/integrity jobs.
