@@ -14,24 +14,28 @@
 
 name: Release
 
-# ── SUPERSEDED 2026-08-13 — ported to Concourse. Refs: #42 ────────────────────
+# ── THIS IS THE LIVE G5 PATH. Refs: #42 ──────────────────────────────────────
 #
-# Now the `release-preflight`, `deploy-staging` and `authorize-production` jobs
-# in ci/pipeline.yml. This file was already workflow_dispatch-only, so there is
-# no trigger to strip — but do not run it expecting it to be the live path.
+# CI/CD moved to Concourse (ci/pipeline.yml); release authorization deliberately
+# did NOT. It was ported, the weakening was measured, and it was moved back.
 #
-# ⚠️  READ THIS BEFORE DELETING THIS FILE ⚠️
+# Concourse cannot reproduce what the `production` environment below does. Its
+# nearest equivalent is a job with no trigger, which means: no approval workflow
+# (triggering and approving become one action), no requirement that the approver
+# differ from the author, and team-level rather than per-job authorization.
+# Accepting that would have reopened POAM-006 and put a High finding on the one
+# control the entire lifecycle terminates in.
 #
-# The G5 gate described below — a `production` environment with required
-# reviewers, where the job physically cannot start until a named human approves
-# and that record IS the CM-3 evidence — has NO Concourse equivalent. The
-# replacement is a manually triggered job: no approval workflow, no
-# second-identity requirement, and anyone with pipeline access can trigger it.
+# So G5 stays here, where required reviewers make the gate a technical control
+# rather than a documented intention. The cost is that release orchestration
+# lives apart from the rest of CI. That is the cheaper half of the trade.
 #
-# That is a genuine weakening of AC-5 and CM-3, tracked as POAM-010. This file is
-# the strongest form of the control the repository has ever had, and it is kept
-# on disk deliberately: if the POA&M entry is ever resolved by moving release
-# authorization back to GitHub, this is what it moves back to.
+# ⚠️  ONE THING CHANGED — the artifact is now built by CONCOURSE, not by this
+# workflow. `cosign verify` in preflight must match Concourse's signing identity,
+# not `token.actions.githubusercontent.com`, and `gh attestation verify` will not
+# work at all, because nothing here was built by Actions (POAM-011). Adapt the
+# verify steps below before the first real release: a verification that passes
+# against the wrong identity is worse than none.
 on:
   workflow_dispatch:
     inputs:

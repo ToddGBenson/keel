@@ -38,12 +38,37 @@ assurance that everything else relies on.
 | POAM-007 | Verification routine in `configure-github.sh` reported 5 false failures | CA-2 | Medium | *unassigned* | 2026-08-07 | **Closed** — fixed + re-verified |
 | POAM-008 | **Solo operation — AC-5 separation of duties cannot be satisfied** | AC-5, CM-5 | **High** | Todd Benson | on 2nd team member | Open — accepted with compensating controls |
 | POAM-009 | Commit signing not registered with GitHub — SI-7/CM-14 unsatisfied | SI-7, CM-14 | Medium | Todd Benson | 2026-08-08 | **Closed** — key registered; GitHub verifies commits; required_signatures enabled |
-| POAM-010 | **G5 release authorization weakened by the move to Concourse** — reopens POAM-006 | CM-3, AC-5 | **High** | Todd Benson | 2026-09-12 | Open |
+| POAM-010 | **G5 release authorization weakened by the move to Concourse** — reopens POAM-006 | CM-3, AC-5 | **High** | Todd Benson | 2026-08-13 | **Closed** — release authorization moved back to GitHub Actions before merge (ADR-0003 D2) |
 | POAM-011 | GitHub attestation store unreachable from Concourse — provenance/SBOM attestations lost | SR-4(3), CM-14 | Medium | Todd Benson | 2026-11-11 | Open |
-| POAM-012 | CodeQL SARIF no longer reaches GitHub code scanning | SA-11(1) | Low | Todd Benson | 2026-11-11 | Open — Mykronos is system of record |
+| POAM-012 | CodeQL SARIF from Concourse does not reach GitHub code scanning | SA-11(1) | Low | Todd Benson | 2026-11-11 | Open — reduced scope; PR commits still populate the Security tab |
 | POAM-013 | Monthly monitoring cadence approximated by a weekly trigger | CA-7 | Low | Todd Benson | 2026-11-11 | Open — accepted, detection is loud |
 
-### POAM-010 — G5 release authorization weakened by the move to Concourse
+### POAM-010 — G5 release authorization weakened by the move to Concourse ✅ CLOSED 2026-08-13
+
+**Closed before the change that opened it ever merged.** Release authorization was moved
+back to GitHub Actions rather than accepted as a weakening; `release.yml` is the live G5
+path and the Concourse release lane was deleted. See ADR-0003 § D2.
+
+**What made the decision.** The compensating guard written for this entry —
+`authorize-production` refusing to run when no triggering human was recorded — was what
+made the gap concrete rather than theoretical. It could establish that *a* human pressed
+the button. It could not establish that they were entitled to, or that they were not the
+author. POAM-006 had closed this same gap five days earlier; accepting this entry would
+have reopened it to avoid a split pipeline.
+
+**Evidence of closure.** `.github/workflows/release.yml` retains the `production`
+environment with required reviewers (verified enabled under POAM-006 on 2026-08-08);
+`ci/pipeline.yml` contains no release jobs and `ci/tasks/release.yml` and
+`ci/scripts/release.sh` are deleted.
+
+**Residual, tracked under POAM-011:** the artifact is now built by Concourse, so
+`release.yml`'s `cosign verify` must match Concourse's signing identity and
+`gh attestation verify` cannot work at all. The verify steps are ADAPT stubs and must be
+adapted before the first real release — a verification that passes against the wrong
+identity is worse than none.
+
+<details>
+<summary>Original finding, retained for the audit trail</summary>
 
 **Weakness.** CI/CD execution moved from GitHub Actions to Concourse (#42). The production
 release gate was a GitHub `production` environment with required reviewers: the deploy job
@@ -89,6 +114,8 @@ the strongest form of this control the repository has ever had.
 **Evidence of closure.** A demonstration that a production deploy cannot proceed without an
 approval record attributable to an identity other than the change author — tested by
 attempting it, not by reading the config.
+
+</details>
 
 ---
 

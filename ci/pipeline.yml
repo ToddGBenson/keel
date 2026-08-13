@@ -145,8 +145,6 @@ groups:
     jobs: [compliance-daily, compliance-weekly, compliance-monthly, metrics-snapshot]
   - name: supply-chain
     jobs: [build-and-attest, verify-artifact]
-  - name: release
-    jobs: [release-preflight, deploy-staging, authorize-production]
   - name: all
     jobs: ["*"]
 
@@ -534,66 +532,23 @@ jobs:
           COSIGN_SHA256: ((cosign_sha256))
           REGISTRY: ((registry))
 
-  # ── Release (G5) ────────────────────────────────────────────────────────────
+  # ── Release (G5) — NOT HERE, DELIBERATELY ───────────────────────────────────
   #
-  # ⚠️  CONTROL WEAKENING — READ THIS ⚠️
+  # Release authorization lives in .github/workflows/release.yml and stays on
+  # GitHub Actions. This lane was built here first, and then removed on the
+  # evidence it produced.
   #
-  # On GitHub Actions the production gate was an `environment:` with required
-  # reviewers. The job physically could not start until a named human approved in
-  # the UI, and that approval — identity and timestamp — WAS the CM-3 change
-  # approval evidence.
+  # The G5 gate is a `production` environment with required reviewers: the deploy
+  # job physically cannot start until a named human approves, and that record —
+  # identity, timestamp, bound to the run — IS the CM-3 change approval evidence.
   #
-  # Concourse has no equivalent. `authorize-production` below is a manually
-  # triggered job: a human clicks it, and Concourse records the triggering user
-  # in build metadata. That is weaker. It is not an approval workflow, there is
-  # no second-identity requirement, and anyone with pipeline access can trigger
-  # it.
+  # Concourse's nearest equivalent is a job with no trigger. That collapses
+  # triggering and approving into one action, cannot require the approver to
+  # differ from the author, and authorizes per team rather than per job. Keeping
+  # it would have reopened POAM-006 and left a High finding sitting on the one
+  # control the whole lifecycle terminates in — to save a split pipeline.
   #
-  # This is recorded as POAM-010 in docs/compliance/poam.md — the same gap
-  # POAM-006 closed on 2026-08-08, reopened in a different form. It is real and
-  # is written down as one rather than described as equivalent.
-
-  - name: release-preflight
-    public: true
-    plan:
-      - get: repo
-      - task: preflight
-        file: repo/ci/tasks/release.yml
-        params:
-          STAGE: preflight
-          COSIGN_VERSION: ((cosign_version))
-          COSIGN_SHA256: ((cosign_sha256))
-          REGISTRY: ((registry))
-          GITHUB_TOKEN: ((github_token))
-          REPO_SLUG: ((github_owner))/((github_repo))
-
-  - name: deploy-staging
-    public: true
-    serial: true
-    plan:
-      - get: repo
-        passed: [release-preflight]
-      - task: deploy-staging
-        file: repo/ci/tasks/release.yml
-        params:
-          STAGE: staging
-          REGISTRY: ((registry))
-          STAGING_URL: ((staging_url))
-
-  - name: authorize-production
-    public: true
-    serial: true
-    # No `trigger: true` anywhere in this plan. The only way this job runs is a
-    # human pressing the + in the Concourse UI or `fly trigger-job`.
-    plan:
-      - get: repo
-        passed: [deploy-staging]
-      - task: authorize-and-deploy
-        file: repo/ci/tasks/release.yml
-        params:
-          STAGE: production
-          COSIGN_VERSION: ((cosign_version))
-          COSIGN_SHA256: ((cosign_sha256))
-          REGISTRY: ((registry))
-          PRODUCTION_URL: ((production_url))
-          CONCOURSE_URL: ((concourse_external_url))
+  # Everything upstream of the release stays here: build, scan, ingest, SBOM,
+  # sign, verify. Actions authorizes and deploys.
+  #
+  # See docs/adr/ADR-0003-concourse-execution-github-authorization.md § D2.
