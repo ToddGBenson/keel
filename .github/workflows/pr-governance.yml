@@ -184,6 +184,7 @@ jobs:
 
               const selfReview = evaluate({
                 body,
+                title: pr.title,
                 prNumber: pr.number,
                 exists: (p) => fs.existsSync(p),
                 readFile: (p) => fs.readFileSync(p, 'utf8'),
