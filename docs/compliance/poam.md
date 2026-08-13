@@ -136,7 +136,10 @@ alerts or add a banner, and do not cite that tab as SA-11(1) evidence for any co
 day-of-week. It has no day-of-month. Expressing a true monthly trigger would require a
 third-party resource type, which the pipeline deliberately avoids (SR-3, SR-4).
 
-The `compliance-monthly` job therefore fires weekly and returns early on the other Mondays.
+The `compliance-monthly` job is therefore driven by a 7-day interval and executes only when
+the day of the month is 7 or lower. Fires spaced 7 days apart land in a 7-day window exactly
+once, so it runs precisely once per calendar month — it cannot double up or skip a month.
+What is lost is a predictable date, not the cadence.
 
 **Risk.** Low, and deliberately mitigated by making the no-op loud: a build that is not due
 prints that nothing was assessed and that the run must not be cited as CA-7 evidence for the

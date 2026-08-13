@@ -9,35 +9,40 @@ set -euo pipefail
 : "${PERIOD:?PERIOD is required (daily|weekly|monthly|metrics)}"
 
 # ── CADENCE NOTE ──────────────────────────────────────────────────────────────
-# Concourse's bundled `time` resource has interval, start/stop and day-of-week.
-# It has no day-of-month, so there is no way to express "monthly" as a trigger
-# without taking on a third-party resource type — which this pipeline
-# deliberately does not do.
+# Concourse's bundled `time` resource has no day-of-month, so there is no way to
+# express "monthly" as a trigger without taking on a third-party resource type —
+# which this pipeline deliberately does not do.
 #
-# The monthly job therefore fires weekly and returns early on the other three
-# Mondays. That early return is LOUD: a build that was not due says so in its
-# output, so "we did not look this week" can never be mistaken for "we looked and
-# found nothing". A silent no-op here would be the exact defect class this
-# repository keeps rediscovering (L0007, L0008).
+# The monthly job is therefore driven by the 7-day `weekly` resource and executes
+# only when the day of the month is 7 or lower. Any sequence of fires spaced 7
+# days apart lands in a 7-day window exactly once, so this runs precisely once
+# per calendar month — it cannot double up and it cannot skip a month.
+#
+# The early return is LOUD. A build that was not due says so, so "we did not look
+# this cycle" can never be mistaken for "we looked and found nothing". A silent
+# no-op here would be the exact defect class this repository keeps rediscovering
+# (L0007, L0008).
 if [ "${PERIOD}" = "monthly" ]; then
   DOM="$(date -u +%d)"
+  # ${DOM#0} strips the leading zero: `08` is not a valid octal number and would
+  # abort the comparison under `set -e`.
   if [ "${DOM#0}" -gt 7 ]; then
     cat <<EOF
 
 ================================================================================
 MONTHLY BUNDLE NOT DUE — today is day ${DOM} of the month.
 
-This job fires weekly and executes on the first Monday only. Nothing was
-assessed in this run. This is a scheduling no-op, NOT a clean monthly result,
-and it must not be cited as evidence for CA-7 for this month.
+This job runs on the first 7 days of the month only. Nothing was assessed in
+this run. This is a scheduling no-op, NOT a clean monthly result, and it must
+not be cited as evidence for CA-7 for this month.
 
-Next execution: the first Monday of the coming month.
+Next execution: the next trigger falling on day 1-7.
 ================================================================================
 
 EOF
     exit 0
   fi
-  echo "First Monday of the month — running the monthly bundle."
+  echo "Day ${DOM} of the month — running the monthly bundle."
 fi
 
 case "${PERIOD}" in
