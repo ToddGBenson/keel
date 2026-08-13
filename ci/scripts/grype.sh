@@ -2,9 +2,11 @@
 # SCA — dependency vulnerabilities. Refs: #42
 set -euo pipefail
 
-: "${GRYPE_VERSION:?GRYPE_VERSION is required — pin it in ci/vars.yml}"
-: "${GRYPE_SHA256:?GRYPE_SHA256 is required — see ci/README.md for how to get it}"
 SEVERITY_CUTOFF="${SEVERITY_CUTOFF:-high}"
+
+# The pin is checked after the manifest-presence test below, not before it. A
+# repository with nothing to scan must not go red over a tool version it was
+# never going to use.
 
 # Same "nothing to scan" case as the IaC lane. A repo with no dependency manifest
 # is legitimate; the scan must say so rather than fail on plumbing or, worse,
@@ -28,6 +30,10 @@ applicable. It applies the moment you add a manifest.
 EOF
   exit 0
 fi
+
+# Manifests are present, so the pin is genuinely required now.
+: "${GRYPE_VERSION:?GRYPE_VERSION is required — there ARE dependency manifests to scan}"
+: "${GRYPE_SHA256:?GRYPE_SHA256 is required — see ci/README.md for how to get it}"
 
 tarball="grype.tar.gz"
 curl -sSfL -o "${tarball}" \

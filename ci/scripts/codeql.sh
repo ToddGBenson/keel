@@ -15,10 +15,14 @@
 set -euo pipefail
 
 : "${CODEQL_LANGUAGE:?CODEQL_LANGUAGE is required}"
-: "${CODEQL_BUNDLE_VERSION:?CODEQL_BUNDLE_VERSION is required — pin the bundle}"
-: "${CODEQL_BUNDLE_SHA256:?CODEQL_BUNDLE_SHA256 is required — see ci/README.md}"
 
 CODEQL_QUERIES="${CODEQL_QUERIES:-security-extended}"
+
+# The bundle pin is checked further down, AFTER the source-presence test, not
+# here. Checking it up front turned this job red on a repository that has no
+# source in this language and therefore never needed a bundle at all — a red gate
+# for a non-finding reason, which is precisely the thing the presence test below
+# exists to prevent. Caught by running the job rather than reading it.
 
 # ── Language identifiers ──────────────────────────────────────────────────────
 # The Actions matrix uses names like `javascript-typescript` and `java-kotlin`.
@@ -68,9 +72,13 @@ EOF
 fi
 
 # ── Fetch and verify the bundle ───────────────────────────────────────────────
-# The bundle is the thing performing the security analysis. Fetching it
-# unverified would undercut the entire job, so the checksum is required and a
-# mismatch is fatal.
+# There is source to analyse, so the pin is now genuinely required. The bundle is
+# the thing performing the security analysis: fetching it unverified would
+# undercut the entire job, so both the version and the checksum are mandatory and
+# a mismatch is fatal.
+: "${CODEQL_BUNDLE_VERSION:?CODEQL_BUNDLE_VERSION is required — there IS ${CODEQL_LANGUAGE} source to scan}"
+: "${CODEQL_BUNDLE_SHA256:?CODEQL_BUNDLE_SHA256 is required — see ci/README.md}"
+
 bundle="codeql-bundle-linux64.tar.gz"
 url="https://github.com/github/codeql-action/releases/download/codeql-bundle-${CODEQL_BUNDLE_VERSION}/${bundle}"
 

@@ -2,7 +2,8 @@
 # IaC & configuration scanning. Refs: #42
 set -euo pipefail
 
-: "${CHECKOV_VERSION:?CHECKOV_VERSION is required — pin it in ci/vars.yml}"
+# The pin is checked after the presence test below, not before it. A repository
+# with no IaC must not go red over a tool version it was never going to use.
 
 # Is there any IaC to scan? A repo with no Terraform/CloudFormation/K8s/Dockerfile
 # is a legitimate state, and the scan must say "nothing to scan" rather than
@@ -25,6 +26,11 @@ Terraform module.
 EOF
   exit 0
 fi
+
+# IaC is present, so the pin is genuinely required now. An unpinned scanner
+# produces results you cannot reproduce, and the finding count is what gates this
+# job.
+: "${CHECKOV_VERSION:?CHECKOV_VERSION is required — there IS IaC to scan}"
 
 python -m pip install --quiet --disable-pip-version-check "checkov==${CHECKOV_VERSION}"
 checkov --version
