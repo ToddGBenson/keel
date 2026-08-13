@@ -75,6 +75,15 @@ jobs:
             }
 
             // ---- AIC-6: AI authorship declared ----------------------------------
+            // DELIBERATE, not inherited (#44 asked): the three checks below and the
+            // "What I made worse" test are HEADING tests, and they stay that way. The
+            // self-review check was upgraded to demand an artifact because it is the
+            // compensating control for POAM-008 — with required_approving_review_count
+            // at 0 it is the only thing standing in for a second reviewer, so a token
+            // the template hands you is worth nothing there. These are prompts for the
+            // author, not substitutes for a control: their failure mode is a thin
+            // declaration a human reviewer can see, not an unreviewed merge. Revisit if
+            // any of them ever becomes the sole evidence for a control.
             const aiSection = /##\s*AI authorship/i.test(body);
             const aiDeclared = /\*\*Parts AI-authored:\*\*\s*\S+/i.test(body)
                             || /-\s*\[x\]\s*\*\*Parts AI-authored/i.test(body);
@@ -175,19 +184,32 @@ jobs:
               // exist in the checkout (fetch-depth 0 above), and it must have real
               // content in the two sections that make the rest credible.
               // The logic lives in scripts/selfreview-check.js so it can be tested —
-              // test/selfreview-check.test.js, 13 assertions, mutation-verified, run by
-              // the platform-integrity job below. This check is the whole of AC-5's
-              // substitute under solo operation; it does not get to be untested again.
+              // test/selfreview-check.test.js, 33 assertions including one against a
+              // real filesystem, run by the platform-integrity job below. This check is
+              // the whole of AC-5's substitute under solo operation; it does not get to
+              // be untested again.
+              //
+              // It has been bypassed four times, each the same shape as the last. Read
+              // the header of that module before changing anything here.
               const fs = require('fs');
-              const { evaluate } = require(
-                `${process.env.GITHUB_WORKSPACE}/scripts/selfreview-check.js`);
+              const nodePath = require('path');
+              const ws = process.env.GITHUB_WORKSPACE;
+              const { evaluate } = require(`${ws}/scripts/selfreview-check.js`);
+
+              // Paths are joined against the workspace rather than trusting cwd — the
+              // module confines them to evidence/<issue>/ first, and the symlink check
+              // must see the same absolute path the read will use.
+              const abs = (p) => nodePath.join(ws, p);
 
               const selfReview = evaluate({
                 body,
                 title: pr.title,
                 prNumber: pr.number,
-                exists: (p) => fs.existsSync(p),
-                readFile: (p) => fs.readFileSync(p, 'utf8'),
+                exists: (p) => fs.existsSync(abs(p)),
+                readFile: (p) => fs.readFileSync(abs(p), 'utf8'),
+                // git stores symlinks and actions/checkout materialises them, so a
+                // record can be committed as a link to another issue's review.
+                isSymlink: (p) => fs.existsSync(abs(p)) && fs.lstatSync(abs(p)).isSymbolicLink(),
               });
               failures.push(...selfReview.failures);
               warnings.push(...selfReview.warnings);
@@ -264,12 +286,17 @@ jobs:
       - name: Dashboard generator tests
         run: python test/dashboard.test.py
 
-      # The solo-mode self-review check (#44). It passed on a markdown heading for
-      # months — the one the PR template tells authors to write — so the compensating
-      # control for POAM-008 was satisfied before any review happened. Every assertion
-      # in here is a negative case, and the suite is mutation-verified: removing the
-      # path confinement, the existence check, the section-content test, the
-      # none-rejection or the length floor each fails at least one.
+      # The solo-mode self-review check (#44). It passed on a markdown heading — the
+      # one the PR template tells authors to write — so the compensating control for
+      # POAM-008 was satisfied before any review happened.
+      #
+      # Four bypasses have now been found and pinned here, the last two by independent
+      # review rather than by the author. Almost every assertion is a negative case,
+      # and one runs against a real filesystem because the injected-fs tests were
+      # structurally unable to see the fourth.
+      #
+      # `node` comes from the runner image and is not pinned, unlike Python above.
+      # Noted rather than fixed: nothing here depends on a node version.
       - name: Self-review check tests (POAM-008, #44)
         run: node test/selfreview-check.test.js
 

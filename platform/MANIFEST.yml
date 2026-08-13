@@ -20,6 +20,15 @@ platform_owned:
   - process/gates/
   - platform/
   - scripts/
+  # Tests for platform-owned code. `test/` as a whole is project-owned below —
+  # a fork's own tests are its own — but these two exercise platform modules and
+  # are invoked by merge-required workflows. Without them a fork receives
+  # scripts/selfreview-check.js and a pr-governance.yml that runs a test file it
+  # does not have: a permanently red required check, whose obvious repair is to
+  # delete the step and leave the control untested downstream. Which is the
+  # outcome #44 exists to prevent, shipped to every consumer at once.
+  - test/selfreview-check.test.js
+  - test/dashboard.test.py
   - docs/00-overview.md
   - docs/01-roles.md
   - docs/02-intake-and-discovery.md

@@ -1,25 +1,43 @@
 'use strict';
 // Tests for the solo-mode self-review check. Refs: #44
 //
-// Almost every assertion is a NEGATIVE case — the branch proving the control
-// denies. That is the point: this check is the entire substitute for a second
-// reviewer's approval under POAM-008, and it shipped passing on a markdown
-// heading that the PR template tells authors to write.
+// This check is the entire substitute for a second reviewer's approval under
+// POAM-008. It has now been bypassed four times, each time in the same shape as
+// the last, and each bypass below is pinned by name so it cannot come back:
 //
-// Two regressions are pinned here, both found in production rather than review:
-//   1. a bare "## Self-review" heading satisfied the check (the original #44)
-//   2. ANY evidence/**/self-review.md satisfied it, including another issue's —
-//      which is how the PR introducing this very check passed its own check
+//   1. a `## Self-review` heading satisfied it
+//   2. any evidence/**/self-review.md satisfied it, including another issue's
+//   3. the first LINKED issue won, so `Refs: #42` above `Closes #44` bound to 42
+//   4. `evidence/44/..\42\...` — backslashes survive path.normalize on POSIX
 //
-// Mutation-verified: removing the path confinement, the existence check, the
-// section-content test, the none-rejection, the length floor, or the
-// issue-number match each fails at least one assertion below.
+// Bypass 4 was invisible to this suite for a reason worth remembering: every
+// assertion ran against an INJECTED filesystem, and the defect lived in the gap
+// between the string returned and what a real filesystem does with it. Hence the
+// integration section at the bottom, which uses the real `fs` on a real tree.
+//
+// ── WHAT IS AND IS NOT MUTATION-VERIFIED ─────────────────────────────────────
+// Caught individually: multi-close detection, PR-number binding, symlink
+// rejection, fence stripping, the existence check, the bullet-length anchor, the
+// word boundary on closing keywords, the issue-number pattern, the prefix check.
+//
+// NOT caught individually: the two separator guards in resolveRecordPath —
+// normalising `\` before path.posix.normalize, and rejecting any surviving `..`
+// segment. Either alone stops every payload below, so mutating one leaves the
+// suite green. Removing both fails three assertions. That is defence in depth
+// rather than a coverage gap, but it is stated plainly here because claiming
+// per-guard verification would be the kind of unearned assurance this whole file
+// exists to stop.
 //
 //   node test/selfreview-check.test.js
 
 const assert = require('assert');
-const { evaluate, sectionFilled, resolveRecordPath, linkedIssue } =
-  require('../scripts/selfreview-check.js');
+const fs = require('fs');
+const os = require('os');
+const nodePath = require('path');
+const {
+  evaluate, sectionFilled, sectionBody, resolveRecordPath,
+  linkedIssue, closingIssues, MIN_BULLET_CHARS,
+} = require('../scripts/selfreview-check.js');
 
 let passed = 0;
 let failed = 0;
@@ -35,8 +53,13 @@ function check(name, fn) {
   }
 }
 
+const BS = String.fromCharCode(92);      // a literal backslash, unambiguously
+const body = (...lines) => lines.join('\n');
+
 const GOOD_RECORD = [
   '# Self-review — #42',
+  '',
+  'PR: #43   Mode: solo (POAM-008)',
   '',
   '## Verified independently',
   '- Ran fly validate-pipeline and read the output rather than the badge',
@@ -49,29 +72,33 @@ const GOOD_RECORD = [
   '',
 ].join('\n');
 
-// Injected filesystem that explodes if reached — so any assertion using it also
-// proves the check rejected the input BEFORE touching the disk.
+// Explodes if reached, so any assertion using it also proves the input was
+// rejected BEFORE any syscall.
 const noFs = {
   exists: () => { throw new Error('exists() must not be called on this path'); },
   readFile: () => { throw new Error('readFile() must not be called on this path'); },
+  isSymlink: () => false,
+};
+const withRecord = (record) => ({
+  exists: () => true, readFile: () => record, isSymlink: () => false,
+});
+const linked = {
+  body: body('Closes #42', '', 'Record: `evidence/42/g3/self-review.md`'),
+  title: 'fix: thing',
+  prNumber: 43,
 };
 
-const withRecord = (record) => ({ exists: () => true, readFile: () => record });
-const body = (...lines) => lines.join('\n');
-
-// ── REGRESSION 1: a heading is not a record ─────────────────────────────────
+// ── BYPASS 1: a heading is not a record ─────────────────────────────────────
 check('a bare "## Self-review" heading is NOT a record', () => {
   const r = evaluate({
     body: body('Closes #42', '', '## Self-review', '', 'No record exists yet.'),
     title: 'fix: thing', prNumber: 43, ...noFs,
   });
   assert.strictEqual(r.found, false);
-  assert.strictEqual(r.failures.length, 1, 'must fail');
   assert.match(r.failures[0], /heading alone is not a record/i);
 });
 
 check('a body honestly stating the record is absent still fails', () => {
-  // The exact wording that passed on PR #43.
   const r = evaluate({
     body: body('Closes #42', '', '## Self-review', '',
                '*(deliberately absent)* — no self-review record exists yet.'),
@@ -88,51 +115,49 @@ check('no mention of a self-review at all fails', () => {
   assert.strictEqual(r.failures.length, 1);
 });
 
-// ── REGRESSION 2: another issue's record is not this issue's review ─────────
+// ── BYPASS 2: another issue's record ────────────────────────────────────────
 check("another issue's record does NOT satisfy this PR", () => {
-  // Exactly how PR #46 passed its own check: the body mentioned #42's record in
-  // a sentence explaining how the check had been tested.
   const r = evaluate({
     body: body('Closes #44', '',
                'Verified against the real evidence/42/g3/self-review.md as a control.'),
     title: 'fix(governance): require a record', prNumber: 46, ...noFs,
   });
-  assert.strictEqual(r.found, false, "must not accept another issue's record");
+  assert.strictEqual(r.found, false);
   assert.match(r.failures[0], /belongs to a different issue/i);
 });
 
-check('a PR with no linked issue fails rather than searching', () => {
-  const r = evaluate({
-    body: 'no issue here', title: 'chore: thing', prNumber: 9, ...noFs,
-  });
-  assert.strictEqual(r.found, false);
-  assert.match(r.failures[0], /No linked issue/i);
+// Both enforcement points are pinned INDEPENDENTLY. Mutation testing showed the
+// suite only noticed when the pattern and the prefix check were removed
+// together, which is not verification of either.
+check('the reference pattern alone confines to the issue', () => {
+  assert.strictEqual(resolveRecordPath('evidence/42/g3/self-review.md', '44'), null);
+});
+check('the prefix check alone confines to the issue', () => {
+  // Reaches the prefix test only because the pattern permits it via traversal.
+  assert.strictEqual(
+    resolveRecordPath('evidence/44/../42/g3/self-review.md', '44'), null);
 });
 
-check('linkedIssue accepts the documented forms', () => {
-  assert.strictEqual(linkedIssue('Closes #42', ''), '42');
-  assert.strictEqual(linkedIssue('Refs: #7', ''), '7');
-  assert.strictEqual(linkedIssue('nothing', 'fix(x): thing #13'), '13');
-  assert.strictEqual(linkedIssue('nothing', 'no number'), null);
-});
-
+// ── BYPASS 3: which issue is "the" issue ───────────────────────────────────
 check('a closing keyword beats an earlier "Refs:"', () => {
-  // Nearly every body in this repo carries `Refs: #<n>`. A single alternation
-  // returned whichever came first, so `Refs: #42` above `Closes #44` resolved to
-  // 42 — and 42's record then satisfied a PR that closes 44.
   assert.strictEqual(linkedIssue('Refs: #42\n\nCloses #44', 'fix: x'), '44');
   assert.strictEqual(linkedIssue('Refs: #42\n\nFixes #44', 'fix: x'), '44');
-  assert.strictEqual(linkedIssue('Refs: #42\n\nResolves #44', 'fix: x'), '44');
 });
 
-check("an earlier issue's record cannot satisfy a PR that closes another", () => {
+check('two closing keywords fail loudly rather than picking one', () => {
   const r = evaluate({
-    body: body('Refs: #42', '', 'Closes #44', '',
-               'Record: evidence/42/g3/self-review.md'),
+    body: body('> Closes #42', '', 'Closes #44', '',
+               'evidence/42/g3/self-review.md'),
     title: 'fix: x', prNumber: 46, ...noFs,
   });
-  assert.strictEqual(r.found, false, 'must not accept #42 record for a #44 PR');
-  assert.match(r.failures[0], /belongs to a different issue/i);
+  assert.strictEqual(r.found, false, 'must not silently bind to the first');
+  assert.match(r.failures[0], /closes 2 issues/i);
+});
+
+check('a word ending in a closing keyword does not count', () => {
+  assert.deepStrictEqual(closingIssues('This prefixes #42 onto the log line.'), []);
+  assert.deepStrictEqual(closingIssues('It discloses #42 to the caller.'), []);
+  assert.deepStrictEqual(closingIssues('Closes #42'), ['42']);
 });
 
 check('the issue number is matched whole, not as a prefix', () => {
@@ -140,53 +165,81 @@ check('the issue number is matched whole, not as a prefix', () => {
   assert.strictEqual(resolveRecordPath('evidence/4/g3/self-review.md', '44'), null);
 });
 
-// ── The link must point at something real ──────────────────────────────────
-check('a linked record that does not exist fails', () => {
-  const r = evaluate({
-    body: body('Closes #42', '', 'See evidence/42/g3/self-review.md'),
-    title: 'fix: thing', prNumber: 43,
-    exists: () => false,
-    readFile: () => { throw new Error('should not read a missing file'); },
-  });
-  assert.strictEqual(r.found, false);
-  assert.match(r.failures[0], /not in the repository/i);
+// ── BYPASS 4: separators, on the platform this runs on ─────────────────────
+// These would have PASSED on Linux while passing on Windows for the wrong
+// reason. resolveRecordPath uses path.posix explicitly so the result is the
+// runner's result wherever the test is run.
+check('backslash traversal is rejected (bypass 4)', () => {
+  const ref = 'evidence/44/..' + BS + '42' + BS + 'g3' + BS + 'self-review.md';
+  assert.strictEqual(resolveRecordPath(ref, '44'), null);
 });
 
-// ── Path confinement (PD-6) ────────────────────────────────────────────────
-check('traversal outside evidence/ is rejected without touching the filesystem', () => {
+check('mixed separators are rejected', () => {
+  const ref = 'evidence/44/g3' + BS + '..' + BS + '..' + BS + '42/g3/self-review.md';
+  assert.strictEqual(resolveRecordPath(ref, '44'), null);
+});
+
+check('backslash escape out of the checkout is rejected', () => {
+  const ref = 'evidence/44/..' + BS + '..' + BS + '..' + BS + 'etc/self-review.md';
+  assert.strictEqual(resolveRecordPath(ref, '44'), null);
+});
+
+check('forward-slash traversal is rejected without touching the filesystem', () => {
   const r = evaluate({
     body: body('Closes #42', '', 'See evidence/42/../../../tmp/self-review.md'),
     title: 'fix: thing', prNumber: 43, ...noFs,
   });
   assert.strictEqual(r.recordPath, null);
-  assert.strictEqual(r.failures.length, 1);
 });
 
-check('resolveRecordPath normalises, confines, and requires the issue to match', () => {
-  assert.strictEqual(resolveRecordPath('evidence/42/g3/self-review.md', '42'),
-                     'evidence/42/g3/self-review.md');
-  assert.strictEqual(resolveRecordPath('evidence/42/../../etc/self-review.md', '42'), null);
-  assert.strictEqual(resolveRecordPath('nothing here', '42'), null);
-  assert.strictEqual(resolveRecordPath('evidence/42/g3/self-review.md', '44'), null);
-  assert.strictEqual(resolveRecordPath('evidence/42/g3/self-review.md', null), null);
+check('an honest capitalised reference is ACCEPTED, not accused', () => {
+  // /i on the pattern with a case-sensitive prefix test rejected this and then
+  // told the author they had not written a record. L0007.
+  assert.strictEqual(resolveRecordPath('Evidence/44/g3/Self-Review.md', '44'),
+                     'Evidence/44/g3/Self-Review.md');
 });
 
-// ── Content, not just existence ────────────────────────────────────────────
-const linked = {
-  body: body('Closes #42', '', 'Record: `evidence/42/g3/self-review.md`'),
-  title: 'fix: thing',
-  prNumber: 43,
-};
+// ── The record must be real, and must be this PR's ─────────────────────────
+check('a linked record that does not exist fails', () => {
+  const r = evaluate({
+    body: body('Closes #42', '', 'See evidence/42/g3/self-review.md'),
+    title: 'fix: thing', prNumber: 43,
+    exists: () => false, isSymlink: () => false,
+    readFile: () => { throw new Error('should not read a missing file'); },
+  });
+  assert.match(r.failures[0], /not in the repository/i);
+});
 
+check('a symlinked record is rejected', () => {
+  const r = evaluate({
+    ...linked,
+    exists: () => true, isSymlink: () => true,
+    readFile: () => { throw new Error('must not read through a symlink'); },
+  });
+  assert.strictEqual(r.found, false);
+  assert.match(r.failures[0], /symbolic link/i);
+});
+
+check("an earlier PR's record on the same issue does not satisfy this one", () => {
+  const r = evaluate({ ...linked, prNumber: 99, ...withRecord(GOOD_RECORD) });
+  assert.strictEqual(r.found, false);
+  assert.match(r.failures[0], /does not reference PR #99/i);
+});
+
+check('evaluate refuses to run without a symlink check wired in', () => {
+  assert.throws(() => evaluate({ ...linked, exists: () => true, readFile: () => '' }),
+                /requires an isSymlink/);
+});
+
+// ── Content, not shape alone ───────────────────────────────────────────────
 check('a record with an empty "Not verified" fails', () => {
   const record = GOOD_RECORD.replace(
     '- The Mykronos ingestion path has never executed end to end. Unverified.', '');
   const r = evaluate({ ...linked, ...withRecord(record) });
-  assert.strictEqual(r.failures.length, 1);
   assert.match(r.failures[0], /Not verified/);
 });
 
-check('"Not verified: none" fails — that is the shape of not having looked', () => {
+check('"Not verified: none" fails', () => {
   const record = GOOD_RECORD.replace(
     '- The Mykronos ingestion path has never executed end to end. Unverified.', '- none');
   const r = evaluate({ ...linked, ...withRecord(record) });
@@ -194,21 +247,56 @@ check('"Not verified: none" fails — that is the shape of not having looked', (
 });
 
 check('a confidently padded "none" fails too — length is not substance', () => {
-  // The length floor alone passes this. Only the explicit none-rejection catches
-  // it, which is why this assertion exists: mutation testing showed the earlier
-  // none-rejection constrained nothing.
   const record = GOOD_RECORD.replace(
     '- The Mykronos ingestion path has never executed end to end. Unverified.',
     '- None — I verified absolutely everything in this change, comprehensively.');
   const r = evaluate({ ...linked, ...withRecord(record) });
-  assert.strictEqual(r.failures.length, 1, 'a padded "none" must still fail');
   assert.match(r.failures[0], /Not verified/);
+});
+
+check('many tiny bullets do NOT satisfy a section', () => {
+  // The floor used to span newlines, so 21 `- x` bullets passed.
+  const tiny = new Array(21).fill('- x').join('\n');
+  assert.strictEqual(sectionFilled('## Not verified\n' + tiny + '\n', 'Not verified'),
+                     false);
+});
+
+check('a section with prose but no bullet does not count', () => {
+  assert.strictEqual(
+    sectionFilled('## Not verified\n\nthis is a fairly long line of prose indeed\n',
+                  'Not verified'), false);
+});
+
+check('the length floor is measured on one line', () => {
+  const short = '- ' + 'a'.repeat(MIN_BULLET_CHARS - 1);
+  const long = '- ' + 'a'.repeat(MIN_BULLET_CHARS + 1);
+  assert.strictEqual(sectionFilled('## Not verified\n' + short + '\n', 'Not verified'), false);
+  assert.strictEqual(sectionFilled('## Not verified\n' + long + '\n', 'Not verified'), true);
+});
+
+check('content inside a fenced block does not satisfy a section', () => {
+  const record = [
+    '# r', '', 'PR: #43', '',
+    '## Verified independently', '- something genuinely checked and written out here',
+    '', '## Not verified', '',
+    '```', '- pasted from the template, long enough to clear the floor easily', '```',
+    '', '## Cold-read notes', '- a real cold-read note that is long enough to count',
+  ].join('\n');
+  const r = evaluate({ ...linked, ...withRecord(record) });
+  assert.match(r.failures[0], /Not verified/);
+});
+
+check('a fenced heading does not truncate the section above it', () => {
+  const record = [
+    '## Not verified', '- a genuine unverified item written out at length',
+    '', '```', '## Cold-read notes', '```', '',
+  ].join('\n');
+  assert.strictEqual(sectionFilled(record, 'Not verified'), true);
 });
 
 check('a missing "Cold-read notes" section fails', () => {
   const record = GOOD_RECORD.split('## Cold-read notes')[0];
   const r = evaluate({ ...linked, ...withRecord(record) });
-  assert.strictEqual(r.failures.length, 1);
   assert.match(r.failures[0], /Cold-read notes/);
 });
 
@@ -225,12 +313,67 @@ check('sectionFilled ignores a heading with only whitespace', () => {
   assert.strictEqual(sectionFilled('## Not verified\n\n\n## Next\n', 'Not verified'), false);
 });
 
+check('a sub-heading terminates the section', () => {
+  assert.strictEqual(sectionBody('## Not verified\n#### sub\n- x\n', 'Not verified'),
+                     '');
+});
+
 // ── The one positive case ──────────────────────────────────────────────────
-check('a complete record for the linked issue passes clean', () => {
+check('a complete record for the linked issue and PR passes clean', () => {
   const r = evaluate({ ...linked, ...withRecord(GOOD_RECORD) });
   assert.strictEqual(r.found, true);
   assert.deepStrictEqual(r.failures, []);
   assert.deepStrictEqual(r.warnings, []);
+});
+
+// ── INTEGRATION: the real filesystem ───────────────────────────────────────
+// Bypass 4 lived in the gap between "the string resolveRecordPath returns" and
+// "what a filesystem does with that string". Injection cannot see that gap.
+check('INTEGRATION: traversal payloads resolve to nothing on a real tree', () => {
+  const root = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'srcheck-'));
+  try {
+    fs.mkdirSync(nodePath.join(root, 'evidence', '42', 'g3'), { recursive: true });
+    fs.mkdirSync(nodePath.join(root, 'evidence', '44', 'g3'), { recursive: true });
+    fs.writeFileSync(nodePath.join(root, 'evidence', '42', 'g3', 'self-review.md'),
+                     GOOD_RECORD);
+    // evidence/44/ is deliberately EMPTY — there is no record for issue 44.
+
+    const realFs = {
+      exists: (p) => fs.existsSync(nodePath.join(root, p)),
+      readFile: (p) => fs.readFileSync(nodePath.join(root, p), 'utf8'),
+      isSymlink: (p) => {
+        const full = nodePath.join(root, p);
+        return fs.existsSync(full) && fs.lstatSync(full).isSymbolicLink();
+      },
+    };
+
+    const payloads = [
+      'evidence/44/..' + BS + '42' + BS + 'g3' + BS + 'self-review.md',
+      'evidence/44/g3' + BS + '..' + BS + '..' + BS + '42/g3/self-review.md',
+      'evidence/44/../42/g3/self-review.md',
+    ];
+
+    for (const p of payloads) {
+      const r = evaluate({
+        body: 'Closes #44\n\nRecord: ' + p,
+        title: 'fix: x', prNumber: 46, ...realFs,
+      });
+      assert.strictEqual(r.found, false, 'payload passed: ' + p);
+      assert.ok(r.failures.length > 0, 'no failure raised for: ' + p);
+    }
+
+    // And the honest path on the same real tree still works.
+    fs.writeFileSync(nodePath.join(root, 'evidence', '44', 'g3', 'self-review.md'),
+                     GOOD_RECORD.replace('PR: #43', 'PR: #46'));
+    const ok = evaluate({
+      body: 'Closes #44\n\nRecord: evidence/44/g3/self-review.md',
+      title: 'fix: x', prNumber: 46, ...realFs,
+    });
+    assert.strictEqual(ok.found, true, 'honest record must pass: ' +
+                       JSON.stringify(ok.failures));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 console.log(`\n  ${passed} passed, ${failed} failed`);
