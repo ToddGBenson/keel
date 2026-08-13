@@ -149,10 +149,18 @@ for run in doc.get("runs", []):
     }
     for res in run.get("results", []):
         rule = rules.get(res.get("ruleId"), {})
+        props = rule.get("properties", {})
+        # Four fallbacks, in decreasing specificity. The first cut stopped after
+        # two and reported "unknown: 8" on a real run: security-severity is only
+        # set on security queries, and `level` is omitted from a result whenever
+        # it matches the rule's default — which is most of them. A severity
+        # breakdown that says "unknown" for everything is not a summary.
         sev = (
-            rule.get("properties", {}).get("security-severity")
+            props.get("security-severity")
             or res.get("level")
-            or "unknown"
+            or rule.get("defaultConfiguration", {}).get("level")
+            or props.get("problem.severity")
+            or "unspecified"
         )
         levels[str(sev)] += 1
 
