@@ -14,6 +14,24 @@
 
 name: Release
 
+# ── SUPERSEDED 2026-08-13 — ported to Concourse. Refs: #42 ────────────────────
+#
+# Now the `release-preflight`, `deploy-staging` and `authorize-production` jobs
+# in ci/pipeline.yml. This file was already workflow_dispatch-only, so there is
+# no trigger to strip — but do not run it expecting it to be the live path.
+#
+# ⚠️  READ THIS BEFORE DELETING THIS FILE ⚠️
+#
+# The G5 gate described below — a `production` environment with required
+# reviewers, where the job physically cannot start until a named human approves
+# and that record IS the CM-3 evidence — has NO Concourse equivalent. The
+# replacement is a manually triggered job: no approval workflow, no
+# second-identity requirement, and anyone with pipeline access can trigger it.
+#
+# That is a genuine weakening of AC-5 and CM-3, tracked as POAM-010. This file is
+# the strongest form of the control the repository has ever had, and it is kept
+# on disk deliberately: if the POA&M entry is ever resolved by moving release
+# authorization back to GitHub, this is what it moves back to.
 on:
   workflow_dispatch:
     inputs:

@@ -1,0 +1,29 @@
+# Is the SBOM actually evidence? Refs: #42
+#
+# An SBOM with nothing in it is not evidence, and archiving one is worse than
+# recording none: the dashboard would show an SBOM present for a file that
+# describes no software.
+#
+# Usually an empty result means the repository pins nothing. Syft reads resolved
+# dependency sets — lockfiles, requirements.txt, installed packages — and a
+# project declaring ranges in pyproject.toml with no lockfile has no resolved set
+# to record. That is a fact about the repository, not a tool failure, and the
+# right response is to say so rather than emit a confident empty document.
+platform: linux
+
+image_resource:
+  type: registry-image
+  source:
+    repository: python
+    tag: "3.13"
+
+inputs:
+  - name: repo
+  - name: sbom
+
+outputs:
+  - name: sbom
+
+run:
+  path: bash
+  args: [repo/ci/scripts/sbom-check.sh]

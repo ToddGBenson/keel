@@ -1,0 +1,90 @@
+# Non-secret pipeline vars. Refs: #42
+#
+#   cp ci/vars.example.yml ci/vars.yml     # ci/vars.yml is gitignored
+#   fly -t <target> set-pipeline -p keel -c ci/pipeline.yml -l ci/vars.yml
+#
+# SECRETS DO NOT BELONG IN THIS FILE OR IN ci/vars.yml. Every ((var)) named in
+# the "supplied by the credential manager" list at the bottom is looked up at
+# build time from Vault / CredHub / Kubernetes secrets. Passing them with -l puts
+# them in the pipeline config, where `fly get-pipeline` will happily print them
+# back out to anyone on the team.
+#
+# ── VALUES MARKED CHANGEME ────────────────────────────────────────────────────
+# These are left unset deliberately. Every one is a version or checksum for a
+# tool that performs or verifies a security check, and a wrong pin is worse than
+# a missing one — the job would run, pass, and mean nothing. Resolve each against
+# the upstream release page and record what you pinned and why.
+#
+# To get a checksum for a released binary:
+#   curl -sSfL <url> | sha256sum
+
+# ── Repository ────────────────────────────────────────────────────────────────
+git_uri: https://github.com/ToddGBenson/keel.git
+github_owner: ToddGBenson
+github_repo: keel
+github_user: x-access-token          # with a PAT as the password
+
+# ── Concourse ─────────────────────────────────────────────────────────────────
+# Used in evidence records so a build URL in an audit trail actually resolves.
+concourse_external_url: CHANGEME      # e.g. https://concourse.example.com
+
+# ── Mykronos ──────────────────────────────────────────────────────────────────
+mykronos_ingestion_url: https://mykronos.toddbenson.net
+
+# The `mykronos` package ref. Pinned to the same commit the Actions workflows
+# used, so the uploader, the adapters and the FindingSubmission schema are
+# byte-identical to what was ingesting before the port. Never a branch.
+mykronos_ref: 8b329fc5c1f739eab8ad40b8a7628da7cd1ee935
+
+# ── CodeQL ────────────────────────────────────────────────────────────────────
+# The bundle is what actually performs the SAST analysis. Verify it.
+#   Releases: https://github.com/github/codeql-action/releases
+#   Asset:    codeql-bundle-linux64.tar.gz
+codeql_bundle_version: CHANGEME       # e.g. v2.23.0
+codeql_bundle_sha256: CHANGEME
+
+# ── Grype (SCA) ───────────────────────────────────────────────────────────────
+#   Releases: https://github.com/anchore/grype/releases
+#   Asset:    grype_<version>_linux_amd64.tar.gz
+#   The release also ships a checksums.txt — use it rather than hashing locally.
+grype_version: CHANGEME               # without the leading v, e.g. 0.100.0
+grype_sha256: CHANGEME
+
+# ── Checkov (IaC) ─────────────────────────────────────────────────────────────
+#   Releases: https://pypi.org/project/checkov/#history
+#   Installed from PyPI, so pip verifies the wheel hash against the index.
+checkov_version: CHANGEME             # e.g. 3.2.400
+
+# ── Trivy (containers) ────────────────────────────────────────────────────────
+# Only needed once the container-scan lane is in service. Until then the job
+# reports "not applicable" and exits without touching these.
+trivy_version: CHANGEME
+trivy_sha256: CHANGEME
+
+# ── Cosign (signing) ──────────────────────────────────────────────────────────
+#   Releases: https://github.com/sigstore/cosign/releases
+#   Asset:    cosign-linux-amd64
+cosign_version: CHANGEME              # without the leading v, e.g. 2.6.1
+cosign_sha256: CHANGEME
+
+# ── Deploy targets ────────────────────────────────────────────────────────────
+registry: CHANGEME                    # e.g. ghcr.io/toddgbenson
+staging_url: CHANGEME
+production_url: CHANGEME
+
+# ══════════════════════════════════════════════════════════════════════════════
+# SUPPLIED BY THE CREDENTIAL MANAGER — never put these in a -l file
+# ══════════════════════════════════════════════════════════════════════════════
+#
+#   ((github_token))              repo read; PR governance stays on Actions, so
+#                                 this needs no write scope
+#   ((webhook_token))             shared secret in the GitHub webhook URL
+#   ((mykronos_ingestion_token))  scoped to this repository, with the sast,
+#                                 secrets and atlas capabilities granted
+#   ((anthropic_api_key))         eval harness only
+#   ((registry_user))
+#   ((registry_password))
+#
+# With Vault at the default paths, Concourse resolves ((foo)) from
+#   /concourse/<team>/<pipeline>/foo   then   /concourse/<team>/foo
+# so team-wide credentials can live one level up. See ci/README.md.

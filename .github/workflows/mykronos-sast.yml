@@ -7,13 +7,19 @@
 
 name: Mykronos sast
 
+# ── DISABLED 2026-08-13 — ported to Concourse. Refs: #42 ──────────────────────
+# Now the `mykronos-sast` job in ci/pipeline.yml. That job installs the same
+# `mykronos` package at the same pinned ref and calls the same
+# `python -m mykronos.upload` CLI this file's upload step wraps, so ingestion
+# behaviour is unchanged. CodeQL runs from the CLI bundle rather than
+# github/codeql-action, which does not exist outside Actions.
+#
+# ⚠️  THIS EDIT IS AGAINST THE INSTRUCTION AT THE TOP OF THIS FILE ⚠️
+# A template resync WILL overwrite this and restore the triggers, at which point
+# both this workflow and the Concourse job will scan and ingest. Asked upstream
+# for a Concourse target in ToddGBenson/mykronos#13. Until that lands, treat a
+# resync of this file as a merge conflict to resolve, not a diff to accept.
 on:
-
-  pull_request:
-  push:
-    branches: ["main"]
-  schedule:
-    - cron: "17 3 * * 1"
   workflow_dispatch:
 
 

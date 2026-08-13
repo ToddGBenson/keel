@@ -1,0 +1,32 @@
+# AI assurance — evals, guardrails, or agent regression. Refs: #42
+#
+# A prompt change is a code change. Teams that treat prompts as configuration
+# ship untested behavior changes to production.
+#
+# The Actions version scoped this to prompt/eval/guardrail path changes. Concourse
+# git resources do not filter by path in a way that composes with the rest of this
+# pipeline, so these run on every main commit. That is more often, not less — no
+# assurance is lost, some minutes are.
+platform: linux
+
+image_resource:
+  type: registry-image
+  source:
+    repository: python
+    tag: "3.13"
+
+inputs:
+  - name: repo
+
+outputs:
+  - name: eval-evidence
+
+params:
+  STAGE: ""
+  # Secrets never enter an agent context (AIC-5); the pipeline holds them, scoped
+  # to the one job that needs them.
+  ANTHROPIC_API_KEY: ""
+
+run:
+  path: bash
+  args: [repo/ci/scripts/ai.sh]

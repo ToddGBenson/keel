@@ -14,14 +14,20 @@
 
 name: Security
 
+# ── DISABLED 2026-08-13 — ported to Concourse. Refs: #42 ──────────────────────
+# Now the `sast`, `secrets`, `sca`, `iac`, `container-scan` and
+# `suppression-audit` jobs in ci/pipeline.yml. The daily rescan is the
+# `daily-0600` time resource there — a clean scan at build time still says
+# nothing about a CVE published yesterday, and that control moved with the rest.
+#
+# ONE THING GOT WORSE: CodeQL SARIF no longer reaches the GitHub Security tab,
+# because the code scanning API is Actions-only. Mykronos is the system of record
+# for findings and still receives it. Tracked as POAM-012.
+#
+# Triggers reduced to workflow_dispatch rather than deleted. See ci/README.md §5
+# before re-enabling.
 on:
-  pull_request:
-  push:
-    branches: [main]
-  schedule:
-    # Daily rescan. A clean scan at build time says nothing about a CVE published
-    # yesterday — this is the control that catches it. (RA-5, SI-2)
-    - cron: '17 6 * * *'
+  workflow_dispatch:
 
 permissions:
   contents: read

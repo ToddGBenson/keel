@@ -6,11 +6,19 @@
 
 name: Compliance & Continuous Monitoring
 
+# ── DISABLED 2026-08-13 — ported to Concourse. Refs: #42 ──────────────────────
+# Now the `compliance-daily`, `compliance-weekly`, `compliance-monthly` and
+# `metrics-snapshot` jobs in ci/pipeline.yml.
+#
+# CADENCE CHANGED: Concourse's bundled `time` resource has no day-of-month, so
+# the monthly bundle fires weekly and executes on the first Monday. A run that is
+# not due says so loudly rather than reporting a clean month it never looked at.
+# Tracked as POAM-013.
+#
+# The schedule triggers are gone; workflow_dispatch is kept, and the per-job
+# `if:` conditions below already accept it, so a manual run still works as a
+# fallback. See ci/README.md §5 before re-enabling the crons.
 on:
-  schedule:
-    - cron: '0 5 * * *'      # daily
-    - cron: '0 6 * * 1'      # weekly (Monday)
-    - cron: '0 7 1 * *'      # monthly (1st)
   workflow_dispatch:
 
 permissions:

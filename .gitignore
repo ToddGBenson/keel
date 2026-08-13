@@ -68,3 +68,10 @@ temp/
 
 # Generated dashboard snapshot (regenerate with: ./keel dash)
 dashboard.html
+
+# ── Concourse
+# Local pipeline vars. Committed as ci/vars.example.yml instead. Secrets belong
+# in the credential manager, never here — but this file names hosts, registries
+# and pinned versions that describe the deployment, and `fly get-pipeline` will
+# print back anything a -l file put into the pipeline config.
+ci/vars.yml

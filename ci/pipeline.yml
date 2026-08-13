@@ -1,0 +1,591 @@
+# keel — Concourse pipeline
+#
+# Ported from GitHub Actions. Refs: #42
+#
+# ── WHAT THIS FILE IS ─────────────────────────────────────────────────────────
+# The execution half of the lifecycle described in CLAUDE.md. Gates are still
+# human acts recorded in GitHub; this pipeline produces the EVIDENCE those gates
+# are approved against. It does not approve anything.
+#
+# ── WHAT IS DELIBERATELY NOT HERE ─────────────────────────────────────────────
+# `pr-governance.yml` stays on GitHub Actions and stays ENABLED. It reads the PR
+# body through the GitHub API and it is the required status check on `main`.
+# Concourse has no first-class pull-request trigger; every option for adding one
+# means depending on an archived third-party resource type, which is a
+# supply-chain regression this repository's own rules (SR-3, SR-4) would flag.
+# PR-time governance is better served where the data lives.
+#
+# ── NO THIRD-PARTY RESOURCE TYPES ─────────────────────────────────────────────
+# Every resource below is one Concourse ships with (`git`, `time`,
+# `registry-image`, `github-release`). That is deliberate: a pipeline that
+# enforces supply-chain controls should not itself pull unpinned community code
+# to start up.
+#
+# ── SETUP ─────────────────────────────────────────────────────────────────────
+#   fly -t <target> set-pipeline -p keel \
+#       -c ci/pipeline.yml \
+#       -l ci/vars.yml            # non-secret, safe to commit as vars.example.yml
+#   Secrets come from the credential manager as ((var)) lookups — never a -l file.
+#   See ci/README.md.
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Anchors
+# ══════════════════════════════════════════════════════════════════════════════
+
+# Every Mykronos lane fails fast when the ingestion API is unreachable. Better to
+# stop in ten seconds than scan for twenty minutes and find at upload time that
+# the results have nowhere to go — and silently skipping is not an option.
+mykronos_preflight: &mykronos_preflight
+  task: mykronos-preflight
+  file: repo/ci/tasks/mykronos-preflight.yml
+  params:
+    MYKRONOS_INGESTION_URL: ((mykronos_ingestion_url))
+    MYKRONOS_INGESTION_TOKEN: ((mykronos_ingestion_token))
+
+# Shared uploader. This is a port of the `upload-results` composite action, which
+# is itself a thin wrapper around `python -m mykronos.upload` — so the pipeline
+# calls the same CLI, from the same package, pinned at the same ref. The
+# normalization logic and the FindingSubmission schema keep exactly one
+# definition, which was the point of that action existing.
+mykronos_upload_params: &mykronos_upload_params
+  MYKRONOS_INGESTION_URL: ((mykronos_ingestion_url))
+  MYKRONOS_INGESTION_TOKEN: ((mykronos_ingestion_token))
+  MYKRONOS_REF: ((mykronos_ref))
+  REPO_SLUG: ((github_owner))/((github_repo))
+  SEVERITY_THRESHOLD: low
+  BLOCKING: "false"
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Resource types — none. See the header.
+# ══════════════════════════════════════════════════════════════════════════════
+
+resources:
+
+  - name: repo
+    type: git
+    icon: git
+    check_every: 1m
+    webhook_token: ((webhook_token))
+    source:
+      uri: ((git_uri))
+      branch: main
+      username: ((github_user))
+      password: ((github_token))
+      # Full history. Two independent reasons: the Mykronos adapters read
+      # surrounding source to build the snippet fingerprint that gives a finding
+      # stable identity, and a secret deleted in a later commit is still leaked.
+      fetch_tags: true
+
+  - name: github-release
+    type: github-release
+    icon: tag
+    source:
+      owner: ((github_owner))
+      repository: ((github_repo))
+      access_token: ((github_token))
+      drafts: false
+      pre_release: false
+
+  # ── Schedules ───────────────────────────────────────────────────────────────
+  # Concourse's bundled `time` resource has no cron syntax and no day-of-month
+  # support. Windows below reproduce the original crons to the half hour, which
+  # is the resolution that actually matters for a nightly rescan. The monthly
+  # bundle is handled in ci/scripts/compliance.sh — see the note there.
+
+  - name: daily-0500
+    type: time
+    icon: clock-outline
+    source: { start: 5:00 AM, stop: 5:30 AM, location: UTC }
+
+  - name: daily-0600
+    type: time
+    icon: clock-outline
+    source: { start: 6:00 AM, stop: 6:30 AM, location: UTC }
+
+  - name: weekly-mon-0300
+    type: time
+    icon: clock-outline
+    source: { start: 3:00 AM, stop: 3:30 AM, days: [Monday], location: UTC }
+
+  - name: weekly-mon-0400
+    type: time
+    icon: clock-outline
+    source: { start: 4:00 AM, stop: 4:30 AM, days: [Monday], location: UTC }
+
+  - name: weekly-mon-0600
+    type: time
+    icon: clock-outline
+    source: { start: 6:00 AM, stop: 6:30 AM, days: [Monday], location: UTC }
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Groups — the UI is a navigation surface, not decoration. A pipeline nobody can
+# read is a pipeline nobody notices going red.
+# ══════════════════════════════════════════════════════════════════════════════
+
+groups:
+  - name: ci
+    jobs: [build, lint, test, full-suite]
+  - name: security
+    jobs: [sast, secrets, sca, iac, container-scan, suppression-audit]
+  - name: mykronos
+    jobs: [mykronos-sast, mykronos-secrets, mykronos-atlas]
+  - name: platform
+    jobs: [platform-integrity]
+  - name: ai
+    jobs: [ai-evals, ai-guardrails, agent-assurance]
+  - name: compliance
+    jobs: [compliance-daily, compliance-weekly, compliance-monthly, metrics-snapshot]
+  - name: supply-chain
+    jobs: [build-and-attest, verify-artifact]
+  - name: release
+    jobs: [release-preflight, deploy-staging, authorize-production]
+  - name: all
+    jobs: ["*"]
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Jobs
+# ══════════════════════════════════════════════════════════════════════════════
+
+jobs:
+
+  # ── CI ──────────────────────────────────────────────────────────────────────
+  # Target: feedback under 10 minutes. Slow pipelines get bypassed, and a
+  # bypassed control is worse than an honest absence of one because it still
+  # shows green on the assessment.
+
+  - name: build
+    public: true
+    plan:
+      - get: repo
+        trigger: true
+      - task: build
+        file: repo/ci/tasks/ci-stage.yml
+        params: { STAGE: build }
+
+  - name: lint
+    public: true
+    plan:
+      - get: repo
+        trigger: true
+      - task: lint
+        file: repo/ci/tasks/ci-stage.yml
+        params: { STAGE: lint }
+
+  - name: test
+    public: true
+    plan:
+      - get: repo
+        trigger: true
+      - task: test
+        file: repo/ci/tasks/ci-stage.yml
+        params:
+          STAGE: test
+          # A floor, not a target — coverage measures reach, not quality.
+          COVERAGE_THRESHOLD: "80"
+
+  # The deep, slow checks that would blow the 10-minute budget. `passed:` is the
+  # Concourse equivalent of the original's "only on push to main" condition —
+  # this resource only ever tracks main, so gating on the fast jobs is what makes
+  # this a post-merge suite rather than a parallel one.
+  - name: full-suite
+    public: true
+    plan:
+      - get: repo
+        trigger: true
+        passed: [build, lint, test]
+      - task: full-suite
+        file: repo/ci/tasks/ci-stage.yml
+        params: { STAGE: full-suite }
+
+  # ── Security ────────────────────────────────────────────────────────────────
+  # Gate on NEW findings, not TOTAL. Gating on the absolute count in any real
+  # codebase means the pipeline is red forever and everyone learns to ignore it —
+  # at which point it stops being a control and becomes decoration. The existing
+  # backlog is driven down on SLA through the POA&M.
+
+  - name: sast
+    public: true
+    plan:
+      - get: repo
+        trigger: true
+      - get: daily-0600
+        trigger: true
+      - task: codeql
+        file: repo/ci/tasks/codeql.yml
+        params:
+          # ADAPT: your languages. Note this is the keel-owned SAST lane and
+          # scans javascript-typescript; the Mykronos lane scans python. Both
+          # were present in the Actions setup and both are ported as they stood.
+          CODEQL_LANGUAGE: javascript-typescript
+          CODEQL_QUERIES: security-extended,security-and-quality
+          CODEQL_BUNDLE_VERSION: ((codeql_bundle_version))
+          CODEQL_BUNDLE_SHA256: ((codeql_bundle_sha256))
+          UPLOAD_TO_MYKRONOS: "false"
+
+  - name: secrets
+    public: true
+    plan:
+      - get: repo
+        trigger: true
+      - get: daily-0600
+        trigger: true
+      - task: gitleaks
+        file: repo/ci/tasks/gitleaks.yml
+      # Any hit fails. If one fires, the correct response is to ROTATE the
+      # credential, then remove it. A deleted commit is not a rotated credential.
+      - task: gate
+        file: repo/ci/tasks/gitleaks-gate.yml
+
+  - name: sca
+    public: true
+    plan:
+      - get: repo
+        trigger: true
+      - get: daily-0600
+        trigger: true
+      - task: grype
+        file: repo/ci/tasks/grype.yml
+        params:
+          GRYPE_VERSION: ((grype_version))
+          GRYPE_SHA256: ((grype_sha256))
+          SEVERITY_CUTOFF: high
+
+  - name: iac
+    public: true
+    plan:
+      - get: repo
+        trigger: true
+      - get: daily-0600
+        trigger: true
+      - task: checkov
+        file: repo/ci/tasks/checkov.yml
+        params:
+          CHECKOV_VERSION: ((checkov_version))
+
+  # ADAPT: enable when you ship containers. Left with no trigger rather than
+  # deleted — the original carried `if: false` for the same reason, and a job
+  # that is visibly not running beats one that silently does not exist.
+  - name: container-scan
+    public: true
+    plan:
+      - get: repo
+      - task: trivy
+        file: repo/ci/tasks/trivy.yml
+        params:
+          TRIVY_VERSION: ((trivy_version))
+          TRIVY_SHA256: ((trivy_sha256))
+
+  - name: suppression-audit
+    public: true
+    plan:
+      - get: repo
+        trigger: true
+      - task: suppression-audit
+        file: repo/ci/tasks/suppression-audit.yml
+
+  # ── Mykronos ────────────────────────────────────────────────────────────────
+  # Findings are recorded in Mykronos, which is the system of record. Each lane
+  # registers a ScanRun even when the scan itself broke, so "never ran" and "ran
+  # and broke" stay distinguishable in the lake.
+
+  - name: mykronos-sast
+    public: true
+    plan:
+      - get: repo
+        trigger: true
+      - get: weekly-mon-0300
+        trigger: true
+      - do:
+          - *mykronos_preflight
+          - task: codeql
+            file: repo/ci/tasks/codeql.yml
+            params:
+              CODEQL_LANGUAGE: python
+              CODEQL_QUERIES: security-extended
+              CODEQL_BUNDLE_VERSION: ((codeql_bundle_version))
+              CODEQL_BUNDLE_SHA256: ((codeql_bundle_sha256))
+              UPLOAD_TO_MYKRONOS: "true"
+        ensure:
+          task: upload
+          file: repo/ci/tasks/mykronos-upload.yml
+          params:
+            <<: *mykronos_upload_params
+            CAPABILITY: sast
+            TOOL: codeql
+
+  - name: mykronos-secrets
+    public: true
+    plan:
+      - get: repo
+        trigger: true
+      - get: weekly-mon-0400
+        trigger: true
+      - do:
+          - *mykronos_preflight
+          # Never fails the step itself: exit codes are the upload step's job,
+          # which applies this repo's configured threshold and blocking policy.
+          # A scanner deciding CI outcomes on its own bypasses that.
+          - task: gitleaks
+            file: repo/ci/tasks/gitleaks.yml
+        ensure:
+          task: upload
+          file: repo/ci/tasks/mykronos-upload.yml
+          params:
+            <<: *mykronos_upload_params
+            CAPABILITY: secrets
+            TOOL: gitleaks
+
+  - name: mykronos-atlas
+    public: true
+    plan:
+      - get: repo
+        trigger: true
+      - get: github-release
+        trigger: true
+      - get: weekly-mon-0400
+        trigger: true
+      - do:
+          - *mykronos_preflight
+          - task: osv-scan
+            file: repo/ci/tasks/osv-scan.yml
+          # CycloneDX, fixed. The Actions template had a format switch, but it
+          # rendered to a hardcoded "cyclonedx" for this repo and the other
+          # branch had never executed. Syft takes the format as an argument, so
+          # the switch has nowhere useful to live here — change the task if you
+          # need SPDX.
+          - task: sbom
+            file: repo/ci/tasks/sbom.yml
+          - task: sbom-check
+            file: repo/ci/tasks/sbom-check.yml
+        ensure:
+          do:
+            - task: upload
+              file: repo/ci/tasks/mykronos-upload.yml
+              params:
+                <<: *mykronos_upload_params
+                CAPABILITY: atlas
+                TOOL: osv-scanner
+            - task: atlas-evidence
+              file: repo/ci/tasks/atlas-evidence.yml
+              params:
+                MYKRONOS_INGESTION_URL: ((mykronos_ingestion_url))
+                MYKRONOS_INGESTION_TOKEN: ((mykronos_ingestion_token))
+                MYKRONOS_REF: ((mykronos_ref))
+                REPO_SLUG: ((github_owner))/((github_repo))
+                CONCOURSE_URL: ((concourse_external_url))
+
+  # ── Platform integrity ──────────────────────────────────────────────────────
+  # The non-GitHub half of pr-governance.yml. Those checks remain required on
+  # PRs in Actions; running them here as well means a direct push to main, or a
+  # change that lands without a PR, still gets them. Per the control-assessment
+  # skill: TEST beats EXAMINE.
+
+  - name: platform-integrity
+    public: true
+    plan:
+      - get: repo
+        trigger: true
+      - task: platform-integrity
+        file: repo/ci/tasks/platform-integrity.yml
+
+  # ── AI assurance ────────────────────────────────────────────────────────────
+  # A prompt change is a code change. The scheduled run is the control that
+  # catches the failure mode unique to hosted models: the provider updates the
+  # model, behavior changes, and there is no diff on your side to notice.
+
+  - name: ai-evals
+    public: true
+    plan:
+      - get: repo
+        trigger: true
+      - get: weekly-mon-0400
+        trigger: true
+      - task: evals
+        file: repo/ci/tasks/ai.yml
+        params:
+          STAGE: evals
+          ANTHROPIC_API_KEY: ((anthropic_api_key))
+
+  - name: ai-guardrails
+    public: true
+    plan:
+      - get: repo
+        trigger: true
+      - task: guardrails
+        file: repo/ci/tasks/ai.yml
+        params: { STAGE: guardrails }
+
+  - name: agent-assurance
+    public: true
+    plan:
+      - get: repo
+      - get: weekly-mon-0400
+        trigger: true
+      - task: agent-assurance
+        file: repo/ci/tasks/ai.yml
+        params: { STAGE: agent-assurance }
+
+  # ── Compliance & continuous monitoring ──────────────────────────────────────
+  # Scheduled rather than event-driven, because the risk changes while your code
+  # does not. A clean scan at build time says nothing about a CVE published
+  # yesterday.
+
+  - name: compliance-daily
+    public: true
+    plan:
+      - get: repo
+      - get: daily-0500
+        trigger: true
+      - task: compliance
+        file: repo/ci/tasks/compliance.yml
+        params:
+          PERIOD: daily
+          GITHUB_TOKEN: ((github_token))
+          REPO_SLUG: ((github_owner))/((github_repo))
+
+  - name: compliance-weekly
+    public: true
+    plan:
+      - get: repo
+      - get: weekly-mon-0600
+        trigger: true
+      - task: compliance
+        file: repo/ci/tasks/compliance.yml
+        params:
+          PERIOD: weekly
+          GITHUB_TOKEN: ((github_token))
+          REPO_SLUG: ((github_owner))/((github_repo))
+
+  # Fires weekly, executes on the first Monday of the month. See the cadence note
+  # in ci/scripts/compliance.sh — a run that is not due says so loudly rather
+  # than reporting a clean month it never looked at.
+  - name: compliance-monthly
+    public: true
+    plan:
+      - get: repo
+      - get: weekly-mon-0600
+        trigger: true
+      - task: compliance
+        file: repo/ci/tasks/compliance.yml
+        params:
+          PERIOD: monthly
+          GITHUB_TOKEN: ((github_token))
+          REPO_SLUG: ((github_owner))/((github_repo))
+
+  - name: metrics-snapshot
+    public: true
+    plan:
+      - get: repo
+      - get: weekly-mon-0600
+        trigger: true
+      - task: metrics
+        file: repo/ci/tasks/compliance.yml
+        params:
+          PERIOD: metrics
+          GITHUB_TOKEN: ((github_token))
+          REPO_SLUG: ((github_owner))/((github_repo))
+
+  # ── Supply chain ────────────────────────────────────────────────────────────
+  # Build once, inventory it, sign it, verify it. The artifact tested in staging
+  # is byte-identical to the one that reaches production. Never rebuild per
+  # environment — a rebuild invalidates every test that came before it.
+
+  - name: build-and-attest
+    public: true
+    plan:
+      - get: repo
+        trigger: true
+        passed: [full-suite]
+      - get: github-release
+        trigger: true
+      - task: build-and-attest
+        file: repo/ci/tasks/supply-chain.yml
+        params:
+          STAGE: build-and-attest
+          COSIGN_VERSION: ((cosign_version))
+          COSIGN_SHA256: ((cosign_sha256))
+          REGISTRY: ((registry))
+          REGISTRY_USER: ((registry_user))
+          REGISTRY_PASSWORD: ((registry_password))
+
+  # This job exists because a signature nobody verifies is decoration. The same
+  # verification MUST run in the deploy path and MUST refuse on mismatch —
+  # verifying only here proves the signature was made, not that it is checked
+  # before use.
+  - name: verify-artifact
+    public: true
+    plan:
+      - get: repo
+        passed: [build-and-attest]
+        trigger: true
+      - task: verify
+        file: repo/ci/tasks/supply-chain.yml
+        params:
+          STAGE: verify
+          COSIGN_VERSION: ((cosign_version))
+          COSIGN_SHA256: ((cosign_sha256))
+          REGISTRY: ((registry))
+
+  # ── Release (G5) ────────────────────────────────────────────────────────────
+  #
+  # ⚠️  CONTROL WEAKENING — READ THIS ⚠️
+  #
+  # On GitHub Actions the production gate was an `environment:` with required
+  # reviewers. The job physically could not start until a named human approved in
+  # the UI, and that approval — identity and timestamp — WAS the CM-3 change
+  # approval evidence.
+  #
+  # Concourse has no equivalent. `authorize-production` below is a manually
+  # triggered job: a human clicks it, and Concourse records the triggering user
+  # in build metadata. That is weaker. It is not an approval workflow, there is
+  # no second-identity requirement, and anyone with pipeline access can trigger
+  # it.
+  #
+  # This is recorded as POAM-010 in docs/compliance/poam.md — the same gap
+  # POAM-006 closed on 2026-08-08, reopened in a different form. It is real and
+  # is written down as one rather than described as equivalent.
+
+  - name: release-preflight
+    public: true
+    plan:
+      - get: repo
+      - task: preflight
+        file: repo/ci/tasks/release.yml
+        params:
+          STAGE: preflight
+          COSIGN_VERSION: ((cosign_version))
+          COSIGN_SHA256: ((cosign_sha256))
+          REGISTRY: ((registry))
+          GITHUB_TOKEN: ((github_token))
+          REPO_SLUG: ((github_owner))/((github_repo))
+
+  - name: deploy-staging
+    public: true
+    serial: true
+    plan:
+      - get: repo
+        passed: [release-preflight]
+      - task: deploy-staging
+        file: repo/ci/tasks/release.yml
+        params:
+          STAGE: staging
+          REGISTRY: ((registry))
+          STAGING_URL: ((staging_url))
+
+  - name: authorize-production
+    public: true
+    serial: true
+    # No `trigger: true` anywhere in this plan. The only way this job runs is a
+    # human pressing the + in the Concourse UI or `fly trigger-job`.
+    plan:
+      - get: repo
+        passed: [deploy-staging]
+      - task: authorize-and-deploy
+        file: repo/ci/tasks/release.yml
+        params:
+          STAGE: production
+          COSIGN_VERSION: ((cosign_version))
+          COSIGN_SHA256: ((cosign_sha256))
+          REGISTRY: ((registry))
+          PRODUCTION_URL: ((production_url))
+          CONCOURSE_URL: ((concourse_external_url))

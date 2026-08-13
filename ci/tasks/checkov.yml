@@ -1,0 +1,28 @@
+# IaC & configuration scanning. Refs: #42
+#
+# Checkov comes from PyPI, pinned. CHECKOV_VERSION has no default — an unpinned
+# scanner produces results you cannot reproduce, and the finding count is what
+# gates this job.
+#
+# Same skip-loudly rule as the SCA lane. This defect existed in BOTH jobs in the
+# Actions version; fixing one was not fixing the class (L0008).
+platform: linux
+
+image_resource:
+  type: registry-image
+  source:
+    repository: python
+    tag: "3.13"
+
+inputs:
+  - name: repo
+
+outputs:
+  - name: iac-results
+
+params:
+  CHECKOV_VERSION: ""
+
+run:
+  path: bash
+  args: [repo/ci/scripts/checkov.sh]

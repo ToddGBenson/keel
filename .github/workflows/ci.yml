@@ -11,10 +11,17 @@
 
 name: CI
 
+# ── DISABLED 2026-08-13 — ported to Concourse. Refs: #42 ──────────────────────
+# Now runs as the `build`, `lint`, `test` and `full-suite` jobs in
+# ci/pipeline.yml. The ADAPT stubs below moved to ci/scripts/ci-stage.sh, where
+# they can at least be executed locally.
+#
+# Triggers reduced to workflow_dispatch rather than deleted, so the port stays
+# reviewable and revertable. Restore the `on:` block from git history to
+# re-enable — and read ci/README.md §5 first, because the required status checks
+# on `main` were trimmed when this was switched off.
 on:
-  pull_request:
-  push:
-    branches: [main]
+  workflow_dispatch:
 
 # Least privilege by default; elevate per job, never globally. (AC-6)
 permissions:

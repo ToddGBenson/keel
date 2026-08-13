@@ -1,0 +1,32 @@
+# SCA — dependency vulnerabilities. Refs: #42
+#
+# Replaces anchore/scan-action. Grype is installed from its GitHub release with a
+# verified checksum; GRYPE_VERSION and GRYPE_SHA256 have no defaults, because a
+# vulnerability scanner fetched over the wire without verification is the wrong
+# thing to trust. Pin them in ci/vars.yml.
+#
+# Detects the input and skips LOUDLY when it is absent. A repo with no dependency
+# manifest is legitimate; the scan must say so rather than fail on plumbing or,
+# worse, report green as though it had checked something.
+platform: linux
+
+image_resource:
+  type: registry-image
+  source:
+    repository: python
+    tag: "3.13"
+
+inputs:
+  - name: repo
+
+outputs:
+  - name: sca-results
+
+params:
+  GRYPE_VERSION: ""
+  GRYPE_SHA256: ""
+  SEVERITY_CUTOFF: high
+
+run:
+  path: bash
+  args: [repo/ci/scripts/grype.sh]
