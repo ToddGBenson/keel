@@ -305,8 +305,17 @@ jobs:
           if [ -z "$HITS" ]; then echo "No suppressions found."; exit 0; fi
 
           echo "$HITS" > /tmp/all_suppressions.txt
-          # A valid suppression cites an issue (#123) AND an expiry (expires: YYYY-MM-DD).
-          BAD=$(grep -vE '#[0-9]+' /tmp/all_suppressions.txt | grep -viE 'expires?:? *[0-9]{4}-[0-9]{2}-[0-9]{2}' || true)
+          # A valid suppression cites an issue (#123) AND an expiry (expires: YYYY-MM-DD),
+          # so a violation is missing EITHER — the union, not the intersection.
+          #
+          # DEFECT FIXED 2026-08-13 (#42): these two greps were chained, which selects lines
+          # missing BOTH. `# nosec — see #142` with no expiry passed, and the job printed
+          # "All suppressions carry an issue reference and an expiry date". A control that
+          # prints a false assurance sentence is worse than one that prints nothing.
+          # Found by independent review of the Concourse port; fixed in both copies.
+          MISSING_ISSUE=$(grep -vE '#[0-9]+' /tmp/all_suppressions.txt || true)
+          MISSING_EXPIRY=$(grep -viE 'expires?:? *[0-9]{4}-[0-9]{2}-[0-9]{2}' /tmp/all_suppressions.txt || true)
+          BAD=$(printf '%s\n%s\n' "$MISSING_ISSUE" "$MISSING_EXPIRY" | grep -v '^$' | sort -u || true)
 
           {
             echo "### Suppression audit"
