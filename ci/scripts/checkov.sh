@@ -9,10 +9,13 @@ set -euo pipefail
 # is a legitimate state, and the scan must say "nothing to scan" rather than
 # either failing the gate or — worse — reporting green as though it had checked
 # something.
-if ! find repo -path repo/.git -prune -o \
+# `-print -quit` and no pipe — see the note in ci/scripts/codeql.sh. The piped
+# form inverts under `set -o pipefail` on large trees and reports "nothing to
+# scan" with exit 0.
+if [ -z "$(find repo -path repo/.git -prune -o \
      \( -name '*.tf' -o -name '*.tf.json' -o -name 'Dockerfile*' \
         -o -name 'docker-compose*.y*ml' -o -name '*.template.y*ml' \
-        -o -path '*/k8s/*.y*ml' -o -path '*/helm/*' \) -print 2>/dev/null | grep -q .; then
+        -o -path '*/k8s/*.y*ml' -o -path '*/helm/*' \) -print -quit 2>/dev/null)" ]; then
   cat <<'EOF'
 
 ================================================================================

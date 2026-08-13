@@ -21,14 +21,38 @@ if [ ! -f "${report}" ]; then
   exit 0
 fi
 
-COUNT="$(python3 -c '
-import json
-try:
-    doc = json.load(open("mykronos-results/gitleaks.json"))
-except (json.JSONDecodeError, FileNotFoundError):
-    doc = []
-print(len(doc) if isinstance(doc, list) else 0)
-')"
+# ── THIS GATE MUST FAIL CLOSED ────────────────────────────────────────────────
+# The first version caught JSONDecodeError and returned 0, and returned 0 for any
+# non-list document. A truncated report — worker killed mid-write, disk full — or
+# a gitleaks output-format change therefore read as "no secrets detected" and
+# exited 0. Two independent fail-open paths in the one control that implements
+# IA-5.
+#
+# An unreadable report is now a failure. If this gate cannot tell whether there
+# are secrets, it does not get to say there are none.
+if ! COUNT="$(python3 -c '
+import json, sys
+
+with open("mykronos-results/gitleaks.json") as handle:
+    doc = json.load(handle)
+
+if not isinstance(doc, list):
+    print(f"gitleaks report is {type(doc).__name__}, expected a list", file=sys.stderr)
+    sys.exit(1)
+
+print(len(doc))
+')"; then
+  cat >&2 <<'EOF'
+
+ERROR: the gitleaks report exists but could not be parsed.
+
+This is NOT a pass. A malformed report means the scan's result is unknown, and an
+unknown result must not be reported as clean (IA-5). Usual causes: the task was
+killed mid-write, the worker ran out of disk, or gitleaks changed its output
+format — check the scan task's log before assuming the repository is clean.
+EOF
+  exit 1
+fi
 
 if [ "${COUNT}" -eq 0 ]; then
   echo "No secrets detected."

@@ -21,8 +21,11 @@ image_resource:
 
 inputs:
   - name: repo
+  # Required, not optional. As an optional input it could never arrive — the
+  # only syft task lived in a different job — so the "no SBOM" branch ran on
+  # every build and `optional: true` turned a structural wiring error into a
+  # warning. The SBOM is now produced in the same job.
   - name: sbom
-    optional: true
 
 outputs:
   - name: artifact
@@ -31,10 +34,7 @@ params:
   STAGE: ""
   COSIGN_VERSION: ""
   COSIGN_SHA256: ""
-  SYFT_VERSION: v1.51.0
   REGISTRY: ""
-  REGISTRY_USER: ""
-  REGISTRY_PASSWORD: ""
 
 run:
   path: bash

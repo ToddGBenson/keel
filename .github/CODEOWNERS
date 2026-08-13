@@ -28,6 +28,9 @@
 # control in this repo, so it requires security review without exception. (CM-5)
 # ---------------------------------------------------------------------------
 /.github/workflows/             @ToddGBenson
+# Same rule, same reason: since #42 this directory holds the main-branch and
+# scheduled half of every security control.
+/ci/                            @ToddGBenson
 /.github/CODEOWNERS             @ToddGBenson
 /.github/dependabot.yml         @ToddGBenson
 

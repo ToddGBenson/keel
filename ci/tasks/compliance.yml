@@ -18,7 +18,9 @@ outputs:
 
 params:
   PERIOD: ""
-  GITHUB_TOKEN: ""
+  # No GITHUB_TOKEN. compliance.sh never read it, and handing a credential to a
+  # container with no consumer is exposure without benefit. Add it back in the
+  # same change that adds code which uses it.
   REPO_SLUG: ""
 
 run:

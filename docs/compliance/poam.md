@@ -126,10 +126,23 @@ attestation store and are only invocable from Actions. Artifacts built by Concou
 entry there, so `gh attestation verify` — the documented verification path — returns nothing
 for them.
 
-**Risk.** Medium. cosign keyless signing and cosign attestations carry over and cover the
-same SR-4/SR-4(3) ground; this is a loss of one verification surface, not of provenance
-itself. It becomes High if anything downstream still verifies via `gh attestation verify`,
-because that call now fails open on artifacts that never had an entry.
+**Risk.** Medium — **and the original wording of this entry was wrong.** It claimed "cosign
+keyless signing and cosign attestations carry over and cover the same SR-4/SR-4(3) ground;
+this is a loss of one verification surface, not of provenance itself."
+
+Independent review established that nothing carries over as executable code. `cosign sign`,
+`cosign attest` and `cosign verify` in `ci/scripts/supply-chain.sh` are `echo "ADAPT: ..."`
+lines. The Actions workflow they replaced ran `anchore/sbom-action`,
+`actions/attest-build-provenance` and `actions/attest-sbom` for real.
+
+**Accurate statement: after the port, artifact provenance is zero, not degraded.** Nothing
+is signed and nothing is attested. SBOM generation for the artifact lane was also lost and
+has been restored (the `build-and-attest` job now runs syft in-job); signing and attestation
+have not been, because this repository does not yet build a deployable artifact.
+
+It becomes High the moment an artifact ships, or if anything downstream verifies via
+`gh attestation verify` — that call returns nothing for a Concourse-built artifact and must
+not be read as a pass.
 
 **Remediation.** Repoint every verification path at `cosign verify-attestation`, and confirm
 by attempting to verify an artifact that was never signed — the check must refuse it.
@@ -164,9 +177,18 @@ day-of-week. It has no day-of-month. Expressing a true monthly trigger would req
 third-party resource type, which the pipeline deliberately avoids (SR-3, SR-4).
 
 The `compliance-monthly` job is therefore driven by a 7-day interval and executes only when
-the day of the month is 7 or lower. Fires spaced 7 days apart land in a 7-day window exactly
-once, so it runs precisely once per calendar month — it cannot double up or skip a month.
-What is lost is a predictable date, not the cadence.
+the day of the month is 7 or lower.
+
+**Believed once per calendar month; not proven.** The arithmetic holds for fires spaced
+*exactly* 168h apart: any such sequence lands in a 7-day window exactly once. Concourse's
+`time` resource treats `interval` as a *minimum*, so real spacing is 168h + ε and drifts. A
+gap straddling the day-7/day-8 boundary skips a month, and pausing or re-setting the
+pipeline resets the phase. An earlier version of this entry asserted it "cannot double up or
+skip a month" — that claim was not supportable and has been withdrawn.
+
+A skipped month is silent: the not-due builds are green and the missing one leaves no trace.
+**Detection gap, not yet closed:** record the last successful monthly run and alert if it is
+more than ~40 days old.
 
 **Risk.** Low, and deliberately mitigated by making the no-op loud: a build that is not due
 prints that nothing was assessed and that the run must not be cited as CA-7 evidence for the

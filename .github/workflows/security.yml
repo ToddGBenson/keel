@@ -52,7 +52,22 @@ jobs:
       fail-fast: false
       matrix:
         # ADAPT: your languages.
-        language: ['javascript-typescript']
+        #
+        # `python` added 2026-08-13. Until then this matrix held only
+        # javascript-typescript, and this repository contains no JavaScript — so
+        # the one SAST job gating pull requests skipped loudly and passed on
+        # every PR, while the three Python files that do exist (including
+        # scripts/dashboard.py, which does HTML escaping and truncation) were
+        # analysed only post-merge by the Concourse Mykronos lane.
+        #
+        # ADR-0003 §D1 claimed disabling this workflow would have left "no SAST
+        # ... gate on any pull request". True in the sense that mattered, but the
+        # gate that survived was examining nothing. Fixed rather than reworded.
+        #
+        # NOTE: this adds a new check context, `SAST — CodeQL (SA-11(1))
+        # (python)`. It runs immediately; making it REQUIRED is a branch
+        # protection change — see ci/README.md §5.
+        language: ['javascript-typescript', 'python']
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 

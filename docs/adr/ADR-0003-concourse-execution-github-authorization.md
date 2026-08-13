@@ -53,10 +53,19 @@ governance checks that read it could not run at all.
 **REVERSED DURING IMPLEMENTATION.** The first cut disabled `ci.yml` and `security.yml`
 outright, leaving only `pr-governance.yml` on Actions. Reading the branch protection
 settings showed what that actually meant: eight of `main`'s eleven required status checks
-came from those two files. Removing them would have left **no SAST, secret, SCA, IaC,
-coverage or suppression gate on any pull request** — a High CVE would merge cleanly and
-then turn `main` red afterwards. Scanning would have become a post-merge notification
-wearing the word "gate".
+came from those two files. Removing them would have left **no secret, SCA, IaC, coverage or
+suppression gate on any pull request** — a High CVE would merge cleanly and then turn `main`
+red afterwards. Scanning would have become a post-merge notification wearing the word
+"gate".
+
+**AND THE REVERSAL WAS NOT ENOUGH.** Independent review found that the SAST half of that
+sentence was false when written. `security.yml`'s CodeQL matrix held only
+`javascript-typescript`, and this repository contains no JavaScript — so the restored SAST
+gate skipped loudly and passed on every pull request, examining nothing, while the Python
+that does exist was analysed only post-merge. The gate was restored; its coverage was not.
+`python` was added to the matrix in response. Recording this because it is the same
+false-assurance shape the reversal was meant to prevent, reintroduced one level down, in
+the paragraph claiming to have prevented it.
 
 The reversal costs some duplicated scanning between PR and main. That is minutes. The
 alternative was a merge gate that had quietly become a report.

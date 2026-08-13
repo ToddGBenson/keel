@@ -18,8 +18,11 @@ PATTERN='nosec|noqa|eslint-disable|codeql\[|# type: ignore|checkov:skip|trivy:ig
 # muted, and a muted control detects nothing. Same class as L0002. Restrict to
 # source extensions and exclude the directories whose job is to talk about this.
 #
-# ci/ is excluded for the same reason — this script and its neighbours quote the
-# tokens while implementing the rule.
+# Only THIS FILE is excluded, not all of ci/. The first version excluded the
+# whole directory, which quietly exempted 15 scripts and 18 task definitions —
+# the entire new execution surface — from the audit, while the PR that added them
+# reported "audit run, clean". That is L0008 with the checker pointed away from
+# the change that introduced it.
 set +e
 HITS="$(grep -rInE "${PATTERN}" \
   --include='*.py'   --include='*.js'   --include='*.ts'  --include='*.tsx' \
@@ -29,7 +32,7 @@ HITS="$(grep -rInE "${PATTERN}" \
   --exclude-dir=.git --exclude-dir=node_modules --exclude-dir=vendor \
   --exclude-dir=.github --exclude-dir=docs --exclude-dir=.claude \
   --exclude-dir=platform --exclude-dir=evidence --exclude-dir=scripts \
-  --exclude-dir=ci .)"
+  --exclude=suppression-audit.sh .)"
 set -e
 
 if [ -z "${HITS}" ]; then
@@ -40,9 +43,18 @@ fi
 echo "${HITS}" > /tmp/all_suppressions.txt
 TOTAL="$(wc -l < /tmp/all_suppressions.txt)"
 
-# A valid suppression cites an issue (#123) AND an expiry (expires: YYYY-MM-DD).
-BAD="$(grep -vE '#[0-9]+' /tmp/all_suppressions.txt \
-       | grep -viE 'expires?:? *[0-9]{4}-[0-9]{2}-[0-9]{2}' || true)"
+# A valid suppression cites an issue (#123) AND an expiry (expires: YYYY-MM-DD),
+# so a violation is missing EITHER — the union, not the intersection.
+#
+# The Actions original chained the two greps, which selects lines missing BOTH.
+# `# nosec — see #142` with no expiry therefore passed, and the job printed "All
+# suppressions carry an issue reference and an expiry date". A control that
+# prints a false assurance sentence is worse than one that prints nothing. The
+# bug is pre-existing (security.yml:294) and is fixed here rather than carried
+# into a second execution engine; see the note in the PR.
+MISSING_ISSUE="$(grep -vE '#[0-9]+' /tmp/all_suppressions.txt || true)"
+MISSING_EXPIRY="$(grep -viE 'expires?:? *[0-9]{4}-[0-9]{2}-[0-9]{2}' /tmp/all_suppressions.txt || true)"
+BAD="$(printf '%s\n%s\n' "${MISSING_ISSUE}" "${MISSING_EXPIRY}" | grep -v '^$' | sort -u || true)"
 
 echo "Total suppressions: ${TOTAL}"
 

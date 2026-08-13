@@ -318,6 +318,7 @@ jobs:
             <<: *mykronos_upload_params
             CAPABILITY: sast
             TOOL: codeql
+            TRIGGERED_BY: schedule
 
   - name: mykronos-secrets
     public: true
@@ -340,6 +341,7 @@ jobs:
             <<: *mykronos_upload_params
             CAPABILITY: secrets
             TOOL: gitleaks
+            TRIGGERED_BY: schedule
 
   - name: mykronos-atlas
     public: true
@@ -364,6 +366,15 @@ jobs:
           - task: sbom-check
             file: repo/ci/tasks/sbom-check.yml
         ensure:
+          # `ensure:` guarantees the BLOCK runs, not each step in it — and `do:`
+          # is sequential and short-circuits. With these two as a plain `do:`,
+          # any upload failure skipped the evidence record entirely, so the
+          # exact condition the preflight exists to detect (Mykronos
+          # unreachable) also silently suppressed the atlas report.
+          #
+          # The upload now carries its own `ensure:`, so the evidence record runs
+          # either way. This is the same reasoning as the outer `ensure:`,
+          # applied one level down.
           do:
             - task: upload
               file: repo/ci/tasks/mykronos-upload.yml
@@ -371,14 +382,15 @@ jobs:
                 <<: *mykronos_upload_params
                 CAPABILITY: atlas
                 TOOL: osv-scanner
-            - task: atlas-evidence
-              file: repo/ci/tasks/atlas-evidence.yml
-              params:
-                MYKRONOS_INGESTION_URL: ((mykronos_ingestion_url))
-                MYKRONOS_INGESTION_TOKEN: ((mykronos_ingestion_token))
-                MYKRONOS_REF: ((mykronos_ref))
-                REPO_SLUG: ((github_owner))/((github_repo))
-                CONCOURSE_URL: ((concourse_external_url))
+                TRIGGERED_BY: schedule
+              ensure:
+                task: atlas-evidence
+                file: repo/ci/tasks/atlas-evidence.yml
+                params:
+                  MYKRONOS_INGESTION_URL: ((mykronos_ingestion_url))
+                  MYKRONOS_INGESTION_TOKEN: ((mykronos_ingestion_token))
+                  MYKRONOS_REF: ((mykronos_ref))
+                  REPO_SLUG: ((github_owner))/((github_repo))
 
   # ── Platform integrity ──────────────────────────────────────────────────────
   # The non-GitHub half of pr-governance.yml. Those checks remain required on
@@ -446,7 +458,6 @@ jobs:
         file: repo/ci/tasks/compliance.yml
         params:
           PERIOD: daily
-          GITHUB_TOKEN: ((github_token))
           REPO_SLUG: ((github_owner))/((github_repo))
 
   - name: compliance-weekly
@@ -459,7 +470,6 @@ jobs:
         file: repo/ci/tasks/compliance.yml
         params:
           PERIOD: weekly
-          GITHUB_TOKEN: ((github_token))
           REPO_SLUG: ((github_owner))/((github_repo))
 
   # Fires weekly, executes on the first Monday of the month. See the cadence note
@@ -475,7 +485,6 @@ jobs:
         file: repo/ci/tasks/compliance.yml
         params:
           PERIOD: monthly
-          GITHUB_TOKEN: ((github_token))
           REPO_SLUG: ((github_owner))/((github_repo))
 
   - name: metrics-snapshot
@@ -488,7 +497,6 @@ jobs:
         file: repo/ci/tasks/compliance.yml
         params:
           PERIOD: metrics
-          GITHUB_TOKEN: ((github_token))
           REPO_SLUG: ((github_owner))/((github_repo))
 
   # ── Supply chain ────────────────────────────────────────────────────────────
@@ -502,8 +510,16 @@ jobs:
       - get: repo
         trigger: true
         passed: [full-suite]
-      - get: github-release
-        trigger: true
+      # The SBOM is generated HERE, in this job. It was previously taken as an
+      # optional input, which could never arrive: syft runs in `mykronos-atlas`,
+      # and Concourse does not pass task outputs between jobs. So the branch was
+      # unreachable and every build printed "CM-8 is not satisfied" and went
+      # green. Generating it in-job also makes the inventory describe the tree
+      # that was actually built, which is what CM-8 asks for.
+      - task: sbom
+        file: repo/ci/tasks/sbom.yml
+      - task: sbom-check
+        file: repo/ci/tasks/sbom-check.yml
       - task: build-and-attest
         file: repo/ci/tasks/supply-chain.yml
         params:
@@ -511,8 +527,6 @@ jobs:
           COSIGN_VERSION: ((cosign_version))
           COSIGN_SHA256: ((cosign_sha256))
           REGISTRY: ((registry))
-          REGISTRY_USER: ((registry_user))
-          REGISTRY_PASSWORD: ((registry_password))
 
   # This job exists because a signature nobody verifies is decoration. The same
   # verification MUST run in the deploy path and MUST refuse on mismatch —

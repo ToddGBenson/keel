@@ -24,12 +24,12 @@ TOOL_VERSION="${TOOL_VERSION:-}"
 SEVERITY_THRESHOLD="${SEVERITY_THRESHOLD:-low}"
 BLOCKING="${BLOCKING:-false}"
 
-# Concourse always materialises a declared output directory, but this task takes
-# `mykronos-results` as an OPTIONAL input so it can still run when the scan step
-# never got far enough to produce one. That case is the whole point of running
-# this on `ensure:` — "never ran" and "ran and broke" have to stay
-# distinguishable in the lake, and an absent directory is what tells the uploader
-# which of those happened.
+# `mykronos-results` is an OPTIONAL input, so it may be absent when the scan step
+# never got far enough to produce one — which is the whole point of running this
+# on `ensure:`. The uploader distinguishes the cases by CONTENT, not by the
+# directory's existence: an empty directory yields no archivable candidates and
+# no findings, which is how "ran and broke" is recorded distinctly from a clean
+# scan. Creating it here is therefore safe and keeps `--results-path` valid.
 mkdir -p mykronos-results
 
 COMMIT_SHA="$(git -C repo rev-parse HEAD)"
@@ -57,22 +57,31 @@ python -m pip install --quiet --disable-pip-version-check \
 
 echo "Uploading ${CAPABILITY}/${TOOL} results for ${REPO_SLUG}@${COMMIT_SHA}"
 
-# The token is passed through the environment rather than the command line so it
-# never appears in a process listing or in the Concourse build log.
+# The token is on the command line, which means it is visible in a process
+# listing inside this container. `mykronos.upload` declares --token required and
+# offers no environment variable, so there is no alternative available today; the
+# upstream composite action has the same exposure.
+#
+# An earlier version of this file carried a comment claiming the token was passed
+# through the environment "so it never appears in a process listing", next to a
+# `MYKRONOS_TOKEN=... python ... --token "${MYKRONOS_TOKEN}"` line that did not
+# work at all — the prefix is applied after the argument list is expanded, so
+# under `set -u` the script aborted before the CLI ever ran. A false control
+# claim sitting on top of dead code. Fixed both; asked upstream for env support.
 #
 # --workspace is the repository root, not the build directory: findings carry
 # paths relative to it, and getting this wrong makes every fingerprint unstable.
 #
-# --pr-number 0 is normalised to null by the uploader. PR-time scanning stays on
-# GitHub Actions (see ci/pipeline.yml), so no Concourse build is ever a PR build.
-MYKRONOS_TOKEN="${MYKRONOS_INGESTION_TOKEN}" \
+# --pr-number 0 is normalised to null by the uploader. Mykronos no longer scans
+# pull requests anywhere — the three generated workflows are dispatch-only — so
+# no build reaching this script is ever a PR build.
 python -m mykronos.upload \
   --capability "${CAPABILITY}" \
   --tool "${TOOL}" \
   --tool-version "${TOOL_VERSION}" \
   --results-path "mykronos-results" \
   --ingestion-url "${MYKRONOS_INGESTION_URL}" \
-  --token "${MYKRONOS_TOKEN}" \
+  --token "${MYKRONOS_INGESTION_TOKEN}" \
   --repo "${REPO_SLUG}" \
   --commit-sha "${COMMIT_SHA}" \
   --branch "${BRANCH}" \

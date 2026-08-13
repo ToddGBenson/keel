@@ -52,8 +52,25 @@ esac
 #
 # The rule: detect the input, skip LOUDLY when it is absent, and never let
 # "nothing to scan" render as a green pass.
-# shellcheck disable=SC2086
-if ! find repo -path repo/.git -prune -o -path repo/node_modules -prune -o \( ${find_pat} \) -print 2>/dev/null | grep -q .; then
+#
+# ── DO NOT REWRITE THIS AS `find ... | grep -q .` ─────────────────────────────
+# That is what it was, copied verbatim from security.yml. Under `set -o pipefail`
+# it inverts on any repository large enough to matter: `grep -q` exits at the
+# first match and closes the pipe, `find` dies of SIGPIPE with status 141, the
+# pipeline status is 141, and `! pipeline` is TRUE — so the "nothing to scan"
+# branch runs and the job exits 0 having analysed nothing.
+#
+# Measured: 200 files fine, 2000 files silently skipped. The Actions original was
+# correct only because Actions runs `bash -e` WITHOUT pipefail; adding pipefail
+# to the ported script changed the meaning of code that had not been touched.
+#
+# `-print -quit` stops find at the first hit, so there is no pipe and no second
+# process to race. `set -f` because $find_pat must word-split but must NOT be
+# glob-expanded against the build directory first.
+set -f
+first_hit="$(find repo -path repo/.git -prune -o -path repo/node_modules -prune -o \( ${find_pat} \) -print -quit 2>/dev/null)"
+set +f
+if [ -z "${first_hit}" ]; then
   cat <<EOF
 
 ================================================================================

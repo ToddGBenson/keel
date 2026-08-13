@@ -12,12 +12,17 @@ SEVERITY_CUTOFF="${SEVERITY_CUTOFF:-high}"
 # is legitimate; the scan must say so rather than fail on plumbing or, worse,
 # report green as though it had checked something. (L0008 — this defect existed
 # in BOTH jobs; fixing one was not fixing the class.)
-if ! find repo -path repo/.git -prune -o \
+# `-print -quit` and no pipe: `find ... | grep -q .` inverts under `set -o
+# pipefail` once find's output outruns the pipe buffer, because grep closes the
+# pipe and find exits 141. That renders as "nothing to scan", exit 0, on exactly
+# the large repositories where scanning matters. See the long note in
+# ci/scripts/codeql.sh.
+if [ -z "$(find repo -path repo/.git -prune -o \
      \( -name 'package.json' -o -name 'package-lock.json' -o -name 'yarn.lock' \
         -o -name 'requirements*.txt' -o -name 'pyproject.toml' -o -name 'Pipfile.lock' \
         -o -name 'go.mod' -o -name 'Cargo.toml' -o -name 'Gemfile.lock' \
         -o -name 'pom.xml' -o -name 'build.gradle*' -o -name 'composer.json' \) \
-     -print 2>/dev/null | grep -q .; then
+     -print -quit 2>/dev/null)" ]; then
   cat <<'EOF'
 
 ================================================================================
