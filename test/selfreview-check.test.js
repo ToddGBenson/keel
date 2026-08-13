@@ -116,6 +116,30 @@ check('linkedIssue accepts the documented forms', () => {
   assert.strictEqual(linkedIssue('nothing', 'no number'), null);
 });
 
+check('a closing keyword beats an earlier "Refs:"', () => {
+  // Nearly every body in this repo carries `Refs: #<n>`. A single alternation
+  // returned whichever came first, so `Refs: #42` above `Closes #44` resolved to
+  // 42 — and 42's record then satisfied a PR that closes 44.
+  assert.strictEqual(linkedIssue('Refs: #42\n\nCloses #44', 'fix: x'), '44');
+  assert.strictEqual(linkedIssue('Refs: #42\n\nFixes #44', 'fix: x'), '44');
+  assert.strictEqual(linkedIssue('Refs: #42\n\nResolves #44', 'fix: x'), '44');
+});
+
+check("an earlier issue's record cannot satisfy a PR that closes another", () => {
+  const r = evaluate({
+    body: body('Refs: #42', '', 'Closes #44', '',
+               'Record: evidence/42/g3/self-review.md'),
+    title: 'fix: x', prNumber: 46, ...noFs,
+  });
+  assert.strictEqual(r.found, false, 'must not accept #42 record for a #44 PR');
+  assert.match(r.failures[0], /belongs to a different issue/i);
+});
+
+check('the issue number is matched whole, not as a prefix', () => {
+  assert.strictEqual(resolveRecordPath('evidence/44/g3/self-review.md', '4'), null);
+  assert.strictEqual(resolveRecordPath('evidence/4/g3/self-review.md', '44'), null);
+});
+
 // ── The link must point at something real ──────────────────────────────────
 check('a linked record that does not exist fails', () => {
   const r = evaluate({

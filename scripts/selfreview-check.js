@@ -65,13 +65,24 @@ function resolveRecordPath(body, issueNumber) {
   return candidate.startsWith('evidence/' + issueNumber + '/') ? candidate : null;
 }
 
-// Which issue does this PR claim to close? Same forms pr-governance.yml accepts
-// for the CM-3 traceability check, so a PR cannot link one issue and file its
-// review under another.
+// Which issue does this PR CLOSE? Not merely mention.
+//
+// The closing keywords are matched first, and only then a bare `Refs:`. A single
+// alternation over all four returns whichever appears earliest in the text, and
+// this repository's commit convention puts `Refs: #<n>` in almost every body —
+// so `Refs: #42` above `Closes #44` resolved to 42, and issue 42's existing
+// record satisfied a pull request that closed 44. That is the same
+// somebody-else's-review bypass this check exists to stop, reached through the
+// issue number instead of the path.
+//
+// Ordering, not cleverness: closes/fixes/resolves state intent; refs does not.
 function linkedIssue(body, title) {
-  const m = body.match(/(?:closes|fixes|resolves|refs?)\s*:?\s*#(\d+)/i)
-         || (title || '').match(/#(\d+)/);
-  return m ? m[1] : null;
+  const closing = body.match(/(?:closes|fixes|resolves)\s*:?\s*#(\d+)/i);
+  if (closing) return closing[1];
+  const refs = body.match(/\brefs?\s*:?\s*#(\d+)/i);
+  if (refs) return refs[1];
+  const fromTitle = (title || '').match(/#(\d+)/);
+  return fromTitle ? fromTitle[1] : null;
 }
 
 /**
