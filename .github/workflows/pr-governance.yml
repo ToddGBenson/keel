@@ -163,21 +163,35 @@ jobs:
               r => r.state === 'APPROVED' && r.user && r.user.login !== pr.user.login);
 
             if (!approvedByOther) {
-              const hasSelfReview = /##\s*Self-review/i.test(body)
-                                 || /evidence\/[^\s)]*\/self-review\.md/i.test(body);
-              const hasVerified = /verified independently[^\n]*\n(?:[^\n]*\n){0,2}?\s*[-*]\s*\S{20,}/i.test(body);
+              // ── THIS CHECKS FOR A RECORD, NOT A HEADING (#44) ──────────────────
+              // It used to pass on `/##\s*Self-review/`, i.e. on the presence of a
+              // markdown heading. The PR template instructs authors to write exactly
+              // that heading, so the default path through the process satisfied the
+              // compensating control for POAM-008 before a word of review existed.
+              // Found when a PR whose body said, under that heading, that no record
+              // existed — passed.
+              //
+              // Now: the body must reference a self-review artifact, that file must
+              // exist in the checkout (fetch-depth 0 above), and it must have real
+              // content in the two sections that make the rest credible.
+              // The logic lives in scripts/selfreview-check.js so it can be tested —
+              // test/selfreview-check.test.js, 13 assertions, mutation-verified, run by
+              // the platform-integrity job below. This check is the whole of AC-5's
+              // substitute under solo operation; it does not get to be untested again.
+              const fs = require('fs');
+              const { evaluate } = require(
+                `${process.env.GITHUB_WORKSPACE}/scripts/selfreview-check.js`);
 
-              if (!hasSelfReview) {
-                failures.push(
-                  'No approving review from another identity, and no self-review record. ' +
-                  'In solo mode the self-review artifact IS the review evidence (POAM-008, ' +
-                  'docs/13-solo-operation.md). Run `/self-review ' + pr.number + '` and link ' +
-                  'evidence/<issue>/g3/self-review.md in the PR body.');
-              } else if (!hasVerified) {
-                warnings.push(
-                  'Self-review present but "verified independently" looks thin. State the ' +
-                  'specific claims you checked, not that you reviewed it.');
-              }
+              const selfReview = evaluate({
+                body,
+                prNumber: pr.number,
+                exists: (p) => fs.existsSync(p),
+                readFile: (p) => fs.readFileSync(p, 'utf8'),
+              });
+              failures.push(...selfReview.failures);
+              warnings.push(...selfReview.warnings);
+              const record = selfReview.found;
+              const recordPath = selfReview.recordPath;
 
               // Cooling-off. A PR opened and merged in the same session has been re-read by
               // the person who just wrote it, holding the same mental model — not reviewed.
@@ -190,7 +204,7 @@ jobs:
               }
               core.summary.addRaw(
                 `\n> **Solo mode** — no independent approval. Self-review record: ` +
-                `${hasSelfReview ? 'present' : 'MISSING'}. PR age: ${ageHours.toFixed(1)}h.\n`);
+                `${record ? recordPath : 'MISSING'}. PR age: ${ageHours.toFixed(1)}h.\n`);
             }
 
             // ---- Report -----------------------------------------------------------
@@ -248,6 +262,15 @@ jobs:
       # escaper each fails 2 assertions.
       - name: Dashboard generator tests
         run: python test/dashboard.test.py
+
+      # The solo-mode self-review check (#44). It passed on a markdown heading for
+      # months — the one the PR template tells authors to write — so the compensating
+      # control for POAM-008 was satisfied before any review happened. Every assertion
+      # in here is a negative case, and the suite is mutation-verified: removing the
+      # path confinement, the existence check, the section-content test, the
+      # none-rejection or the length floor each fails at least one.
+      - name: Self-review check tests (POAM-008, #44)
+        run: node test/selfreview-check.test.js
 
   dependency-review:
     name: Dependency review (SR-3, SR-4, AIC-7)

@@ -29,3 +29,13 @@ bash .claude/hooks/selftest.sh
 # notice or the escaper each fails 2 assertions.
 echo "── dashboard generator tests ──────────────────────────────────────────────"
 python test/dashboard.test.py
+
+# test/selfreview-check.test.js is NOT run here, and that is not a silent skip.
+# It tests scripts/selfreview-check.js, which is only ever loaded by
+# .github/workflows/pr-governance.yml — a workflow that runs on GitHub Actions
+# and nowhere else. The test runs there, in the same job, on the same runner that
+# executes the code. Running it in this container would need node in the image to
+# exercise logic this engine never runs.
+echo "── self-review check tests ────────────────────────────────────────────────"
+echo "Not applicable here: pr-governance.yml runs only on GitHub Actions, and its"
+echo "tests run there. See the platform-integrity job in that workflow."
