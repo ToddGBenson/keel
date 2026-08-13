@@ -1,0 +1,41 @@
+# Build once, inventory it, sign it, verify it. Refs: #42
+#
+# STAGE selects: build-and-attest | verify.
+#
+# ── A CAPABILITY THAT DID NOT SURVIVE THE PORT ────────────────────────────────
+# The Actions version used actions/attest-build-provenance and actions/attest-sbom,
+# which write to GitHub's attestation store and are verifiable with
+# `gh attestation verify`. There is no Concourse equivalent and no way to write to
+# that store from outside Actions.
+#
+# cosign keyless signing carries over and is the stronger half. The GitHub
+# attestation store does not. This is recorded in docs/compliance/poam.md rather
+# than quietly dropped.
+platform: linux
+
+image_resource:
+  type: registry-image
+  source:
+    repository: python
+    tag: "3.13"
+
+inputs:
+  - name: repo
+  # Required, not optional. As an optional input it could never arrive — the
+  # only syft task lived in a different job — so the "no SBOM" branch ran on
+  # every build and `optional: true` turned a structural wiring error into a
+  # warning. The SBOM is now produced in the same job.
+  - name: sbom
+
+outputs:
+  - name: artifact
+
+params:
+  STAGE: ""
+  COSIGN_VERSION: ""
+  COSIGN_SHA256: ""
+  REGISTRY: ""
+
+run:
+  path: bash
+  args: [repo/ci/scripts/supply-chain.sh]

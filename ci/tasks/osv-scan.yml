@@ -1,0 +1,31 @@
+# Dependency scanning for the Atlas capability. Refs: #42
+#
+# OSV-Scanner is installed from its GitHub release with a verified checksum, not
+# from PyPI. `pip install osv-scanner` resolves to a reserved name placeholder
+# ("Reserved name placeholder. No functionality.", 0.0.1) which installs cleanly
+# and provides no CLI — every Atlas run since that lane shipped died on
+# `osv-scanner: command not found`, was swallowed by a blanket `|| true`, and
+# reported zero findings. The checksum below is carried over from the Actions
+# workflow that fixed it (#38).
+platform: linux
+
+image_resource:
+  type: registry-image
+  source:
+    repository: python
+    tag: "3.13"
+
+inputs:
+  - name: repo
+
+outputs:
+  - name: mykronos-results
+  - name: osv-json
+
+params:
+  OSV_VERSION: "2.5.0"
+  OSV_SHA256: "edcfc41d257db36148f065055655fe3fcfc434b0b423ea67468a84c207524e0c"
+
+run:
+  path: bash
+  args: [repo/ci/scripts/osv-scan.sh]

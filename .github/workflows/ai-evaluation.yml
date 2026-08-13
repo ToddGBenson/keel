@@ -12,23 +12,19 @@
 
 name: AI Evaluation
 
+# ── DISABLED 2026-08-13 — ported to Concourse. Refs: #42 ──────────────────────
+# Now the `ai-evals`, `ai-guardrails` and `agent-assurance` jobs in
+# ci/pipeline.yml.
+#
+# SCOPE CHANGED, in the safe direction: the path filters below are gone, because
+# Concourse git resources do not filter by path in a way that composes with the
+# rest of that pipeline. These now run on every main commit rather than only on
+# prompt/eval/guardrail changes. That is more often, not less — no assurance is
+# lost, some minutes are.
+#
+# The weekly drift check against production is the `weekly-mon-0400` time
+# resource there. See ci/README.md §5 before re-enabling.
 on:
-  pull_request:
-    paths:
-      - '**/prompts/**'
-      - '**/evals/**'
-      - '**/guardrails/**'
-      - '**/*.prompt.*'
-      - '**/model_config*'
-      # ADAPT: add the paths where your AI feature code lives.
-  push:
-    branches: [main]
-    paths:
-      - '**/prompts/**'
-      - '**/evals/**'
-      - '**/guardrails/**'
-  schedule:
-    - cron: '0 4 * * 1'   # weekly drift check against production
   workflow_dispatch:
 
 permissions:

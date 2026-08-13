@@ -172,7 +172,13 @@ mkdir -p "$INBOX" "$DONE"
 # ── Paths the runner must never modify: the controls themselves (AIC-11 #3) ──
 # Checked AFTER the agent runs. If it touched any of these, the branch is abandoned
 # rather than proposed — a change to a control must be a deliberate human act.
-PROTECTED='^(\.github/workflows/|\.claude/hooks/|\.claude/agents/|\.claude/settings\.json|process/gates/|docs/compliance/|scripts/configure-github\.sh)'
+# `ci/` is here because the pipeline moved there (#42). Without it, an
+# unattended run could rewrite ci/pipeline.yml — delete the iac job, flip
+# SEVERITY_CUTOFF, set BLOCKING to false — and the branch would be proposed like
+# any other. The whole point of this list is that weakening a gate is a
+# deliberate, reviewed, human act; the list has to follow the gates when they
+# move.
+PROTECTED='^(\.github/workflows/|ci/|\.claude/hooks/|\.claude/agents/|\.claude/settings\.json|process/gates/|docs/compliance/|scripts/configure-github\.sh)'
 
 process_one() {
   local desc="$1"

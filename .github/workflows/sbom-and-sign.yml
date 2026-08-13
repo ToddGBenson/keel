@@ -12,11 +12,18 @@
 
 name: Supply Chain
 
+# ── DISABLED 2026-08-13 — ported to Concourse. Refs: #42 ──────────────────────
+# Now the `build-and-attest` and `verify-artifact` jobs in ci/pipeline.yml.
+#
+# ONE CAPABILITY DID NOT SURVIVE: actions/attest-build-provenance and
+# actions/attest-sbom write to GitHub's attestation store, which is only writable
+# from Actions. cosign attestations cover the same ground and are the portable
+# half, but anything verifying with `gh attestation verify` must be repointed at
+# cosign. Tracked as POAM-011.
+#
+# Triggers reduced to workflow_dispatch. See ci/README.md §5 before re-enabling.
 on:
-  push:
-    branches: [main]
-  release:
-    types: [published]
+  workflow_dispatch:
 
 permissions:
   contents: read

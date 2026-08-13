@@ -78,6 +78,12 @@ merge_required:
   - .github/ISSUE_TEMPLATE/
   - .github/PULL_REQUEST_TEMPLATE.md
   - .github/dependabot.yml
+  # The Concourse pipeline (#42). Merge-required for the same reason as
+  # .github/workflows/: the platform ships the structure — the lane layout, the
+  # skip-loudly rule, the checksum-verified tool fetches — while every fork
+  # supplies its own toolchain commands, tool pins, registry and deploy targets.
+  # Sync reports the diff; a human merges it.
+  - ci/
   - .claude/settings.json
   - CLAUDE.md
   - .gitignore

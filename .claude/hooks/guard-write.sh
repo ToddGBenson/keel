@@ -85,7 +85,7 @@ fi
 
 # ── Notices on high-consequence paths ───────────────────────────────────────
 case "$path" in
-  */.github/workflows/*)
+  */.github/workflows/*|*/ci/pipeline.yml|*/ci/tasks/*|*/ci/scripts/*)
     warn "Editing a workflow. The pipeline gates every other control here — this change requires security review (CM-5), and relaxing a check is a visible process change, not a quiet diff." ;;
   */.claude/agents/*|*/.claude/commands/*|*/.claude/skills/*)
     warn "Editing an agent, command, or skill definition. These are configuration items under change control (AIC-8). A change that RELAXES a control needs the same approval as relaxing a pipeline gate — flag it explicitly in the PR." ;;

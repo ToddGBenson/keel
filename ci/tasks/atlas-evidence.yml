@@ -1,0 +1,39 @@
+# Supply-chain evidence for the Atlas capability. Refs: #42
+#
+# Archives the SBOM, then reports counts — not a score. The trust formula lives
+# in the platform so it is reproducible and cannot drift between action versions.
+#
+# Runs even when the scan failed, so a broken run records what it managed to see
+# rather than leaving the repo with stale evidence and no sign of it.
+#
+# Provenance fields name Concourse rather than github-actions. That is a real
+# change in what the evidence says, and saying it accurately matters more than
+# keeping the old string.
+platform: linux
+
+image_resource:
+  type: registry-image
+  source:
+    repository: python
+    tag: "3.13"
+
+inputs:
+  - name: repo
+  - name: osv-json
+    optional: true
+  - name: sbom
+    optional: true
+  # Used only to decide whether this build sits at a release commit. See the
+  # reasoning in ci/scripts/atlas-evidence.sh — the tag is not taken on trust.
+  - name: github-release
+    optional: true
+
+params:
+  MYKRONOS_INGESTION_URL: ""
+  MYKRONOS_INGESTION_TOKEN: ""
+  MYKRONOS_REF: ""
+  REPO_SLUG: ""
+
+run:
+  path: bash
+  args: [repo/ci/scripts/atlas-evidence.sh]

@@ -1,0 +1,34 @@
+# SAST via the CodeQL CLI. Refs: #42
+#
+# The Actions version used github/codeql-action, which does not exist outside
+# Actions. This runs the CodeQL CLI from the same bundle that action downloads,
+# so the analysis is the same analysis — the queries, the extractors and the
+# suites all come from `codeql-bundle-linux64.tar.gz`.
+#
+# CODEQL_BUNDLE_SHA256 has no default on purpose. The bundle is the thing doing
+# the security analysis; fetching it unverified would undercut the job. Compute
+# it once and pin it — see ci/README.md.
+platform: linux
+
+image_resource:
+  type: registry-image
+  source:
+    repository: python
+    tag: "3.13"
+
+inputs:
+  - name: repo
+
+outputs:
+  - name: mykronos-results
+
+params:
+  CODEQL_LANGUAGE: ""
+  CODEQL_QUERIES: security-extended
+  CODEQL_BUNDLE_VERSION: ""
+  CODEQL_BUNDLE_SHA256: ""
+  UPLOAD_TO_MYKRONOS: "false"
+
+run:
+  path: bash
+  args: [repo/ci/scripts/codeql.sh]

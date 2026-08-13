@@ -11,10 +11,22 @@
 
 name: CI
 
+# ── PR-ONLY since 2026-08-13 — partially ported to Concourse. Refs: #42 ───────
+# `push` and `schedule` moved to the `build`, `lint`, `test` and `full-suite`
+# jobs in ci/pipeline.yml. `pull_request` stays HERE, deliberately.
+#
+# Concourse has no first-class pull-request trigger and cannot report a commit
+# status back to GitHub without an archived third-party resource. Disabling this
+# workflow outright would have left PRs with no build, lint, test or coverage
+# gate at all — scanning would have become a post-merge signal on main rather
+# than a merge gate. Three of `main`'s required status checks come from this
+# file; they still report because this trigger still exists.
+#
+# The division: GitHub gates the pull request, Concourse owns main and
+# everything scheduled. Duplication between them is intentional and cheap.
 on:
   pull_request:
-  push:
-    branches: [main]
+  workflow_dispatch:
 
 # Least privilege by default; elevate per job, never globally. (AC-6)
 permissions:
@@ -109,16 +121,10 @@ jobs:
           retention-days: 90
           if-no-files-found: warn
 
-  # Full suite on merge — the deep, slow checks that would blow the 10-minute PR budget.
-  full-suite:
-    name: Full suite (post-merge)
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-      - name: Full test suite
-        run: |
-          echo "ADAPT: every test, including the slow ones"
-      - name: E2E — critical journeys only
-        run: |
-          echo "ADAPT: E2E. Few. Slow, brittle, and irreplaceable for proving the whole hangs together."
+  # The post-merge full suite lived here, gated on
+  # `github.event_name == 'push' && github.ref == 'refs/heads/main'`. With the
+  # push trigger gone that condition can never be true, so the job is removed
+  # rather than left as config that looks active and never runs.
+  #
+  # It is now the `full-suite` job in ci/pipeline.yml, which runs on every main
+  # commit after build, lint and test pass.

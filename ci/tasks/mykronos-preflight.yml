@@ -1,0 +1,23 @@
+# Fail fast if Mykronos is unreachable. Refs: #42
+#
+# Better to stop in ten seconds than scan for twenty minutes and find at upload
+# time that the results have nowhere to go — and silently skipping is not an
+# option.
+platform: linux
+
+image_resource:
+  type: registry-image
+  source:
+    repository: python
+    tag: "3.13"
+
+inputs:
+  - name: repo
+
+params:
+  MYKRONOS_INGESTION_URL: ""
+  MYKRONOS_INGESTION_TOKEN: ""
+
+run:
+  path: bash
+  args: [repo/ci/scripts/mykronos-preflight.sh]

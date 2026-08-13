@@ -1,0 +1,42 @@
+# Normalize scanner output and upload it to the Mykronos data lake. Refs: #42
+#
+# This is a port of the `upload-results` composite action. That action is itself
+# a thin wrapper around `python -m mykronos.upload`, so this task installs the
+# same package at the same pinned ref and calls the same CLI. The adapters and
+# the FindingSubmission schema keep exactly one definition, which is why that
+# action exists in the first place.
+#
+# `python:3.13` rather than `-slim`: the package installs from git+https, which
+# needs a git binary.
+platform: linux
+
+image_resource:
+  type: registry-image
+  source:
+    repository: python
+    tag: "3.13"
+
+inputs:
+  - name: repo
+  - name: mykronos-results
+    optional: true
+
+params:
+  CAPABILITY: ""
+  TOOL: ""
+  TOOL_VERSION: ""
+  MYKRONOS_INGESTION_URL: ""
+  MYKRONOS_INGESTION_TOKEN: ""
+  MYKRONOS_REF: ""
+  REPO_SLUG: ""
+  BRANCH: main
+  # Left empty so the script infers it. Set it explicitly on a job whose trigger
+  # is unambiguous. Legal values are the platform's TriggeredBy enum:
+  # pull_request | push | schedule | workflow_dispatch | manual
+  TRIGGERED_BY: ""
+  SEVERITY_THRESHOLD: low
+  BLOCKING: "false"
+
+run:
+  path: bash
+  args: [repo/ci/scripts/mykronos-upload.sh]
