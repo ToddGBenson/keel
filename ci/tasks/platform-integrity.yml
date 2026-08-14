@@ -1,0 +1,27 @@
+# Platform integrity. Refs: #42
+#
+# Verifies agent tool grants match docs/compliance/ai-inventory.md, skills are
+# registered, actions are SHA-pinned, workflows declare least-privilege
+# permissions, and no generated evidence has been hand-placed in the tree.
+#
+# Then TESTS the guards rather than examining them. Three real defects in those
+# guards were found only by exercising them (POAM-002/003/004), including one
+# that blocked edits REMOVING a secret.
+#
+# These also run on pull requests in .github/workflows/pr-governance.yml, which
+# stays enabled. Running them here too covers the case that workflow cannot see:
+# a change that reaches main without a pull request.
+platform: linux
+
+image_resource:
+  type: registry-image
+  source:
+    repository: python
+    tag: "3.13"
+
+inputs:
+  - name: repo
+
+run:
+  path: bash
+  args: [repo/ci/scripts/platform-integrity.sh]

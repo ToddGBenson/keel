@@ -1,0 +1,27 @@
+# shellcheck over every shell script. Refs: #42
+#
+# Its own task because the tool's image is Alpine and the rest of the lint stage
+# needs Python. Running the linter from the tool's own image beats installing it
+# into a Python image, for the same reason the gitleaks and syft tasks do it.
+#
+# The report is an output rather than only a log line, so the lint stage can
+# assert the check actually ran. A lint job that silently omits the only linter
+# for the repository's largest language is exactly the false assurance this
+# pipeline keeps rediscovering.
+platform: linux
+
+image_resource:
+  type: registry-image
+  source:
+    repository: koalaman/shellcheck-alpine
+    tag: v0.10.0
+
+inputs:
+  - name: repo
+
+outputs:
+  - name: shellcheck-report
+
+run:
+  path: sh
+  args: [repo/ci/scripts/shellcheck.sh]

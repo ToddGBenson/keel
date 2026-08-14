@@ -1,0 +1,28 @@
+# Continuous monitoring & evidence collection. Refs: #42
+#
+# Scheduled rather than event-driven, because the risk changes while your code
+# does not. PERIOD selects the bundle: daily | weekly | monthly | metrics.
+platform: linux
+
+image_resource:
+  type: registry-image
+  source:
+    repository: python
+    tag: "3.13"
+
+inputs:
+  - name: repo
+
+outputs:
+  - name: compliance-evidence
+
+params:
+  PERIOD: ""
+  # No GITHUB_TOKEN. compliance.sh never read it, and handing a credential to a
+  # container with no consumer is exposure without benefit. Add it back in the
+  # same change that adds code which uses it.
+  REPO_SLUG: ""
+
+run:
+  path: bash
+  args: [repo/ci/scripts/compliance.sh]

@@ -1,0 +1,23 @@
+# Suppression audit. Refs: #42
+#
+# A suppression with no rationale and no expiry is a control failure. Blanket
+# suppressions are how a scanner quietly stops being a control.
+#
+# Scans CODE, not prose. The first run of this job in Actions failed against the
+# platform's own documentation, which necessarily quotes these tokens while
+# explaining the rule. That is L0007: a checker that fires on documentation about
+# the thing gets muted, and a muted control detects nothing.
+platform: linux
+
+image_resource:
+  type: registry-image
+  source:
+    repository: python
+    tag: "3.13"
+
+inputs:
+  - name: repo
+
+run:
+  path: bash
+  args: [repo/ci/scripts/suppression-audit.sh]

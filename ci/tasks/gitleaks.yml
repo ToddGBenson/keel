@@ -1,0 +1,33 @@
+# Secret scanning. Refs: #42
+#
+# The tool's own image is the task image, so there is no `docker run` and no
+# docker socket to hand out. Same pinned version the Actions workflow used.
+#
+# `--exit-code=0` is deliberate and matches the original: this step never decides
+# the build outcome. For the Mykronos lane the threshold and blocking policy live
+# in the uploader; for the keel security lane the gitleaks-gate task decides. A
+# scanner deciding CI outcomes on its own bypasses both.
+platform: linux
+
+image_resource:
+  type: registry-image
+  source:
+    repository: zricethezav/gitleaks
+    tag: v8.18.4
+
+inputs:
+  - name: repo
+
+outputs:
+  - name: mykronos-results
+
+run:
+  path: gitleaks
+  args:
+    - detect
+    - --source=repo
+    - --report-format=json
+    - --report-path=mykronos-results/gitleaks.json
+    - --redact
+    - --exit-code=0
+    - --no-banner

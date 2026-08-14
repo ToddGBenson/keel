@@ -1,0 +1,29 @@
+# CI stage — build, lint, test, or full-suite. Refs: #42
+#
+# One task, four stages, because all four are the same shape: check out, run the
+# toolchain, emit evidence. The STAGE param selects which.
+platform: linux
+
+image_resource:
+  type: registry-image
+  source:
+    repository: python
+    tag: "3.13"
+
+inputs:
+  - name: repo
+  # Produced by the shellcheck task; consumed only by STAGE=lint, which FAILS if
+  # it is absent rather than treating a missing linter as a pass.
+  - name: shellcheck-report
+    optional: true
+
+outputs:
+  - name: test-evidence
+
+params:
+  STAGE: ""
+  COVERAGE_THRESHOLD: "80"
+
+run:
+  path: bash
+  args: [repo/ci/scripts/ci-stage.sh]

@@ -1,0 +1,45 @@
+# SBOM generation. Refs: #42
+#
+# Syft, not cyclonedx-bom. `cyclonedx-py environment` documents the interpreter
+# the job is running in rather than the repository being scanned, and sees only
+# Python on repositories where osv-scanner routinely finds four ecosystems. The
+# output would have been a plausible SBOM of entirely the wrong software.
+#
+# Syft's own image is the task image — same pinned tag the Actions workflow used,
+# minus the docker socket. Pinned to an exact tag, never `latest`: an SBOM is
+# evidence, and evidence produced by an unknown version of the tool is worth less
+# than none.
+#
+# The excludes are for build and dependency directories a clean checkout should
+# not contain anyway. They are insurance: cataloguing a vendored tree turns a
+# minute into tens of minutes and describes software this repository does not
+# ship.
+platform: linux
+
+image_resource:
+  type: registry-image
+  source:
+    repository: anchore/syft
+    tag: v1.51.0
+
+inputs:
+  - name: repo
+
+outputs:
+  - name: sbom
+
+run:
+  path: syft
+  args:
+    - scan
+    - dir:repo
+    - --exclude
+    - ./**/node_modules
+    - --exclude
+    - ./**/.venv
+    - --exclude
+    - ./**/venv
+    - --exclude
+    - ./**/vendor
+    - --output
+    - cyclonedx-json=sbom/sbom.json

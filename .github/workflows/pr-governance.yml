@@ -75,6 +75,15 @@ jobs:
             }
 
             // ---- AIC-6: AI authorship declared ----------------------------------
+            // DELIBERATE, not inherited (#44 asked): the three checks below and the
+            // "What I made worse" test are HEADING tests, and they stay that way. The
+            // self-review check was upgraded to demand an artifact because it is the
+            // compensating control for POAM-008 — with required_approving_review_count
+            // at 0 it is the only thing standing in for a second reviewer, so a token
+            // the template hands you is worth nothing there. These are prompts for the
+            // author, not substitutes for a control: their failure mode is a thin
+            // declaration a human reviewer can see, not an unreviewed merge. Revisit if
+            // any of them ever becomes the sole evidence for a control.
             const aiSection = /##\s*AI authorship/i.test(body);
             const aiDeclared = /\*\*Parts AI-authored:\*\*\s*\S+/i.test(body)
                             || /-\s*\[x\]\s*\*\*Parts AI-authored/i.test(body);
@@ -163,21 +172,49 @@ jobs:
               r => r.state === 'APPROVED' && r.user && r.user.login !== pr.user.login);
 
             if (!approvedByOther) {
-              const hasSelfReview = /##\s*Self-review/i.test(body)
-                                 || /evidence\/[^\s)]*\/self-review\.md/i.test(body);
-              const hasVerified = /verified independently[^\n]*\n(?:[^\n]*\n){0,2}?\s*[-*]\s*\S{20,}/i.test(body);
+              // ── THIS CHECKS FOR A RECORD, NOT A HEADING (#44) ──────────────────
+              // It used to pass on `/##\s*Self-review/`, i.e. on the presence of a
+              // markdown heading. The PR template instructs authors to write exactly
+              // that heading, so the default path through the process satisfied the
+              // compensating control for POAM-008 before a word of review existed.
+              // Found when a PR whose body said, under that heading, that no record
+              // existed — passed.
+              //
+              // Now: the body must reference a self-review artifact, that file must
+              // exist in the checkout (fetch-depth 0 above), and it must have real
+              // content in the two sections that make the rest credible.
+              // The logic lives in scripts/selfreview-check.js so it can be tested —
+              // test/selfreview-check.test.js, 33 assertions including one against a
+              // real filesystem, run by the platform-integrity job below. This check is
+              // the whole of AC-5's substitute under solo operation; it does not get to
+              // be untested again.
+              //
+              // It has been bypassed four times, each the same shape as the last. Read
+              // the header of that module before changing anything here.
+              const fs = require('fs');
+              const nodePath = require('path');
+              const ws = process.env.GITHUB_WORKSPACE;
+              const { evaluate } = require(`${ws}/scripts/selfreview-check.js`);
 
-              if (!hasSelfReview) {
-                failures.push(
-                  'No approving review from another identity, and no self-review record. ' +
-                  'In solo mode the self-review artifact IS the review evidence (POAM-008, ' +
-                  'docs/13-solo-operation.md). Run `/self-review ' + pr.number + '` and link ' +
-                  'evidence/<issue>/g3/self-review.md in the PR body.');
-              } else if (!hasVerified) {
-                warnings.push(
-                  'Self-review present but "verified independently" looks thin. State the ' +
-                  'specific claims you checked, not that you reviewed it.');
-              }
+              // Paths are joined against the workspace rather than trusting cwd — the
+              // module confines them to evidence/<issue>/ first, and the symlink check
+              // must see the same absolute path the read will use.
+              const abs = (p) => nodePath.join(ws, p);
+
+              const selfReview = evaluate({
+                body,
+                title: pr.title,
+                prNumber: pr.number,
+                exists: (p) => fs.existsSync(abs(p)),
+                readFile: (p) => fs.readFileSync(abs(p), 'utf8'),
+                // git stores symlinks and actions/checkout materialises them, so a
+                // record can be committed as a link to another issue's review.
+                isSymlink: (p) => fs.existsSync(abs(p)) && fs.lstatSync(abs(p)).isSymbolicLink(),
+              });
+              failures.push(...selfReview.failures);
+              warnings.push(...selfReview.warnings);
+              const record = selfReview.found;
+              const recordPath = selfReview.recordPath;
 
               // Cooling-off. A PR opened and merged in the same session has been re-read by
               // the person who just wrote it, holding the same mental model — not reviewed.
@@ -190,7 +227,7 @@ jobs:
               }
               core.summary.addRaw(
                 `\n> **Solo mode** — no independent approval. Self-review record: ` +
-                `${hasSelfReview ? 'present' : 'MISSING'}. PR age: ${ageHours.toFixed(1)}h.\n`);
+                `${record ? recordPath : 'MISSING'}. PR age: ${ageHours.toFixed(1)}h.\n`);
             }
 
             // ---- Report -----------------------------------------------------------
@@ -237,17 +274,16 @@ jobs:
       - name: Validate platform integrity
         run: python scripts/validate-platform.py
 
-      # Per the control-assessment skill: TEST beats EXAMINE. Three real defects in these
-      # guards were found only by exercising them (POAM-002/003/004), including one that
-      # blocked edits REMOVING a secret. Four assertions are regression tests for those.
-      - name: Guard hook self-test
-        run: bash .claude/hooks/selftest.sh
-
-      # The dashboard generator has real logic (truncation disclosure, escaping, degraded
-      # rendering). Its tests are mutation-verified — removing the truncation notice or the
-      # escaper each fails 2 assertions.
-      - name: Dashboard generator tests
-        run: python test/dashboard.test.py
+      # ── TEST SUITES MOVED OUT, 2026-08-13 ────────────────────────────────────
+      # The guard self-test, the dashboard generator tests and the self-review
+      # check tests used to run here. They are test suites, and they now run in
+      # `Test & coverage` (ci.yml) — which until today was an ADAPT stub that
+      # echoed and passed while every real test in the repository ran under a job
+      # called "Platform integrity".
+      #
+      # Both jobs are required checks, so nothing lost coverage. What changed is
+      # that each job's name is now true: this one verifies the platform's own
+      # control integrity, and the one called Test runs the tests.
 
   dependency-review:
     name: Dependency review (SR-3, SR-4, AIC-7)

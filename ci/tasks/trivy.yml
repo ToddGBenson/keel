@@ -1,0 +1,29 @@
+# Container image scanning. Refs: #42
+#
+# ADAPT: this lane is inert until you ship containers — it carried `if: false` in
+# the Actions version and has no trigger here. Left visible rather than deleted:
+# a job that is plainly not running beats one that silently does not exist.
+#
+# `--ignore-unfixed` is deliberate — gate on what you can actually act on.
+platform: linux
+
+image_resource:
+  type: registry-image
+  source:
+    repository: python
+    tag: "3.13"
+
+inputs:
+  - name: repo
+
+outputs:
+  - name: container-results
+
+params:
+  TRIVY_VERSION: ""
+  TRIVY_SHA256: ""
+  IMAGE_REF: ""
+
+run:
+  path: bash
+  args: [repo/ci/scripts/trivy.sh]

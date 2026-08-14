@@ -17,8 +17,7 @@
 # needs a secret, or has no safe default for a blocking question. It leaves a note instead.
 
 set -uo pipefail
-cd "$(dirname "$0")/.."
-ROOT="$PWD"
+cd "$(dirname "$0")/.." || { echo "cannot reach repo root" >&2; exit 1; }
 
 INBOX="sprint/inbox"; DONE="sprint/done"; DRY=0; ONE=""; PREFLIGHT=0; UNATTENDED=0
 POLICY="automation-policy.yml"
@@ -172,7 +171,13 @@ mkdir -p "$INBOX" "$DONE"
 # ── Paths the runner must never modify: the controls themselves (AIC-11 #3) ──
 # Checked AFTER the agent runs. If it touched any of these, the branch is abandoned
 # rather than proposed — a change to a control must be a deliberate human act.
-PROTECTED='^(\.github/workflows/|\.claude/hooks/|\.claude/agents/|\.claude/settings\.json|process/gates/|docs/compliance/|scripts/configure-github\.sh)'
+# `ci/` is here because the pipeline moved there (#42). Without it, an
+# unattended run could rewrite ci/pipeline.yml — delete the iac job, flip
+# SEVERITY_CUTOFF, set BLOCKING to false — and the branch would be proposed like
+# any other. The whole point of this list is that weakening a gate is a
+# deliberate, reviewed, human act; the list has to follow the gates when they
+# move.
+PROTECTED='^(\.github/workflows/|ci/|\.claude/hooks/|\.claude/agents/|\.claude/settings\.json|process/gates/|docs/compliance/|scripts/configure-github\.sh)'
 
 process_one() {
   local desc="$1"
@@ -276,7 +281,16 @@ Stopping is a success state (AIC-11) — this needs a human decision before it c
   git push -q -u origin "$branch" 2>/dev/null || { warn "push failed"; git switch -q main; return 1; }
 
   # 7. Propose. A human merges.
-  gh pr create --title "feat: ${issue_title}" --body "$(cat <<PRBODY
+  # --draft, deliberately (#47). pr-governance.yml skips drafts, so the runner
+  # can open a PR without tripping a check it structurally cannot satisfy: the
+  # POAM-008 compensating control requires a self-review ARTIFACT, and an agent
+  # reviewing its own autonomous output is not an independent identity — which
+  # is what this body already says.
+  #
+  # Marking it ready for review is the human's act, and that is the moment
+  # governance starts demanding the record. The ordering IS the control: the
+  # runner proposes, a person accepts.
+  gh pr create --draft --title "feat: ${issue_title}" --body "$(cat <<PRBODY
 Closes #$issue_num
 
 Built autonomously by the sprint runner from \`$desc\`.
@@ -303,10 +317,14 @@ as a **chosen default**, not a stated requirement. **Overrule any of them on thi
 - [x] Issue linked; AI authorship declared
 - [ ] **Human review — this is the step that is deliberately not automated**
 
-## Self-review — required, no other approver (solo mode, POAM-008)
+## Review evidence — NOT PRESENT, and this PR is a DRAFT because of it
 Written by the agent in \`docs/product/\`. Note the limit honestly: an agent reviewing its own
 autonomous output is the *weakest* form of the compensating control, because the same
 reasoning produced both. Read the "Not verified" section first.
+
+**Before marking this ready for review**, run \`/self-review\` and commit the record at
+\`evidence/<issue>/g3/self-review.md\`. Governance skips drafts, so nothing demands it yet —
+and it is demanded the moment you take the draft flag off (#44, #47).
 
 ## Rollback
 \`git revert\`, or close this PR unmerged — nothing has shipped.
@@ -483,9 +501,11 @@ PROMPT
     warn "non-prod deploy/health failed for #$num"
   fi
 
-  gh pr create --title "feat: $title" --base main --head "$branch" \
-    --body "$(printf 'Closes #%s\n\nImplemented by the unattended sprint runner from a G1-approved story.\n\n## Non-prod (P3)\n%s\n\n## Tests (P5)\nUnit, functional and security suites were re-run by the runner after the agent reported done. All passed, or this PR would not exist.\n\n## Your gate (P4)\nApprove what is RUNNING in `%s`, not this diff. The diff is how it got there; the environment is what you are accepting.\n\n## AI authorship (AIC-6)\n- [x] **Parts AI-authored:** all of it\n- [x] **Agent / model:** claude-opus-5 via the unattended runner\n\nGive this MORE scrutiny than a hand-written PR: no human watched it being written.\n' \
-      "$num" "$deployed" "$(pol nonprod_name)")" >/dev/null 2>&1 \
+  # --draft for the same reason as above (#47): no human has read this, so it
+  # must not present as ready to merge.
+  gh pr create --draft --title "feat: $title" --base main --head "$branch" \
+    --body "$(printf 'Closes #%s\n\nImplemented by the unattended sprint runner from a G1-approved story.\n\n## Non-prod (P3)\n%s\n\n## Tests (P5)\nUnit, functional and security suites were re-run by the runner after the agent reported done. All passed, or this PR would not exist.\n\n## Your gate (P4)\nApprove what is RUNNING in `%s`, not this diff. The diff is how it got there; the environment is what you are accepting.\n\n## AI authorship (AIC-6)\n- [x] **Parts AI-authored:** all of it\n- [x] **Agent / model:** claude-opus-5 via the unattended runner\n\nGive this MORE scrutiny than a hand-written PR: no human watched it being written.\n\n## This is a DRAFT\nRun `/self-review` and commit `evidence/%s/g3/self-review.md` before marking it ready. Governance skips drafts and demands that record the moment you do (#44, #47).\n' \
+      "$num" "$deployed" "$(pol nonprod_name)" "$num")" >/dev/null 2>&1 \
     && ok "PR opened for #$num" || warn "#$num PR creation failed"
 
   git switch -q "$STARTED_ON" 2>/dev/null

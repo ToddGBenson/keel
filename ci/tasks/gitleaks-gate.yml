@@ -1,0 +1,22 @@
+# The keel security lane's secret gate. Refs: #42
+#
+# Any hit fails. If one fires, the correct response is to ROTATE the credential,
+# then remove it. A deleted commit is not a rotated credential.
+#
+# Separate from the scan task because the Mykronos lane shares that scan but must
+# NOT share this gate — there, blocking policy is the uploader's decision.
+platform: linux
+
+image_resource:
+  type: registry-image
+  source:
+    repository: python
+    tag: "3.13"
+
+inputs:
+  - name: repo
+  - name: mykronos-results
+
+run:
+  path: bash
+  args: [repo/ci/scripts/gitleaks-gate.sh]

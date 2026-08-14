@@ -20,6 +20,15 @@ platform_owned:
   - process/gates/
   - platform/
   - scripts/
+  # Tests for platform-owned code. `test/` as a whole is project-owned below —
+  # a fork's own tests are its own — but these two exercise platform modules and
+  # are invoked by merge-required workflows. Without them a fork receives
+  # scripts/selfreview-check.js and a pr-governance.yml that runs a test file it
+  # does not have: a permanently red required check, whose obvious repair is to
+  # delete the step and leave the control untested downstream. Which is the
+  # outcome #44 exists to prevent, shipped to every consumer at once.
+  - test/selfreview-check.test.js
+  - test/dashboard.test.py
   - docs/00-overview.md
   - docs/01-roles.md
   - docs/02-intake-and-discovery.md
@@ -78,6 +87,12 @@ merge_required:
   - .github/ISSUE_TEMPLATE/
   - .github/PULL_REQUEST_TEMPLATE.md
   - .github/dependabot.yml
+  # The Concourse pipeline (#42). Merge-required for the same reason as
+  # .github/workflows/: the platform ships the structure — the lane layout, the
+  # skip-loudly rule, the checksum-verified tool fetches — while every fork
+  # supplies its own toolchain commands, tool pins, registry and deploy targets.
+  # Sync reports the diff; a human merges it.
+  - ci/
   - .claude/settings.json
   - CLAUDE.md
   - .gitignore

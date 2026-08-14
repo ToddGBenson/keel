@@ -14,14 +14,24 @@
 
 name: Security
 
+# ── PR-ONLY since 2026-08-13 — partially ported to Concourse. Refs: #42 ───────
+# `push` and the daily rescan cron moved to the `sast`, `secrets`, `sca`, `iac`,
+# `container-scan` and `suppression-audit` jobs in ci/pipeline.yml, driven there
+# by the `daily` time resource. A clean scan at build time still says nothing
+# about a CVE published yesterday, and that control moved with the rest.
+#
+# `pull_request` stays HERE, deliberately. Concourse cannot report a commit
+# status back to GitHub without an archived third-party resource, so disabling
+# this outright would have meant no SAST, secret, SCA, IaC or suppression gate on
+# any pull request — a High CVE would merge, then turn main red. Five of `main`'s
+# required status checks come from this file.
+#
+# Side effect worth knowing: because this still runs on pull requests, CodeQL
+# SARIF DOES still reach the GitHub Security tab for PR commits. Only
+# main-branch and scheduled runs are affected by POAM-012.
 on:
   pull_request:
-  push:
-    branches: [main]
-  schedule:
-    # Daily rescan. A clean scan at build time says nothing about a CVE published
-    # yesterday — this is the control that catches it. (RA-5, SI-2)
-    - cron: '17 6 * * *'
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -42,7 +52,22 @@ jobs:
       fail-fast: false
       matrix:
         # ADAPT: your languages.
-        language: ['javascript-typescript']
+        #
+        # `python` added 2026-08-13. Until then this matrix held only
+        # javascript-typescript, and this repository contains no JavaScript — so
+        # the one SAST job gating pull requests skipped loudly and passed on
+        # every PR, while the three Python files that do exist (including
+        # scripts/dashboard.py, which does HTML escaping and truncation) were
+        # analysed only post-merge by the Concourse Mykronos lane.
+        #
+        # ADR-0003 §D1 claimed disabling this workflow would have left "no SAST
+        # ... gate on any pull request". True in the sense that mattered, but the
+        # gate that survived was examining nothing. Fixed rather than reworded.
+        #
+        # NOTE: this adds a new check context, `SAST — CodeQL (SA-11(1))
+        # (python)`. It runs immediately; making it REQUIRED is a branch
+        # protection change — see ci/README.md §5.
+        language: ['javascript-typescript', 'python']
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
@@ -280,8 +305,17 @@ jobs:
           if [ -z "$HITS" ]; then echo "No suppressions found."; exit 0; fi
 
           echo "$HITS" > /tmp/all_suppressions.txt
-          # A valid suppression cites an issue (#123) AND an expiry (expires: YYYY-MM-DD).
-          BAD=$(grep -vE '#[0-9]+' /tmp/all_suppressions.txt | grep -viE 'expires?:? *[0-9]{4}-[0-9]{2}-[0-9]{2}' || true)
+          # A valid suppression cites an issue (#123) AND an expiry (expires: YYYY-MM-DD),
+          # so a violation is missing EITHER — the union, not the intersection.
+          #
+          # DEFECT FIXED 2026-08-13 (#42): these two greps were chained, which selects lines
+          # missing BOTH. `# nosec — see #142` with no expiry passed, and the job printed
+          # "All suppressions carry an issue reference and an expiry date". A control that
+          # prints a false assurance sentence is worse than one that prints nothing.
+          # Found by independent review of the Concourse port; fixed in both copies.
+          MISSING_ISSUE=$(grep -vE '#[0-9]+' /tmp/all_suppressions.txt || true)
+          MISSING_EXPIRY=$(grep -viE 'expires?:? *[0-9]{4}-[0-9]{2}-[0-9]{2}' /tmp/all_suppressions.txt || true)
+          BAD=$(printf '%s\n%s\n' "$MISSING_ISSUE" "$MISSING_EXPIRY" | grep -v '^$' | sort -u || true)
 
           {
             echo "### Suppression audit"

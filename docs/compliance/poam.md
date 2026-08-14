@@ -38,6 +38,186 @@ assurance that everything else relies on.
 | POAM-007 | Verification routine in `configure-github.sh` reported 5 false failures | CA-2 | Medium | *unassigned* | 2026-08-07 | **Closed** — fixed + re-verified |
 | POAM-008 | **Solo operation — AC-5 separation of duties cannot be satisfied** | AC-5, CM-5 | **High** | Todd Benson | on 2nd team member | Open — accepted with compensating controls |
 | POAM-009 | Commit signing not registered with GitHub — SI-7/CM-14 unsatisfied | SI-7, CM-14 | Medium | Todd Benson | 2026-08-08 | **Closed** — key registered; GitHub verifies commits; required_signatures enabled |
+| POAM-010 | **G5 release authorization weakened by the move to Concourse** — reopens POAM-006 | CM-3, AC-5 | **High** | Todd Benson | 2026-08-13 | **Closed** — release authorization moved back to GitHub Actions before merge (ADR-0003 D2) |
+| POAM-011 | GitHub attestation store unreachable from Concourse — provenance/SBOM attestations lost | SR-4(3), CM-14 | Medium | Todd Benson | 2026-11-11 | Open |
+| POAM-012 | CodeQL SARIF from Concourse does not reach GitHub code scanning | SA-11(1) | Low | Todd Benson | 2026-08-13 | **Closed** — the lane that discarded SARIF was deleted; SAST on main now ingests both languages to Mykronos |
+| POAM-013 | Monthly monitoring cadence approximated by a weekly trigger | CA-7 | Low | Todd Benson | 2026-11-11 | Open — accepted, detection is loud |
+
+### POAM-010 — G5 release authorization weakened by the move to Concourse ✅ CLOSED 2026-08-13
+
+**Closed before the change that opened it ever merged.** Release authorization was moved
+back to GitHub Actions rather than accepted as a weakening; `release.yml` is the live G5
+path and the Concourse release lane was deleted. See ADR-0003 § D2.
+
+**What made the decision.** The compensating guard written for this entry —
+`authorize-production` refusing to run when no triggering human was recorded — was what
+made the gap concrete rather than theoretical. It could establish that *a* human pressed
+the button. It could not establish that they were entitled to, or that they were not the
+author. POAM-006 had closed this same gap five days earlier; accepting this entry would
+have reopened it to avoid a split pipeline.
+
+**Evidence of closure.** `.github/workflows/release.yml` retains the `production`
+environment with required reviewers (verified enabled under POAM-006 on 2026-08-08);
+`ci/pipeline.yml` contains no release jobs and `ci/tasks/release.yml` and
+`ci/scripts/release.sh` are deleted.
+
+**Residual, tracked under POAM-011:** the artifact is now built by Concourse, so
+`release.yml`'s `cosign verify` must match Concourse's signing identity and
+`gh attestation verify` cannot work at all. The verify steps are ADAPT stubs and must be
+adapted before the first real release — a verification that passes against the wrong
+identity is worse than none.
+
+<details>
+<summary>Original finding, retained for the audit trail</summary>
+
+**Weakness.** CI/CD execution moved from GitHub Actions to Concourse (#42). The production
+release gate was a GitHub `production` environment with required reviewers: the deploy job
+**physically could not start** until a named human approved in the GitHub UI, and that
+approval record — identity, timestamp, bound to the specific run — **was** the CM-3 change
+approval evidence.
+
+Concourse has no equivalent. The replacement is a manually triggered job. It is weaker in
+three specific ways:
+
+1. **No approval workflow.** Triggering and approving are the same action, so there is no
+   record of a decision distinct from an act.
+2. **No second-identity requirement.** The person who wrote the change can release it —
+   which is precisely what AC-5 exists to prevent.
+3. **Team-level authorization.** Concourse authorizes per team, not per job, so anyone with
+   pipeline access can trigger a production release.
+
+**This reopens POAM-006**, closed 2026-08-08 by setting an environment reviewer. That fix
+still exists in `.github/workflows/release.yml`, which is kept on disk deliberately and is
+the strongest form of this control the repository has ever had.
+
+**Source.** Self-identified during the port, before it shipped.
+
+**Compensating controls, in place now.**
+- `authorize-production` has no trigger of any kind — a human must start it.
+- The job **refuses to run** when `BUILD_CREATED_BY` is empty. The only authorization
+  control on it is that a human starts it, so a build with no recorded human has no
+  authorization at all, and deploying anonymously is worse than failing.
+- `deploy-staging` must pass first, and it must have passed `release-preflight`, so the
+  evidence checks still gate the path.
+- The build record captures the triggering user, the commit, and the change record.
+
+**Remediation options, in preference order.**
+1. **Move release authorization back to GitHub.** Re-enable `release.yml`, keep Concourse for
+   everything upstream of G5. This closes the gap outright and costs a split pipeline.
+2. Gate the Concourse job on a signed approval record committed to the repository — a real
+   second artifact, verifiable, produced before the trigger.
+3. Restrict the Concourse team so release authorization is a distinct identity from the
+   pipeline's normal operators.
+
+**Owner.** Todd Benson. **Due.** 2026-09-12 (High, 30 days).
+
+**Evidence of closure.** A demonstration that a production deploy cannot proceed without an
+approval record attributable to an identity other than the change author — tested by
+attempting it, not by reading the config.
+
+</details>
+
+---
+
+### POAM-011 — GitHub attestation store unreachable from Concourse
+
+**Weakness.** `actions/attest-build-provenance` and `actions/attest-sbom` write to GitHub's
+attestation store and are only invocable from Actions. Artifacts built by Concourse have no
+entry there, so `gh attestation verify` — the documented verification path — returns nothing
+for them.
+
+**Risk.** Medium — **and the original wording of this entry was wrong.** It claimed "cosign
+keyless signing and cosign attestations carry over and cover the same SR-4/SR-4(3) ground;
+this is a loss of one verification surface, not of provenance itself."
+
+Independent review established that nothing carries over as executable code. `cosign sign`,
+`cosign attest` and `cosign verify` in `ci/scripts/supply-chain.sh` are `echo "ADAPT: ..."`
+lines. The Actions workflow they replaced ran `anchore/sbom-action`,
+`actions/attest-build-provenance` and `actions/attest-sbom` for real.
+
+**Accurate statement: after the port, artifact provenance is zero, not degraded.** Nothing
+is signed and nothing is attested. SBOM generation for the artifact lane was also lost and
+has been restored (the `build-and-attest` job now runs syft in-job); signing and attestation
+have not been, because this repository does not yet build a deployable artifact.
+
+It becomes High the moment an artifact ships, or if anything downstream verifies via
+`gh attestation verify` — that call returns nothing for a Concourse-built artifact and must
+not be read as a pass.
+
+**Remediation.** Repoint every verification path at `cosign verify-attestation`, and confirm
+by attempting to verify an artifact that was never signed — the check must refuse it.
+
+**Owner.** Todd Benson. **Due.** 2026-11-11 (Medium, 90 days).
+
+---
+
+### POAM-012 — CodeQL SARIF no longer reaches GitHub code scanning ✅ CLOSED 2026-08-13
+
+**Closed by deleting the lane rather than by accepting the gap.** The Concourse `sast` job
+ran CodeQL over javascript-typescript a second time — after the pull request had already run
+it — and wrote the SARIF to a build volume Concourse garbage-collects. Results reached
+nothing.
+
+`mykronos-sast` now runs both languages and ingests both to Mykronos, which is the designated
+system of record for findings. PR-time CodeQL continues to populate the GitHub Security tab
+for both languages. So SAST results now land in exactly two places, both of them durable, and
+one duplicate analysis per merge disappeared.
+
+**The stale-results warning below still stands** and is the reason to read this entry.
+
+<details>
+<summary>Original finding, retained for the audit trail</summary>
+
+**Weakness.** The code scanning upload API is reachable only from Actions. The keel-owned
+`sast` lane now emits SARIF as a build artifact with a printed finding summary instead of
+populating the GitHub Security tab.
+
+**Risk.** Low. Mykronos is the system of record for findings, and the `mykronos-sast` lane
+still ingests the same SARIF through the same uploader. What is lost is a second view of the
+same data, not the data.
+
+**Watch for.** The Security tab now shows *stale* CodeQL results from before the port rather
+than none. Stale results that look current are worse than an empty tab. Dismiss the existing
+alerts or add a banner, and do not cite that tab as SA-11(1) evidence for any commit after
+2026-08-13.
+
+**Owner.** Todd Benson. **Due.** 2026-11-11.
+
+</details>
+
+---
+
+### POAM-013 — Monthly monitoring cadence approximated
+
+**Weakness.** Concourse's bundled `time` resource supports interval, start/stop, and
+day-of-week. It has no day-of-month. Expressing a true monthly trigger would require a
+third-party resource type, which the pipeline deliberately avoids (SR-3, SR-4).
+
+The `compliance-monthly` job is therefore driven by a 7-day interval and executes only when
+the day of the month is 7 or lower.
+
+**Believed once per calendar month; not proven.** The arithmetic holds for fires spaced
+*exactly* 168h apart: any such sequence lands in a 7-day window exactly once. Concourse's
+`time` resource treats `interval` as a *minimum*, so real spacing is 168h + ε and drifts. A
+gap straddling the day-7/day-8 boundary skips a month, and pausing or re-setting the
+pipeline resets the phase. An earlier version of this entry asserted it "cannot double up or
+skip a month" — that claim was not supportable and has been withdrawn.
+
+A skipped month is silent: the not-due builds are green and the missing one leaves no trace.
+**Detection gap, not yet closed:** record the last successful monthly run and alert if it is
+more than ~40 days old.
+
+**Risk.** Low, and deliberately mitigated by making the no-op loud: a build that is not due
+prints that nothing was assessed and that the run must not be cited as CA-7 evidence for the
+month. A silent no-op here would be the exact defect class this repository keeps
+rediscovering (L0007, L0008), which is why it is not one.
+
+**Accepted** rather than remediated, pending either day-of-month support upstream or a
+vetted resource type.
+
+**Owner.** Todd Benson. **Review.** 2026-11-11.
+
+---
 
 ### POAM-008 — Separation of duties under solo operation
 
