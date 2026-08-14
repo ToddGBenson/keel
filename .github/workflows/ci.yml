@@ -21,21 +21,23 @@
 
 name: CI
 
-# ── PR-ONLY since 2026-08-13 — partially ported to Concourse. Refs: #42 ───────
-# `push` and `schedule` moved to the `build`, `lint`, `test` and `full-suite`
-# jobs in ci/pipeline.yml. `pull_request` stays HERE, deliberately.
+
+# ── DISABLED 2026-08-13. Concourse is the delivery pipeline. Refs: #42, #50 ───
+# Every lane in this file now lives in ci/pipeline.yml. Triggers reduced to
+# workflow_dispatch: the file is kept so the port stays reviewable and so
+# restoring PR-time gating is a one-hunk revert, not a rewrite.
 #
-# Concourse has no first-class pull-request trigger and cannot report a commit
-# status back to GitHub without an archived third-party resource. Disabling this
-# workflow outright would have left PRs with no build, lint, test or coverage
-# gate at all — scanning would have become a post-merge signal on main rather
-# than a merge gate. Three of `main`'s required status checks come from this
-# file; they still report because this trigger still exists.
+# It could not run regardless — the repository is private and Actions fail to
+# start on billing (POAM-014) — but "cannot run" and "is not configured to run"
+# are different statements, and the second is the one that should be true.
 #
-# The division: GitHub gates the pull request, Concourse owns main and
-# everything scheduled. Duplication between them is intentional and cheap.
+# WHAT DOES NOT EXIST IN CONCOURSE, and is therefore simply gone:
+#   nothing — build, lint and test are all in Concourse.
+#
+# Restoring PR gating means: fix Actions billing, restore the `on:` block here,
+# and re-add the check names to branch protection. All three, or none of it
+# takes effect.
 on:
-  pull_request:
   workflow_dispatch:
 
 # Least privilege by default; elevate per job, never globally. (AC-6)

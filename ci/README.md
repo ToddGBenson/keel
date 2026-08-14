@@ -10,24 +10,54 @@ approve anything. Gate approval stays a human act recorded in GitHub (PD-2).
 
 ## What runs where, after the port
 
-> ## ⚠️ READ THIS FIRST — the prevent layer is currently GONE
+> ## ⚠️ READ THIS FIRST — Concourse is the whole pipeline, and nothing gates a merge
 >
-> As of 2026-08-13 this repository is **private**, GitHub Actions **cannot run** (billing —
+> As of 2026-08-13: the repository is **private**, GitHub Actions **cannot run** (billing —
 > `job was not started because recent account payments have failed or your spending limit
-> needs to be increased`), and every required status check has been **removed** from `main`
-> so that anything can merge at all.
+> needs to be increased`), **all ten workflows are disabled**, and every required status check
+> has been removed from `main`.
 >
-> **Nothing verifies a change before it lands.** Not lint, not tests, not SAST, not secret
-> scanning, not the governance checks. `required_approving_review_count` is 0, and the
-> POAM-008 compensating control — the self-review artifact check — is itself an Action and
-> therefore inoperative.
+> **Nothing verifies a change before it lands.** `required_approving_review_count` is 0 and
+> there are no status checks. Everything below is detection *after* the fact — which is why
+> the deterministic lanes were put back on per-commit triggers.
 >
-> Everything below still describes the intended design, and the workflow files and their
-> triggers were left intact **on purpose**: fixing the billing problem restores the whole
-> prevent layer with no further changes.
+> **Two capabilities have no Concourse equivalent and are simply gone:**
 >
-> Tracked as **POAM-014 (Critical)**. Until it is closed, the Concourse lanes below are
-> detection after the fact, not gates — which is why their per-commit triggers were restored.
+> - **Process compliance** — it read the pull request *body* (issue linkage, AI-authorship
+>   declaration, DoD checklist, and the self-review artifact that is POAM-008's compensating
+>   control). Concourse has no pull-request concept. Solo operation was accepted on the basis
+>   that this check enforced a self-review in place of a second approver. Nothing enforces it.
+> - **Dependency review** — a GitHub feature, not a tool. grype and osv-scanner cover the SCA
+>   function; the new-vulnerabilities-in-this-diff framing is not reproduced.
+>
+> Tracked as **POAM-014 (Critical)**. Closing it: fix Actions billing, go public again, or add
+> a self-hosted runner (free on private repos — the box already running Concourse would do).
+
+## Where things run
+
+Everything is in `ci/pipeline.yml`. There is no second system.
+
+| Concern | Job | Trigger |
+|---|---|---|
+| Pipeline updates itself from `main` | `set-pipeline` | per commit |
+| Build, lint, test, full suite | `build` `lint` `test` `full-suite` | per commit + daily |
+| **SAST — CodeQL, python + js, GATES on findings** | `sast` | per commit + daily |
+| Secrets, SCA, IaC, suppressions | `secrets` `sca` `iac` `suppression-audit` | per commit + daily |
+| Container scan | `container-scan` | manual (inert until an image exists) |
+| Platform / control integrity | `platform-integrity` | per commit + daily |
+| Mykronos ingestion | `mykronos-*` | per commit + weekly — **PAUSED, no token** |
+| AI evals, guardrails, agent assurance | `ai-*` `agent-assurance` | per commit / weekly |
+| Compliance monitoring, metrics | `compliance-*` `metrics-snapshot` | daily / weekly |
+| SBOM, sign, verify | `build-and-attest` `verify-artifact` | per commit |
+| **Release G5** | `release-preflight` → `deploy-staging` → `authorize-production` | **manual only** |
+
+`sast` **gates** — it is the only thing in the system that blocks anything, and it blocks a
+build rather than a merge. It fails on CodeQL security findings at severity ≥ medium; quality
+findings do not gate, or `security-and-quality` becomes a style gate and the lane gets
+switched off within a week.
+
+`authorize-production` has no trigger and refuses to run when Concourse records no triggering
+human. That is the entire G5 control now — see POAM-006/010.
 
 **Three questions decide where a check belongs. Not two.**
 

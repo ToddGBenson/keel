@@ -134,7 +134,7 @@ groups:
   - name: ci
     jobs: [set-pipeline, build, lint, test, full-suite]
   - name: security
-    jobs: [secrets, sca, iac, container-scan, suppression-audit]
+    jobs: [sast, secrets, sca, iac, container-scan, suppression-audit]
   - name: mykronos
     jobs: [mykronos-sast, mykronos-secrets, mykronos-atlas]
   - name: platform
@@ -145,6 +145,8 @@ groups:
     jobs: [compliance-daily, compliance-weekly, compliance-monthly, metrics-snapshot]
   - name: supply-chain
     jobs: [build-and-attest, verify-artifact]
+  - name: release
+    jobs: [release-preflight, deploy-staging, authorize-production]
   - name: all
     jobs: ["*"]
 
@@ -261,6 +263,47 @@ jobs:
   # codebase means the pipeline is red forever and everyone learns to ignore it —
   # at which point it stops being a control and becomes decoration. The existing
   # backlog is driven down on SLA through the POA&M.
+
+  # ── SAST ────────────────────────────────────────────────────────────────────
+  # RESTORED 2026-08-13, and it gates.
+  #
+  # This job was deleted when mykronos-sast was made to cover both languages —
+  # correct at the time, because the Mykronos lane ingested findings to the system
+  # of record and this one discarded them. Then the Mykronos lanes were paused for
+  # want of an ingestion token, and the result was NO SAST ANYWHERE. A deletion
+  # justified by a replacement, where the replacement then stopped running.
+  #
+  # It gates on security findings at severity >= medium, unlike the Mykronos lane,
+  # because nothing else gates anything now: Actions cannot run and every required
+  # status check has been removed (POAM-014). Quality findings do not gate — that
+  # would turn security-and-quality into a style gate and the lane would be
+  # switched off within a week.
+  - name: sast
+    public: true
+    plan:
+      - get: repo
+        trigger: true
+      - get: daily
+        trigger: true
+      - in_parallel:
+          - task: codeql-python
+            file: repo/ci/tasks/codeql.yml
+            output_mapping: { mykronos-results: results-python }
+            params:
+              CODEQL_LANGUAGE: python
+              CODEQL_QUERIES: security-extended,security-and-quality
+              CODEQL_BUNDLE_VERSION: ((codeql_bundle_version))
+              CODEQL_BUNDLE_SHA256: ((codeql_bundle_sha256))
+              FAIL_ON_SECURITY_FINDING: "true"
+          - task: codeql-javascript
+            file: repo/ci/tasks/codeql.yml
+            output_mapping: { mykronos-results: results-javascript }
+            params:
+              CODEQL_LANGUAGE: javascript-typescript
+              CODEQL_QUERIES: security-extended,security-and-quality
+              CODEQL_BUNDLE_VERSION: ((codeql_bundle_version))
+              CODEQL_BUNDLE_SHA256: ((codeql_bundle_sha256))
+              FAIL_ON_SECURITY_FINDING: "true"
 
   # ── DAILY, NOT PER-COMMIT ───────────────────────────────────────────────────
   # `main` cannot be reached except through a pull request that already ran
@@ -624,23 +667,61 @@ jobs:
           COSIGN_SHA256: ((cosign_sha256))
           REGISTRY: ((registry))
 
-  # ── Release (G5) — NOT HERE, DELIBERATELY ───────────────────────────────────
+  # ── Release (G5) ────────────────────────────────────────────────────────────
   #
-  # Release authorization lives in .github/workflows/release.yml and stays on
-  # GitHub Actions. This lane was built here first, and then removed on the
-  # evidence it produced.
+  # RESTORED 2026-08-13. This lane was deleted in favour of the GitHub
+  # `production` environment with required reviewers, which was a genuinely
+  # stronger control (POAM-010, closed on that basis).
   #
-  # The G5 gate is a `production` environment with required reviewers: the deploy
-  # job physically cannot start until a named human approves, and that record —
-  # identity, timestamp, bound to the run — IS the CM-3 change approval evidence.
+  # That control no longer exists: making the repository private removed the
+  # required-reviewers rule outright — measured, `branch_policy` only, 0
+  # reviewers — and Actions cannot run at all. So the comparison is no longer
+  # "weak Concourse gate vs strong GitHub gate". It is "weak Concourse gate vs
+  # nothing", and POAM-010 reopens with the lane.
   #
-  # Concourse's nearest equivalent is a job with no trigger. That collapses
-  # triggering and approving into one action, cannot require the approver to
-  # differ from the author, and authorizes per team rather than per job. Keeping
-  # it would have reopened POAM-006 and left a High finding sitting on the one
-  # control the whole lifecycle terminates in — to save a split pipeline.
-  #
-  # Everything upstream of the release stays here: build, scan, ingest, SBOM,
-  # sign, verify. Actions authorizes and deploys.
-  #
-  # See docs/adr/ADR-0003-concourse-execution-github-authorization.md § D2.
+  # `authorize-production` has NO trigger. A human presses it and Concourse
+  # records who; the job refuses to run if no human is recorded. That is the
+  # whole of the control, and it is written down as such rather than dressed up.
+
+  - name: release-preflight
+    public: true
+    plan:
+      - get: repo
+      - task: preflight
+        file: repo/ci/tasks/release.yml
+        params:
+          STAGE: preflight
+          COSIGN_VERSION: ((cosign_version))
+          COSIGN_SHA256: ((cosign_sha256))
+          REGISTRY: ((registry))
+
+  - name: deploy-staging
+    public: true
+    serial: true
+    plan:
+      - get: repo
+        passed: [release-preflight]
+      - task: deploy-staging
+        file: repo/ci/tasks/release.yml
+        params:
+          STAGE: staging
+          REGISTRY: ((registry))
+          STAGING_URL: ((staging_url))
+
+  - name: authorize-production
+    public: true
+    serial: true
+    # No `trigger: true` anywhere in this plan, deliberately. The only way this
+    # runs is a human pressing + in the UI or `fly trigger-job`.
+    plan:
+      - get: repo
+        passed: [deploy-staging]
+      - task: authorize-and-deploy
+        file: repo/ci/tasks/release.yml
+        params:
+          STAGE: production
+          COSIGN_VERSION: ((cosign_version))
+          COSIGN_SHA256: ((cosign_sha256))
+          REGISTRY: ((registry))
+          PRODUCTION_URL: ((production_url))
+          CONCOURSE_URL: ((concourse_external_url))

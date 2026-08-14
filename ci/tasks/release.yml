@@ -1,0 +1,49 @@
+# Release — G5. Refs: #42, #50
+#
+# STAGE selects: preflight | staging | production.
+#
+# ⚠️  THIS IS NOW THE ONLY RELEASE PATH, AND IT IS THE WEAK ONE ⚠️
+#
+# The strong form was a GitHub `production` environment with required reviewers:
+# the job physically could not start until a named human approved, and that
+# record — identity, timestamp, bound to the run — WAS the CM-3 evidence. This
+# lane was deleted in favour of it (POAM-010, closed).
+#
+# That is gone. Making the repository private removed the required-reviewers rule
+# outright (measured: `branch_policy` only, 0 reviewers), and Actions cannot run
+# at all. So the choice is no longer "weak Concourse gate vs strong GitHub gate";
+# it is "weak Concourse gate vs nothing", and the lane comes back.
+#
+# What it is: a job with no trigger. A human presses it, and Concourse records
+# who. Triggering and approving are one action, there is no requirement that the
+# approver differ from the author, and anyone with pipeline access can do it.
+#
+# Do not describe this as equivalent to what it replaced. POAM-010 stays open.
+platform: linux
+
+image_resource:
+  type: registry-image
+  source:
+    repository: python
+    tag: "3.13"
+
+inputs:
+  - name: repo
+
+outputs:
+  - name: release-evidence
+
+params:
+  STAGE: ""
+  VERSION: ""
+  CHANGE_RECORD: ""
+  COSIGN_VERSION: ""
+  COSIGN_SHA256: ""
+  REGISTRY: ""
+  STAGING_URL: ""
+  PRODUCTION_URL: ""
+  CONCOURSE_URL: ""
+
+run:
+  path: bash
+  args: [repo/ci/scripts/release.sh]

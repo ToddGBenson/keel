@@ -14,6 +14,9 @@
 # in the Security tab. Recorded in docs/compliance/poam.md.
 set -euo pipefail
 
+# Where the helper scripts live, resolved from this script rather than assumed.
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
 : "${CODEQL_LANGUAGE:?CODEQL_LANGUAGE is required}"
 
 CODEQL_QUERIES="${CODEQL_QUERIES:-security-extended}"
@@ -189,8 +192,26 @@ PY
 if [ "${UPLOAD_TO_MYKRONOS:-false}" != "true" ]; then
   cat <<'EOF'
 
-NOTE: this lane no longer publishes to GitHub code scanning — that API is not
-reachable from Concourse. The SARIF above is the evidence; read it. Findings for
-this repository are tracked in Mykronos via the `mykronos-sast` job.
+NOTE: this lane does not publish to GitHub code scanning — that API is not
+reachable from Concourse. The SARIF is the evidence; read it.
 EOF
+fi
+
+# ── GATE ──────────────────────────────────────────────────────────────────────
+# Off by default, so the Mykronos lane keeps its own blocking policy: threshold
+# and blocking belong to the uploader, and a scanner deciding CI outcomes on its
+# own bypasses that.
+#
+# ON for the keel lane, because as of 2026-08-13 nothing else gates anything —
+# Actions cannot run, required status checks are gone, and this is the only SAST
+# left in the system. An advisory-only scanner in that position is decoration.
+if [ "${FAIL_ON_SECURITY_FINDING:-false}" = "true" ]; then
+  n="$(python3 "${SCRIPT_DIR}/codeql-count.py" mykronos-results/codeql.sarif)"
+  if [ "${n}" -gt 0 ]; then
+    echo "ERROR: ${n} security finding(s) at severity >= medium." >&2
+    echo "Read mykronos-results/codeql.sarif. Disposition each at G4: true positive," >&2
+    echo "false positive (rationale AND expiry), or accepted risk with a POA&M entry." >&2
+    exit 1
+  fi
+  echo "No security findings at severity >= medium."
 fi

@@ -108,6 +108,19 @@ its own entry warns about.
 **What still holds.** `enforce_admins`, linear history, no force-push, no deletions, required
 conversation resolution. Those prevent history damage; none of them look at content.
 
+**Two capabilities are gone outright, not relocated.** `Process compliance` read the pull
+request *body* through the GitHub API — issue linkage, AI-authorship declaration, DoD
+checklist, and the self-review artifact. Concourse has no pull-request concept, so there is
+nothing to port it to. `Dependency review` is a GitHub feature rather than a tool; grype and
+osv-scanner cover the SCA function but not the new-in-this-diff framing.
+
+**The SAST gap this exposed, since fixed.** The keel SAST lane had been deleted on the
+grounds that `mykronos-sast` covered it. Those lanes are paused for want of an ingestion
+token, so the net effect was **no SAST anywhere** — a deletion justified by a replacement that
+then stopped running. A gating `sast` job was restored: both languages, failing on security
+findings at severity >= medium. It is now the only thing in the system that blocks anything,
+and it blocks a build rather than a merge.
+
 **What partially compensates.** The Concourse pipeline still runs build, lint, test, secrets,
 SCA, IaC, suppression audit and platform integrity — and their triggers were restored to
 per-commit for exactly this reason, since a daily cadence would leave up to 24 hours of
