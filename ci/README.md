@@ -33,6 +33,26 @@ approve anything. Gate approval stays a human act recorded in GitHub (PD-2).
 > Tracked as **POAM-014 (Critical)**. Closing it: fix Actions billing, go public again, or add
 > a self-hosted runner (free on private repos — the box already running Concourse would do).
 
+## keel is a template, not a service
+
+It ships no artifact and has no production environment. What it distributes is **itself**, to
+forks, via `scripts/sync-platform.sh` under the contract in `platform/MANIFEST.yml`
+(ADR-0004).
+
+Three consequences that change how this pipeline reads:
+
+- **The manifest is the build output.** A template has no build to break, so the failure moves:
+  an unclassified path is never delivered to a fork, and no fork can notice a file it was never
+  sent. `scripts/validate-manifest.py` runs in `platform-integrity`; when first written it
+  found **nine** ungoverned paths, including `keel` itself.
+- **A release is a tag, and its blast radius is wider than a deploy.** A bad service deploy
+  affects one environment and rolls back in minutes. A bad platform release is fast-forwarded
+  into every fork's platform-owned paths, overwriting local edits by design.
+  `authorize-release` still refuses to run without a recorded human.
+- **Inert lanes are inherited, not dead.** `container-scan`, `build-and-attest` and
+  `verify-artifact` do nothing here on purpose. They are what a fork gets on the day it first
+  ships an image. Deleting them because the template has no image would be deleting the point.
+
 ## Where things run
 
 Everything is in `ci/pipeline.yml`. There is no second system.

@@ -2,7 +2,7 @@
 # Release — G5. Refs: #42, #50
 set -euo pipefail
 
-: "${STAGE:?STAGE is required (preflight|staging|production)}"
+: "${STAGE:?STAGE is required (preflight|release)}"
 
 install_cosign() {
   : "${COSIGN_VERSION:?COSIGN_VERSION is required}"
@@ -16,101 +16,78 @@ install_cosign() {
 case "${STAGE}" in
 
   preflight)
-    echo "── G5 preflight — evidence check ────────────────────────────────────"
-    echo "ADAPT: assert the change record at '${CHANGE_RECORD:-<unset>}' exists and"
-    echo "contains all 13 required sections (docs/07-release-and-change.md)."
+    echo "── G5 preflight — is this template fit to release? ───────────────────"
+    # A template's preflight is not "does the artifact verify". It is "will a
+    # fork receive what we think we are sending".
+    echo "── the delivery contract ─────────────────────────────────────────────"
+    python -m pip install --quiet --disable-pip-version-check pyyaml
+    python scripts/validate-manifest.py
+
+    echo "── the platform's own integrity ──────────────────────────────────────"
+    python scripts/validate-platform.py
+
+    echo "── the pipeline forks inherit ────────────────────────────────────────"
+    python scripts/validate-pipeline.py
+
     echo
-    echo "ADAPT: for each issue in scope, assert evidence/<issue>/g4/ contains"
-    echo "independent QA, security, and (if AI-relevant) AI pass records."
+    echo "ADAPT: assert the change record exists and carries all 13 required"
+    echo "sections (docs/07-release-and-change.md), and that every issue in scope"
+    echo "cleared G4. Anything without G4 clearance is REMOVED from the release,"
+    echo "not waived — scope shrinks, gates do not."
     echo
-    echo "Anything without G4 clearance is REMOVED from the release, not waived."
-    echo "Scope shrinks; gates do not. This is the item most often pressured, and"
-    echo "holding it is what makes every upstream gate mean something."
-    echo
-    echo "ADAPT: query the finding register and POA&M. Open Critical or High in"
-    echo "scope is a hard block."
-    echo
-    # This one is NOT hypothetical today.
     cat <<'EOF'
-⚠️  POAM-014 IS OPEN AND CRITICAL: this repository currently has no merge gate.
-Nothing verified any change in this release before it reached main — not lint,
-not tests, not SAST, not the governance checks. A release assembled under that
-condition carries a materially weaker assurance chain, and the change record must
-say so rather than cite gates that did not run.
+⚠️  POAM-014 IS OPEN AND CRITICAL: this repository has no merge gate. Nothing
+verified any change in this release before it reached main. A release assembled
+under that condition carries a materially weaker assurance chain, and the change
+record must say so rather than cite gates that did not run.
 EOF
-    echo
-    echo "ADAPT: assert a rollback rehearsal record exists for this artifact."
-    echo "An untested rollback plan is a hypothesis; this gate asks for a fact."
-    install_cosign
-    echo "ADAPT: cosign verify + verify-attestation — HARD BLOCK."
     ;;
 
-  staging)
-    echo "── Deploy to staging ────────────────────────────────────────────────"
-    echo "ADAPT: deploy the SAME artifact by DIGEST, never by tag. Never rebuild —"
-    echo "the artifact tested here must be byte-identical to the one that reaches"
-    echo "production."
-    echo
-    echo "ADAPT: DAST against ${STAGING_URL:-<unset>} (SA-11(8))"
-    echo "ADAPT: E2E — critical journeys; assert the stated NFR thresholds"
-    echo "ADAPT: configuration drift check vs. the baseline (CM-2, CM-6)"
-    echo
-    echo "ADAPT: rollback rehearsal (CP-10) — actually roll back, verify, then roll"
-    echo "forward. Include the data path. Record the window; the approver needs it."
-    ;;
-
-  production)
+  release)
     # ══════════════════════════════════════════════════════════════════════════
-    # ⚠️  THIS IS THE WEAK FORM OF THE GATE  ⚠️
+    # ⚠️  A TEMPLATE RELEASE HAS A WIDER BLAST RADIUS THAN A DEPLOY  ⚠️
     #
-    # The strong form was a GitHub `production` environment with required
-    # reviewers — the job could not start until a named human approved, and that
-    # record was the CM-3 evidence. Making the repository private removed that
-    # rule outright, and Actions cannot run at all, so the strong form is not
-    # available at any price short of changing those facts.
+    # This does not ship a service. It marks a version that every fork will
+    # fast-forward into its platform-owned paths — overwriting local edits there
+    # by design. A bad service deploy affects one environment and rolls back in
+    # minutes. A bad platform release reaches every fork, on their schedule, and
+    # each one discovers it alone.
     #
-    # This is what remains: a job with no trigger. Triggering and approving are
-    # one action; nothing requires the approver to differ from the author; anyone
-    # with pipeline access can press it. POAM-006 and POAM-010 stay open.
+    # The authorisation control is exactly as weak as the one described in
+    # POAM-010: triggering and approving are one action, nothing requires the
+    # approver to differ from the author, and anyone with pipeline access can
+    # press it. Do not describe it as more.
     # ══════════════════════════════════════════════════════════════════════════
     cat <<EOF
 
-── G5 authorization ───────────────────────────────────────────────────────────
+── G5 authorisation — platform release ────────────────────────────────────────
   Version        ${VERSION:-<unset>}
   Change record  ${CHANGE_RECORD:-<unset>}
-  Triggered by   ${BUILD_CREATED_BY:-UNKNOWN — see below}
+  Authorised by  ${BUILD_CREATED_BY:-UNKNOWN — see below}
   Build          ${CONCOURSE_URL:-}/teams/${BUILD_TEAM_NAME:-}/pipelines/${BUILD_PIPELINE_NAME:-}/jobs/${BUILD_JOB_NAME:-}/builds/${BUILD_NAME:-}
   Commit         $(git -C repo rev-parse HEAD)
 
 EOF
 
-    # BUILD_CREATED_BY is populated only when a user triggered the build. Empty
-    # means something started this WITHOUT a person — and for a production release
-    # that is not a degraded record, it is no authorization at all.
     if [ -z "${BUILD_CREATED_BY:-}" ]; then
       cat >&2 <<'EOF'
-ERROR: no triggering user recorded for a production release.
+ERROR: no triggering user recorded for a platform release.
 
-The only authorization control on this job is that a human starts it, so a build
-with no recorded human has no authorization. Refusing to deploy. If a trigger was
+The only authorisation control on this job is that a human starts it, so a build
+with no recorded human has no authorisation at all. Refusing. If a trigger was
 added to this job, remove it.
 EOF
       exit 1
     fi
 
-    install_cosign
-    echo "ADAPT: re-verify signature and provenance immediately before deploy."
-    echo "Time passed since preflight; verify what you are about to run."
+    echo "ADAPT: tag the release, and write the fork-facing note that says what"
+    echo "changed in PLATFORM-OWNED paths — those are the ones a sync overwrites"
+    echo "without asking. merge_required changes need a sentence each, because a"
+    echo "human on the other end has to reconcile them by hand."
     echo
-    echo "ADAPT: progressive deploy — canary to a small traffic slice, watch error"
-    echo "rate, latency and saturation against thresholds for a defined bake time,"
-    echo "then expand. Automated rollback on breach — the human decision arrives"
-    echo "ten minutes late every time."
-    echo
-    echo "ADAPT: post-deploy verification against ${PRODUCTION_URL:-<unset>}"
-    echo "ADAPT: write evidence/releases/${VERSION:-<version>}/deployment-record.md"
-    echo "Then schedule the 24-hour check: did the success metric from the ORIGINAL"
-    echo "idea record actually move? That closes the loop nearly everyone skips."
+    echo "ADAPT: write evidence/releases/${VERSION:-<version>}/release-record.md"
+    echo "Then check back: did any fork actually sync it? A platform release with"
+    echo "no adopters is not a release, it is a tag."
     ;;
 
   *)

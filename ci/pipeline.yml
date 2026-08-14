@@ -193,7 +193,7 @@ groups:
   # G5. A chain, and the only path a human starts by hand.
   #   release-preflight → deploy-staging → authorize-production
   - name: release
-    jobs: [release-preflight, deploy-staging, authorize-production]
+    jobs: [release-preflight, authorize-release]
 
   # What runs when nobody pushes. Worth its own view: after an outage or a
   # holiday, this is the list you check, and hunting for it across five
@@ -764,21 +764,21 @@ jobs:
           COSIGN_SHA256: ((cosign_sha256))
           REGISTRY: ((registry))
 
-  # ── Release (G5) ────────────────────────────────────────────────────────────
+  # ── Release (G5) — A TEMPLATE RELEASE, NOT A DEPLOY ─────────────────────────
   #
-  # RESTORED 2026-08-13. This lane was deleted in favour of the GitHub
-  # `production` environment with required reviewers, which was a genuinely
-  # stronger control (POAM-010, closed on that basis).
+  # keel ships no artifact and has no production environment. Its release is a
+  # TAGGED VERSION that forks pull via scripts/sync-platform.sh, so "deploy to
+  # staging" had nothing to deploy and `deploy-staging` is gone rather than left
+  # as scaffolding around an absence.
   #
-  # That control no longer exists: making the repository private removed the
-  # required-reviewers rule outright — measured, `branch_policy` only, 0
-  # reviewers — and Actions cannot run at all. So the comparison is no longer
-  # "weak Concourse gate vs strong GitHub gate". It is "weak Concourse gate vs
-  # nothing", and POAM-010 reopens with the lane.
+  # The blast radius is not smaller than a service deploy — it is wider and
+  # slower. A bad service deploy affects one environment and is rolled back in
+  # minutes; a bad platform release is fast-forwarded into every fork's
+  # platform-owned paths, overwriting their local edits by design, and each fork
+  # discovers it independently.
   #
-  # `authorize-production` has NO trigger. A human presses it and Concourse
-  # records who; the job refuses to run if no human is recorded. That is the
-  # whole of the control, and it is written down as such rather than dressed up.
+  # So G5 still means a named human authorises, and `authorize-release` still
+  # refuses to run without one.
 
   - name: release-preflight
     public: true
@@ -790,35 +790,17 @@ jobs:
           STAGE: preflight
           COSIGN_VERSION: ((cosign_version))
           COSIGN_SHA256: ((cosign_sha256))
-          REGISTRY: ((registry))
 
-  - name: deploy-staging
+  - name: authorize-release
     public: true
     serial: true
+    # No trigger anywhere in this plan. A human presses it, and Concourse records
+    # who — see ci/scripts/release.sh for exactly how weak that is, and POAM-010.
     plan:
       - get: repo
         passed: [release-preflight]
-      - task: deploy-staging
+      - task: authorize
         file: repo/ci/tasks/release.yml
         params:
-          STAGE: staging
-          REGISTRY: ((registry))
-          STAGING_URL: ((staging_url))
-
-  - name: authorize-production
-    public: true
-    serial: true
-    # No `trigger: true` anywhere in this plan, deliberately. The only way this
-    # runs is a human pressing + in the UI or `fly trigger-job`.
-    plan:
-      - get: repo
-        passed: [deploy-staging]
-      - task: authorize-and-deploy
-        file: repo/ci/tasks/release.yml
-        params:
-          STAGE: production
-          COSIGN_VERSION: ((cosign_version))
-          COSIGN_SHA256: ((cosign_sha256))
-          REGISTRY: ((registry))
-          PRODUCTION_URL: ((production_url))
+          STAGE: release
           CONCOURSE_URL: ((concourse_external_url))

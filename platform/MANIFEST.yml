@@ -51,12 +51,26 @@ platform_owned:
   - docs/compliance/assessment-plan.md
   - docs/compliance/ssp-outline.md
   - docs/lessons/
+  # The CLI a solo operator actually types. It was unclassified, so no fork has
+  # ever received it — the single most-used entry point in the platform.
+  - keel
+  # Agent assurance: the runner and the seeded behavioural cases (AIC-12).
+  - evals/
+  # Line-ending policy. Not cosmetic — CRLF corrupted a stored credential and
+  # produced 139 phantom shellcheck findings during the Concourse port.
+  - .gitattributes
+  - LICENSE
+  - NOTICE
+  - OPERATING.md
   - CONTRIBUTING.md
   - SETUP.md
 
 # ── PROJECT-OWNED ────────────────────────────────────────────────────────────
 # Never touched by sync. Yours entirely, from the moment you bootstrap.
 project_owned:
+  # Sprint inbox and completed work. A fork's own operating state, never the
+  # platform's.
+  - sprint/
   - src/
   - lib/
   - app/
@@ -93,6 +107,12 @@ merge_required:
   # supplies its own toolchain commands, tool pins, registry and deploy targets.
   # Sync reports the diff; a human merges it.
   - ci/
+  # Scanner allowlists: the platform ships a baseline, a fork adds its own
+  # fixtures and exclusions. Overwriting either side breaks a real scan.
+  - .gitleaks.toml
+  # The security contact and disclosure process differ per fork; the structure
+  # and the response expectations do not.
+  - SECURITY.md
   - .claude/settings.json
   - CLAUDE.md
   - .gitignore

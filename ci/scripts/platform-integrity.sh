@@ -14,6 +14,17 @@ python -m pip install --quiet --disable-pip-version-check pyyaml
 # Verifies agent tool grants match docs/compliance/ai-inventory.md, skills are
 # registered, actions are SHA-pinned, workflows declare least-privilege
 # permissions, and no generated evidence has been hand-placed in the tree.
+# keel is a TEMPLATE. It ships no artifact, so it has no build to break — its
+# delivery mechanism is scripts/sync-platform.sh, and the contract that mechanism
+# obeys is platform/MANIFEST.yml. That makes the manifest the closest thing this
+# repository has to a build output, and nothing checked it until #56.
+#
+# The failure is silent in the worst way: an unclassified path is never delivered
+# to a fork, and no fork can notice a file it was never sent. `ci/` — the whole
+# pipeline — sat unclassified after being added. So did `keel`, the CLI.
+echo "── platform manifest (the template's delivery contract) ───────────────────"
+python scripts/validate-manifest.py
+
 echo "── validate-platform ──────────────────────────────────────────────────────"
 python scripts/validate-platform.py
 
