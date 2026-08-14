@@ -366,6 +366,11 @@ jobs:
   # switched off within a week.
   - name: sast
     public: true
+    # serial: an 846MB CodeQL bundle is downloaded per language per run, so two
+    # concurrent builds is 3.4GB on one worker and three is five. Three stacked
+    # up during testing and none of them finished — they were not deadlocked,
+    # just starving each other. A job this expensive must not run against itself.
+    serial: true
     plan:
       - get: repo
         trigger: true
@@ -470,6 +475,7 @@ jobs:
 
   - name: mykronos-sast
     public: true
+    serial: true
     plan:
       - get: repo
         trigger: true
@@ -549,6 +555,7 @@ jobs:
 
   - name: mykronos-atlas
     public: true
+    serial: true
     plan:
       - get: repo
         trigger: true
@@ -713,6 +720,7 @@ jobs:
 
   - name: build-and-attest
     public: true
+    serial: true
     plan:
       - get: repo
         trigger: true
