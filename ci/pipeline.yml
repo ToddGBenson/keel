@@ -173,6 +173,12 @@ jobs:
     plan:
       - get: repo
         trigger: true
+      # Separate task because shellcheck ships its own Alpine image and the rest
+      # of the lint stage needs Python. Its report is an input to the stage
+      # below, which fails if it is missing — so the linter cannot be skipped
+      # silently.
+      - task: shellcheck
+        file: repo/ci/tasks/shellcheck.yml
       - task: lint
         file: repo/ci/tasks/ci-stage.yml
         params: { STAGE: lint }

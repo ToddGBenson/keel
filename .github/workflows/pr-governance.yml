@@ -274,31 +274,16 @@ jobs:
       - name: Validate platform integrity
         run: python scripts/validate-platform.py
 
-      # Per the control-assessment skill: TEST beats EXAMINE. Three real defects in these
-      # guards were found only by exercising them (POAM-002/003/004), including one that
-      # blocked edits REMOVING a secret. Four assertions are regression tests for those.
-      - name: Guard hook self-test
-        run: bash .claude/hooks/selftest.sh
-
-      # The dashboard generator has real logic (truncation disclosure, escaping, degraded
-      # rendering). Its tests are mutation-verified — removing the truncation notice or the
-      # escaper each fails 2 assertions.
-      - name: Dashboard generator tests
-        run: python test/dashboard.test.py
-
-      # The solo-mode self-review check (#44). It passed on a markdown heading — the
-      # one the PR template tells authors to write — so the compensating control for
-      # POAM-008 was satisfied before any review happened.
+      # ── TEST SUITES MOVED OUT, 2026-08-13 ────────────────────────────────────
+      # The guard self-test, the dashboard generator tests and the self-review
+      # check tests used to run here. They are test suites, and they now run in
+      # `Test & coverage` (ci.yml) — which until today was an ADAPT stub that
+      # echoed and passed while every real test in the repository ran under a job
+      # called "Platform integrity".
       #
-      # Four bypasses have now been found and pinned here, the last two by independent
-      # review rather than by the author. Almost every assertion is a negative case,
-      # and one runs against a real filesystem because the injected-fs tests were
-      # structurally unable to see the fourth.
-      #
-      # `node` comes from the runner image and is not pinned, unlike Python above.
-      # Noted rather than fixed: nothing here depends on a node version.
-      - name: Self-review check tests (POAM-008, #44)
-        run: node test/selfreview-check.test.js
+      # Both jobs are required checks, so nothing lost coverage. What changed is
+      # that each job's name is now true: this one verifies the platform's own
+      # control integrity, and the one called Test runs the tests.
 
   dependency-review:
     name: Dependency review (SR-3, SR-4, AIC-7)

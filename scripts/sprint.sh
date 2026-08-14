@@ -17,8 +17,7 @@
 # needs a secret, or has no safe default for a blocking question. It leaves a note instead.
 
 set -uo pipefail
-cd "$(dirname "$0")/.."
-ROOT="$PWD"
+cd "$(dirname "$0")/.." || { echo "cannot reach repo root" >&2; exit 1; }
 
 INBOX="sprint/inbox"; DONE="sprint/done"; DRY=0; ONE=""; PREFLIGHT=0; UNATTENDED=0
 POLICY="automation-policy.yml"

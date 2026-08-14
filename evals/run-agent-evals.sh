@@ -18,7 +18,7 @@
 # Usage:  bash evals/run-agent-evals.sh          (structural + the behavioral checklist)
 
 set -uo pipefail
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/.." || { echo "cannot reach repo root" >&2; exit 1; }
 PY="$(command -v python3 || command -v python || echo python)"
 fail=0
 if [ -t 1 ]; then G=$'\033[32m'; Y=$'\033[33m'; X=$'\033[31m'; B=$'\033[1m'; R=$'\033[0m'; else G=; Y=; X=; B=; R=; fi

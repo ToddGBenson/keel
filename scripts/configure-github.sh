@@ -216,7 +216,7 @@ CAN_SIGN=0
 
 if [ -n "$SIGN_KEY" ] && [ "$SIGN_ON" = "true" ]; then
   # Prove it: sign a throwaway object rather than trusting the config.
-  if git commit-tree -S -m probe "$(git rev-parse HEAD^{tree})" >/dev/null 2>&1; then
+  if git commit-tree -S -m probe "$(git rev-parse "HEAD^{tree}")" >/dev/null 2>&1; then
     # DEFECT FIXED 2026-08-08: this asked `gh api user/ssh_signing_keys` — i.e. "can I LIST
     # signing keys", which needs the admin:ssh_signing_key scope. A correctly registered key
     # therefore reported as MISSING whenever that scope was absent, conflating "I lack a

@@ -52,7 +52,7 @@ fi
 n=0; blocked=0
 declare -a FLAGGED=()
 
-while IFS=$'\t' read -r num state labels title; do
+while IFS=$'\t' read -r num _state labels title; do
   [ -n "$num" ] || continue
   n=$((n + 1))
   if printf '%s' "$labels" | grep -qE "$DISQUALIFYING"; then
