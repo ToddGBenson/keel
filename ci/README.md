@@ -13,17 +13,58 @@ approve anything. Gate approval stays a human act recorded in GitHub (PD-2).
 **One sentence decides it: GitHub gates the pull request, Concourse owns `main`
 and everything scheduled.**
 
-| Concern | Pull request | main / scheduled |
-|---|---|---|
-| Build, lint, test, coverage | Actions `ci.yml` | Concourse |
-| SAST, secrets, SCA, IaC, suppressions | Actions `security.yml` | Concourse |
-| PR governance (issue link, AI authorship, DoD, self-review) | Actions `pr-governance.yml` | — |
-| Platform integrity | Actions `pr-governance.yml` | Concourse |
-| Mykronos sast / secrets / atlas | — | Concourse |
-| AI evals, guardrails, agent assurance | — | Concourse |
-| Compliance monitoring, metrics | — | Concourse |
-| SBOM, sign, verify | — | Concourse |
-| **Release authorization (G5)** | — | **Actions `release.yml`** |
+| Concern | Pull request | main / scheduled | Required? |
+|---|---|---|---|
+| Build (scope statement — nothing to build here) | Actions `ci.yml` | Concourse | ✅ |
+| Lint: **shellcheck**, syntax, YAML, pipeline structure | Actions `ci.yml` | Concourse | ✅ |
+| Test: dashboard, self-review, guard self-test, agent evals | Actions `ci.yml` | Concourse | ✅ |
+| SAST — CodeQL, **javascript-typescript and python** | Actions `security.yml` | Concourse | ✅ ✅ |
+| Secrets, SCA, IaC, suppressions | Actions `security.yml` | Concourse | ✅ |
+| Container scan | Actions (`if: false`) | Concourse (no trigger) | ❌ inert |
+| PR governance (issue link, AI authorship, DoD, self-review) | Actions `pr-governance.yml` | — | ✅ |
+| Platform integrity (control integrity only) | Actions `pr-governance.yml` | Concourse | ✅ |
+| Mykronos sast / secrets / atlas | — | Concourse | — |
+| AI evals, guardrails, agent assurance | — | Concourse | — |
+| Compliance monitoring, metrics | — | Concourse | — |
+| SBOM, sign, verify | — | Concourse | — |
+| **Release authorization (G5)** | — | **Actions `release.yml`** | — |
+
+Twelve required status checks on `main`. Verify with:
+
+```sh
+gh api repos/ToddGBenson/keel/branches/main/protection \
+  --jq '.required_status_checks.contexts[]'
+```
+
+### What was wrong, and is now fixed
+
+Three of those checks used to verify nothing. `Build`, `Lint & static typing` and
+`Test & coverage` each echoed `ADAPT: ...` and exited 0 — required, green on every
+PR, asserting nothing — while every real test in the repository ran under a job
+called *Platform integrity*. The names were backwards.
+
+And the largest language here had no check at all: **3,785 lines of shell across
+28 files**, with `shellcheck` appearing in the repo only as a string inside the
+suppression-audit pattern. Two of the Concourse port's High defects were shell
+bugs, and shellcheck catches one of them outright — SC2097/SC2098, the
+assignment-prefix bug that made every Mykronos upload abort before calling the
+CLI. It does not catch the pipefail/SIGPIPE inversion. One of two.
+
+`SAST — CodeQL (python)` ran but was not required, while the js-ts lane was —
+and for most of this repo's life js-ts matched no files at all.
+
+### Deliberately not required
+
+- **Container image scan** — inert until this repo ships an image. Requiring a
+  check that can never report would block every PR.
+- **SCA and IaC skip loudly and pass**, because there are no manifests and no IaC.
+  That is correct: they become applicable the moment either appears, and the skip
+  prints "THIS IS NOT A PASS" rather than going quietly green. They stay required
+  so the day input arrives, the gate is already in place.
+- **Task images are pinned by tag, not digest.** `scripts/validate-pipeline.py`
+  warns rather than fails. Digest-pinning `python:3.13` would stop base-image CVE
+  fixes arriving — a patch-currency risk traded for a supply-chain one. Promote to
+  an error once Dependabot updates digests.
 
 ### Why the pull-request half stayed on Actions
 
