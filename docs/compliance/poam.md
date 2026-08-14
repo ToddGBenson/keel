@@ -42,6 +42,7 @@ assurance that everything else relies on.
 | POAM-011 | GitHub attestation store unreachable from Concourse — provenance/SBOM attestations lost | SR-4(3), CM-14 | Medium | Todd Benson | 2026-11-11 | Open |
 | POAM-012 | CodeQL SARIF from Concourse does not reach GitHub code scanning | SA-11(1) | Low | Todd Benson | 2026-08-13 | **Closed** — the lane that discarded SARIF was deleted; SAST on main now ingests both languages to Mykronos |
 | POAM-013 | Monthly monitoring cadence approximated by a weekly trigger | CA-7 | Low | Todd Benson | 2026-11-11 | Open — accepted, detection is loud |
+| POAM-014 | **No merge gate exists. Nothing verifies a change before it reaches `main`.** | CM-3, CM-5, AC-5, SA-11 | **Critical** | Todd Benson | 2026-08-20 | Open — accepted by the system owner |
 
 ### 2026-08-13 — the repository was made private, and three entries reopened
 
@@ -76,6 +77,61 @@ not fail, they simply never appear.
 **Closing any of these requires one of:** making the repository public again, or a GitHub plan
 that provides environments and Advanced Security on private repositories. There is no
 configuration-only path.
+
+---
+
+### POAM-014 — No merge gate exists ⚠️ CRITICAL
+
+**Weakness.** `main` has **no required status checks**, `required_approving_review_count` is
+**0**, and GitHub Actions cannot run on this repository. Nothing — no lint, no test, no SAST,
+no secret scan, no dependency review, no governance check — stands between a pull request and
+`main`.
+
+**How it happened, in order.** The repository was made private (accepted, POAM-005/006/010).
+Private repositories bill Actions minutes against the account, and the account has a payment
+or spending-limit problem, so **every workflow now fails to start** — measured:
+
+> `The job was not started because recent account payments have failed or your spending limit
+> needs to be increased.`
+
+Zero steps execute; jobs fail in about three seconds. Because those twelve checks could never
+report, they were removed from branch protection so that anything could merge at all. That
+removal is what makes this Critical rather than merely broken: a blocked repository is safe
+and useless, whereas an unblocked one with no checks is usable and unverified.
+
+**The compensating control for POAM-008 is also inoperative.** Solo operation was accepted on
+the basis that `Process compliance` enforced a self-review artifact in place of a second
+approver. That check is a GitHub Action. It cannot run. So POAM-008's acceptance now rests on
+a control that does not execute — which is the precise shape of documented false assurance
+its own entry warns about.
+
+**What still holds.** `enforce_admins`, linear history, no force-push, no deletions, required
+conversation resolution. Those prevent history damage; none of them look at content.
+
+**What partially compensates.** The Concourse pipeline still runs build, lint, test, secrets,
+SCA, IaC, suppression audit and platform integrity — and their triggers were restored to
+per-commit for exactly this reason, since a daily cadence would leave up to 24 hours of
+unverified `main`. But this is **detection after the fact**, not prevention: a defect reaches
+`main` first and is reported second. Concourse cannot block a merge, which is the whole reason
+PR gating was kept on Actions in ADR-0003 §D1.
+
+**Accepted by the system owner**, 2026-08-13, after being shown that this option means "no
+merge gate at all". Recorded here rather than softened.
+
+**Remediation — any one of these closes it.**
+1. Fix the Actions billing problem. Everything returns immediately; nothing else needs
+   changing, because the workflow files and their triggers were deliberately left intact.
+2. Make the repository public again. Actions minutes become free and unlimited, and
+   POAM-005/006/010 close with it.
+3. Self-hosted runners. Free on private repositories; a runner on the machine already hosting
+   Concourse would serve.
+
+**Evidence of closure.** All twelve contexts reporting again on a pull request, and restored
+to `required_status_checks`. Verified by opening a PR and watching them, not by reading
+settings.
+
+**Review this weekly, not quarterly.** A Critical finding whose remediation is a billing
+setting should not age.
 
 ---
 

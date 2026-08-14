@@ -178,6 +178,23 @@ jobs:
         file: repo/ci/pipeline.yml
         var_files: [repo/ci/vars.example.yml]
 
+  # ── PREMISE CHANGED 2026-08-13: THESE ARE NOW THE ONLY VERIFICATION ─────────
+  # These lanes were moved to a daily cadence because re-running a deterministic
+  # check on main re-answered a question the pull request had already answered
+  # (L0015). That reasoning depended on the pull request actually running them.
+  #
+  # It no longer does. The repository is private, GitHub Actions cannot run
+  # (billing), and every required status check has been removed so that anything
+  # can merge at all. There is no prevention layer left — so post-merge detection
+  # is not a duplicate of anything, it is the whole of it.
+  #
+  # Per-commit triggers are restored for exactly that reason. A daily cadence
+  # would leave up to 24 hours of unverified main, which was acceptable when a PR
+  # gate stood in front of it and is not acceptable now.
+  #
+  # If Actions ever run again, revert this hunk: the duplication argument becomes
+  # correct again the moment something blocks a merge.
+
   # ── CI ──────────────────────────────────────────────────────────────────────
   # Target: feedback under 10 minutes. Slow pipelines get bypassed, and a
   # bypassed control is worse than an honest absence of one because it still
@@ -187,6 +204,7 @@ jobs:
     public: true
     plan:
       - get: repo
+        trigger: true
       - get: daily
         trigger: true
       - task: build
@@ -197,6 +215,7 @@ jobs:
     public: true
     plan:
       - get: repo
+        trigger: true
       - get: daily
         trigger: true
       # Separate task because shellcheck ships its own Alpine image and the rest
@@ -213,6 +232,7 @@ jobs:
     public: true
     plan:
       - get: repo
+        trigger: true
       - get: daily
         trigger: true
       - task: test
@@ -255,6 +275,7 @@ jobs:
     public: true
     plan:
       - get: repo
+        trigger: true
       - get: daily
         trigger: true
       - task: gitleaks
@@ -268,6 +289,7 @@ jobs:
     public: true
     plan:
       - get: repo
+        trigger: true
       - get: daily
         trigger: true
       - task: grype
@@ -281,6 +303,7 @@ jobs:
     public: true
     plan:
       - get: repo
+        trigger: true
       - get: daily
         trigger: true
       - task: checkov
@@ -305,6 +328,7 @@ jobs:
     public: true
     plan:
       - get: repo
+        trigger: true
       - get: daily
         trigger: true
       - task: suppression-audit
@@ -453,6 +477,7 @@ jobs:
     public: true
     plan:
       - get: repo
+        trigger: true
       - get: daily
         trigger: true
       - task: platform-integrity

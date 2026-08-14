@@ -10,6 +10,25 @@ approve anything. Gate approval stays a human act recorded in GitHub (PD-2).
 
 ## What runs where, after the port
 
+> ## ⚠️ READ THIS FIRST — the prevent layer is currently GONE
+>
+> As of 2026-08-13 this repository is **private**, GitHub Actions **cannot run** (billing —
+> `job was not started because recent account payments have failed or your spending limit
+> needs to be increased`), and every required status check has been **removed** from `main`
+> so that anything can merge at all.
+>
+> **Nothing verifies a change before it lands.** Not lint, not tests, not SAST, not secret
+> scanning, not the governance checks. `required_approving_review_count` is 0, and the
+> POAM-008 compensating control — the self-review artifact check — is itself an Action and
+> therefore inoperative.
+>
+> Everything below still describes the intended design, and the workflow files and their
+> triggers were left intact **on purpose**: fixing the billing problem restores the whole
+> prevent layer with no further changes.
+>
+> Tracked as **POAM-014 (Critical)**. Until it is closed, the Concourse lanes below are
+> detection after the fact, not gates — which is why their per-commit triggers were restored.
+
 **Three questions decide where a check belongs. Not two.**
 
 | | Question it answers | Where | Trigger |
