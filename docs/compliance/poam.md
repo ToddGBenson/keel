@@ -25,6 +25,14 @@ assurance that everything else relies on.
 | Compensating control | What reduces exposure meanwhile |
 | Evidence of closure | Required to close — a rescan, a test, an assessment result |
 
+**Last reviewed:** 2026-08-14 — every row measured against the live system, not carried
+forward. Record: `evidence/assessments/2026-08-14-poam-review.md`. Nothing was closed.
+
+> **POAM-008's compensating control is inoperative.** Solo operation is accepted on the basis
+> that `Process compliance` enforces a self-review artifact in place of a second approver.
+> That check is a GitHub Action and Actions cannot run (POAM-014). The acceptance currently
+> rests on a control that does not execute.
+
 ## Register
 
 | ID | Weakness | Control | Risk | Owner | Due | Status |
