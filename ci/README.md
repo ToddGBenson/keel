@@ -10,8 +10,38 @@ approve anything. Gate approval stays a human act recorded in GitHub (PD-2).
 
 ## What runs where, after the port
 
-**One sentence decides it: GitHub gates the pull request, Concourse owns `main`
-and everything scheduled.**
+**Three questions decide where a check belongs. Not two.**
+
+| | Question it answers | Where | Trigger |
+|---|---|---|---|
+| **Prevent** | Is this change safe to merge? | GitHub Actions | `pull_request` |
+| **Detect** | Is `main` still clean *today*, against *today's* advisories, by a route prevention did not cover? | Concourse | `daily` / `weekly` |
+| **Ingest** | What are the findings for this exact commit, in the system of record? | Concourse | per commit |
+| **Assure** | Are the agents themselves still constrained? | Concourse | `weekly` |
+| **Authorize** | Did a named human approve the release? | GitHub Actions | manual |
+
+The pipeline originally had only *prevent* and "everything else on main", and the
+result was measurable duplication: CodeQL ran twice per language per change,
+gitleaks three times, grype/checkov/suppression-audit twice each.
+
+`main` cannot be reached except through a pull request that already ran all of
+them — `enforce_admins` on, no force-push, no deletions, linear history, 12
+required checks. **A deterministic check re-run on the merge commit re-answers a
+question the PR already answered.** It is not defence in depth; it is the same
+depth, twice, costing minutes and teaching people that a red main job is probably
+a flake.
+
+What *does* belong after the merge is anything that is **not** deterministic in
+the diff:
+
+- **time-dependent** — a clean SCA scan says nothing about a CVE published
+  yesterday, so it wants a cadence, not an echo
+- **route-dependent** — two PRs each green in isolation, a protection setting
+  changed, a merge that resolved badly
+- **commit-keyed** — Mykronos keys findings to a SHA, and a squash merge produces
+  a SHA no PR run ever saw
+- **too slow for the PR budget** — `full-suite`, which is the only CI job that
+  legitimately keeps a per-merge trigger
 
 | Concern | Pull request | main / scheduled | Required? |
 |---|---|---|---|
