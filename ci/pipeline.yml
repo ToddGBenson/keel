@@ -236,6 +236,22 @@ jobs:
   # applies it. This job is first in the file because it is what makes every
   # other job in it trustworthy.
   #
+  # ── THE TRAP: THIS JOB REVERTS BRANCH EXPERIMENTS ───────────────────────────
+  # `set_pipeline: self` applies ci/pipeline.yml FROM THE REPO INPUT, and that
+  # file pins `branch: main`. So applying a branch's pipeline by hand
+  # (`sed s/branch: main/branch: my-branch/`) survives only until this job next
+  # runs — it then rewrites the pipeline back to main's copy.
+  #
+  # That bit hard once: the fix for a broken git resource lived on a branch, this
+  # job reverted the pipeline to main's broken version, and the repo resource
+  # stopped authenticating — so nothing could run, including this job, which is
+  # what stopped the revert loop rather than any deliberate design.
+  #
+  # Main IS the definition; that is the point, not a defect. To try a pipeline
+  # change on a branch, either set it under a DIFFERENT pipeline name, or pause
+  # this job for the duration. Do not expect a hand-applied branch config to
+  # stick.
+  #
   # var_files points at vars.example.yml deliberately: that file holds this
   # repository's real NON-SECRET configuration (tool pins, URLs, versions), and
   # every actual secret is a ((var)) resolved from Vault at build time. A fork
