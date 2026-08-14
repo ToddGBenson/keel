@@ -177,9 +177,48 @@ EOF
 
 # Absent numerics arrive as the sentinel "none" rather than "", so a schema
 # change cannot quietly turn the comparisons below into no-ops.
-if [ "${TRUST_SCORE}" = "none" ] || [ "${MIN_TRUST_SCORE}" = "none" ]; then
-  echo "ERROR: the ingestion API returned no trust score or no floor." >&2
-  echo "The supply-chain gate cannot evaluate. This is not a pass." >&2
+#
+# ── A NULL TRUST SCORE IS NOT ALWAYS AN ERROR ────────────────────────────────
+# The platform returns trust_score=null DELIBERATELY when dependency_count is 0
+# (backend/mykronos/atlas.py, spec 07 §5a). It used to return 100 there — the
+# same answer a repository with four hundred clean dependencies gets, for a scan
+# that inspected nothing — and that was false assurance, so it now declines to
+# score rather than inventing one.
+#
+# This guard originally failed on ANY null, and was therefore wrong for exactly
+# the repository it runs on: keel declares no dependencies, so "not assessed" is
+# the correct answer and the lane went red for receiving it. Guarding against a
+# silent no-op is right; treating the platform's honesty as a fault is not.
+#
+# The distinction: null WITH dependencies is a broken contract and must fail.
+# Null WITHOUT dependencies is the platform being honest, and must be reported
+# loudly rather than either failing or passing quietly.
+if [ "${TRUST_SCORE}" = "none" ]; then
+  if [ "${DEPENDENCY_COUNT}" = "0" ]; then
+    cat <<'EOF'
+
+================================================================================
+SUPPLY CHAIN: NOT ASSESSED
+
+This repository resolved no dependencies, so there is no concrete version set to
+check advisories against, and the platform declined to score it.
+
+This is NOT a trust score of 100 and NOT a clean bill of health. It is a
+statement that nothing was assessed. It becomes a real score the moment a
+lockfile or a pinned manifest exists.
+================================================================================
+
+EOF
+    exit 0
+  fi
+  echo "ERROR: ${DEPENDENCY_COUNT} dependencies were reported but no trust score" >&2
+  echo "came back. That is a broken response, not an empty repository, so the" >&2
+  echo "supply-chain gate cannot evaluate. This is not a pass." >&2
+  exit 1
+fi
+
+if [ "${MIN_TRUST_SCORE}" = "none" ]; then
+  echo "ERROR: a trust score came back with no repository floor to compare against." >&2
   exit 1
 fi
 
