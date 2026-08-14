@@ -110,6 +110,36 @@ def main() -> int:
     for orphan in sorted(jobs - grouped):
         warn(f"job '{orphan}' appears in no group but 'all' — it will be hard to find")
 
+    # ── Broken chains in a group view ────────────────────────────────────────
+    # Concourse draws each group as its own DAG. A group containing a job but not
+    # the job it `passed:` from renders that dependency as an arrow from nowhere,
+    # so the one traceable path in the pipeline reads as unrelated boxes.
+    #
+    # This is not hypothetical: `build`/`lint`/`test` lived in a `ci` group while
+    # `build-and-attest`, which they feed, lived in `supply-chain`. Both views
+    # were missing half the chain and neither said so.
+    upstream: dict[str, set[str]] = {}
+    for job in pipeline.get("jobs", []):
+        deps: set[str] = set()
+
+        def collect(step, deps=deps):
+            if isinstance(step, dict):
+                deps.update(step.get("passed", []) or [])
+        for step in job.get("plan", []):
+            walk_steps(step, collect)
+        if deps:
+            upstream[job["name"]] = deps
+
+    for group in pipeline.get("groups", []) or []:
+        if group.get("name") == "all":
+            continue
+        members = set(group.get("jobs", []) or [])
+        for job_name in sorted(members):
+            missing = upstream.get(job_name, set()) - members
+            if missing:
+                warn(f"group '{group['name']}' has '{job_name}' but not its upstream "
+                     f"{sorted(missing)} — the chain will render broken in that view")
+
     referenced_tasks: set[Path] = set()
     referenced_scripts: set[Path] = set()
 
@@ -192,6 +222,44 @@ def main() -> int:
 
         for step in job.get("plan", []):
             walk_steps(step, check)
+
+        # ── Can every task actually GET its required inputs? ─────────────────
+        # Concourse fails a job with `missing inputs: <name>` before a single
+        # step runs, which reads like a broken task rather than a broken plan.
+        #
+        # This is the defect that shipped: `supply-chain.yml` was given a
+        # required `sbom` input to fix one consumer, and its other consumer —
+        # `verify-artifact`, which shares the file and has no SBOM — errored on
+        # every run. A fix applied to a shared file without checking its siblings
+        # (L0008), invisible to `fly validate-pipeline` because the task and the
+        # plan are each valid on their own.
+        available: set[str] = set()
+
+        def flow(step, available=available, jname=jname):
+            if not isinstance(step, dict):
+                return
+            if "get" in step:
+                available.add(step.get("as") or step["get"])
+            if "task" in step and "file" in step:
+                tp = ROOT / step["file"].replace("repo/", "", 1)
+                if not tp.exists():
+                    return
+                t = yaml.safe_load(tp.read_text(encoding="utf-8"))
+                imap = step.get("input_mapping") or {}
+                for inp in (t.get("inputs") or []):
+                    if inp.get("optional"):
+                        continue
+                    name = imap.get(inp["name"], inp["name"])
+                    if name not in available:
+                        err(f"{jname}/{step['task']}: needs input '{name}' "
+                            f"(required by {step['file']}) which nothing in this job "
+                            f"produces — Concourse will error with 'missing inputs'")
+                omap = step.get("output_mapping") or {}
+                for out in (t.get("outputs") or []):
+                    available.add(omap.get(out["name"], out["name"]))
+
+        for step in job.get("plan", []):
+            walk_steps(step, flow)
 
     # ── Orphans: files nothing reaches ───────────────────────────────────────
     if TASK_DIR.is_dir():

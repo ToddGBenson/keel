@@ -59,6 +59,41 @@ switched off within a week.
 `authorize-production` has no trigger and refuses to run when Concourse records no triggering
 human. That is the entire G5 control now — see POAM-006/010.
 
+### Trying a pipeline change on a branch
+
+`set-pipeline` applies `ci/pipeline.yml` **from the repo**, and that file pins
+`branch: main`. So a hand-applied branch config —
+
+```sh
+sed 's|branch: main|branch: my-branch|' ci/pipeline.yml > /tmp/p.yml
+fly -t mykronos set-pipeline -p keel -c /tmp/p.yml -l ci/vars.yml
+```
+
+— survives only until `set-pipeline` next runs, which reverts it to main's copy.
+Main is the definition; that is the point of the job, not a defect.
+
+To experiment on a branch, do one of:
+
+- set it under a **different pipeline name** (`-p keel-branch`), or
+- **pause `set-pipeline`** for the duration.
+
+This is not theoretical. The fix for a broken git resource lived on a branch,
+`set-pipeline` reverted the pipeline to main's broken version, and the repo
+resource then stopped authenticating — so nothing could run, including
+`set-pipeline`. The revert loop stopped because the pipeline broke, not because
+anything caught it.
+
+### Repository access
+
+The repo is private, so the `repo` resource authenticates over **SSH with a
+read-only deploy key** (`((git_private_key))`), not HTTPS with a token. A personal
+access token would work and would put a credential that can write to every
+repository the owner has into a pipeline whose need is to read one. The deploy
+key is scoped to this repository and registered `read_only`.
+
+If `check-resource` ever reports `could not read Username for 'https://github.com'`,
+the pipeline has been reverted to an HTTPS config — see the trap above.
+
 ## Where a check belongs — the model, and how it changed
 
 | | Question it answers | Trigger |

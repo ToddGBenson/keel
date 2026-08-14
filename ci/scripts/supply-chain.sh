@@ -29,12 +29,23 @@ case "${STAGE}" in
 
     # The SBOM arrives as an input from the syft task rather than being
     # regenerated here, so the inventory describes the same tree that was built.
-    if [ -f sbom/sbom.json ]; then
-      cp sbom/sbom.json artifact/sbom.cdx.json
-      echo "SBOM carried forward (CM-8)."
-    else
-      echo "WARNING: no SBOM input. CM-8 is not satisfied for this build." >&2
+    # HARD FAILURE, not a warning. CM-8 is a component inventory for the thing
+    # being built; an artifact lane that ships without one has not satisfied it,
+    # and the previous `WARNING:` here ran on every single build for weeks while
+    # the job stayed green.
+    #
+    # Enforced here rather than by making the task input required, because
+    # verify-artifact shares this task file and legitimately has no SBOM.
+    if [ ! -f sbom/sbom.json ]; then
+      echo "ERROR: no SBOM. CM-8 is not satisfied and this is not a pass." >&2
+      echo "The build-and-attest job must run the sbom + sbom-check tasks before" >&2
+      echo "this one. If syft found no components it deletes the file on purpose —" >&2
+      echo "see ci/scripts/sbom-check.sh — which means this repository has no" >&2
+      echo "resolved dependency set and there is nothing to inventory." >&2
+      exit 1
     fi
+    cp sbom/sbom.json artifact/sbom.cdx.json
+    echo "SBOM carried forward (CM-8)." 
 
     echo
     echo "ADAPT: fetch the previous release SBOM and diff component sets."

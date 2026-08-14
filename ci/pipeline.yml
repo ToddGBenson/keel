@@ -67,10 +67,19 @@ resources:
     check_every: 1m
     webhook_token: ((webhook_token))
     source:
+      # SSH with a READ-ONLY DEPLOY KEY, not HTTPS with a token.
+      #
+      # The repository went private, and the git resource then failed with
+      # `could not read Username for 'https://github.com'` — which took the whole
+      # pipeline down, because every job gets this resource. A personal access
+      # token would have fixed it and would have put a credential that can write
+      # to every repository the owner has into a pipeline that needs to read one.
+      #
+      # A deploy key is scoped to this repository and marked read_only, so the
+      # worst case is disclosure of source Concourse already checks out.
       uri: ((git_uri))
       branch: main
-      username: ((github_user))
-      password: ((github_token))
+      private_key: ((git_private_key))
       # Full history. Two independent reasons: the Mykronos adapters read
       # surrounding source to build the snippet fingerprint that gives a finding
       # stable identity, and a secret deleted in a later commit is still leaked.
@@ -131,22 +140,83 @@ resources:
 # ══════════════════════════════════════════════════════════════════════════════
 
 groups:
-  - name: ci
-    jobs: [set-pipeline, build, lint, test, full-suite]
+  # ── HOW THESE ARE ORGANISED ─────────────────────────────────────────────────
+  # Concourse renders each group as its own DAG, and the first group is the
+  # default view. So groups are not labels — they decide what a person sees when
+  # they open this pipeline, and whether the arrows between jobs are visible.
+  #
+  # The previous grouping was by SUBJECT (ci / supply-chain / security), which cut
+  # the one genuinely traceable path in this pipeline in half: build, lint and
+  # test sat in `ci` while the jobs they feed — build-and-attest, verify-artifact
+  # — sat in `supply-chain`. The `passed:` arrows between them existed and were
+  # invisible in both views, so the pipeline read as a field of unrelated boxes.
+  #
+  # Now: `commit` is first and contains the whole chain, so the default view is
+  # "what happens to my push", drawn as a chain. Every other group answers one
+  # question. Jobs appear in more than one group on purpose — a job belongs to
+  # every question it answers.
+
+  # What happens to a commit, end to end. This is the only group with `passed:`
+  # arrows running all the way through, so it is the one that draws a line.
+  #   set-pipeline
+  #   build ┐
+  #   lint  ├→ full-suite → build-and-attest → verify-artifact
+  #   test  ┘
+  - name: commit
+    jobs:
+      - set-pipeline
+      - build
+      - lint
+      - test
+      - full-suite
+      - build-and-attest
+      - verify-artifact
+
+  # What scans, and what blocks. `sast` is the only job in this pipeline that
+  # fails a build on a finding; the rest report. container-scan is inert until
+  # this repository ships an image.
   - name: security
-    jobs: [sast, secrets, sca, iac, container-scan, suppression-audit]
-  - name: mykronos
-    jobs: [mykronos-sast, mykronos-secrets, mykronos-atlas]
-  - name: platform
-    jobs: [platform-integrity]
+    jobs: [sast, secrets, sca, iac, suppression-audit, container-scan]
+
+  # Is the platform still the platform — agent tool grants against the inventory,
+  # skills registered, evidence integrity — plus the monitoring cadence that
+  # produces the evidence an assessor reads.
+  - name: governance
+    jobs:
+      - platform-integrity
+      - suppression-audit
+      - compliance-daily
+      - compliance-weekly
+      - compliance-monthly
+      - metrics-snapshot
+
+  # The agents are a system that can regress.
   - name: ai
     jobs: [ai-evals, ai-guardrails, agent-assurance]
-  - name: compliance
-    jobs: [compliance-daily, compliance-weekly, compliance-monthly, metrics-snapshot]
-  - name: supply-chain
-    jobs: [build-and-attest, verify-artifact]
+
+  # Ingestion to the system of record. PAUSED — no ingestion token; see
+  # ci/README.md. Grouped separately so a paused lane is obvious rather than a
+  # grey box in the middle of something else.
+  - name: mykronos
+    jobs: [mykronos-sast, mykronos-secrets, mykronos-atlas]
+
+  # G5. A chain, and the only path a human starts by hand.
+  #   release-preflight → deploy-staging → authorize-production
   - name: release
     jobs: [release-preflight, deploy-staging, authorize-production]
+
+  # What runs when nobody pushes. Worth its own view: after an outage or a
+  # holiday, this is the list you check, and hunting for it across five
+  # subject-based tabs is how a silent cadence stays silent.
+  - name: scheduled
+    jobs:
+      - ai-guardrails
+      - agent-assurance
+      - compliance-daily
+      - compliance-weekly
+      - compliance-monthly
+      - metrics-snapshot
+
   - name: all
     jobs: ["*"]
 
@@ -165,6 +235,22 @@ jobs:
   # `set_pipeline: self` closes it — main is the definition, and Concourse
   # applies it. This job is first in the file because it is what makes every
   # other job in it trustworthy.
+  #
+  # ── THE TRAP: THIS JOB REVERTS BRANCH EXPERIMENTS ───────────────────────────
+  # `set_pipeline: self` applies ci/pipeline.yml FROM THE REPO INPUT, and that
+  # file pins `branch: main`. So applying a branch's pipeline by hand
+  # (`sed s/branch: main/branch: my-branch/`) survives only until this job next
+  # runs — it then rewrites the pipeline back to main's copy.
+  #
+  # That bit hard once: the fix for a broken git resource lived on a branch, this
+  # job reverted the pipeline to main's broken version, and the repo resource
+  # stopped authenticating — so nothing could run, including this job, which is
+  # what stopped the revert loop rather than any deliberate design.
+  #
+  # Main IS the definition; that is the point, not a defect. To try a pipeline
+  # change on a branch, either set it under a DIFFERENT pipeline name, or pause
+  # this job for the duration. Do not expect a hand-applied branch config to
+  # stick.
   #
   # var_files points at vars.example.yml deliberately: that file holds this
   # repository's real NON-SECRET configuration (tool pins, URLs, versions), and
@@ -280,6 +366,11 @@ jobs:
   # switched off within a week.
   - name: sast
     public: true
+    # serial: an 846MB CodeQL bundle is downloaded per language per run, so two
+    # concurrent builds is 3.4GB on one worker and three is five. Three stacked
+    # up during testing and none of them finished — they were not deadlocked,
+    # just starving each other. A job this expensive must not run against itself.
+    serial: true
     plan:
       - get: repo
         trigger: true
@@ -384,6 +475,7 @@ jobs:
 
   - name: mykronos-sast
     public: true
+    serial: true
     plan:
       - get: repo
         trigger: true
@@ -463,6 +555,7 @@ jobs:
 
   - name: mykronos-atlas
     public: true
+    serial: true
     plan:
       - get: repo
         trigger: true
@@ -627,6 +720,7 @@ jobs:
 
   - name: build-and-attest
     public: true
+    serial: true
     plan:
       - get: repo
         trigger: true

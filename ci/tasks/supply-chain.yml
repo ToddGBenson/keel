@@ -21,11 +21,23 @@ image_resource:
 
 inputs:
   - name: repo
-  # Required, not optional. As an optional input it could never arrive — the
-  # only syft task lived in a different job — so the "no SBOM" branch ran on
-  # every build and `optional: true` turned a structural wiring error into a
-  # warning. The SBOM is now produced in the same job.
+  # OPTIONAL at the task level, MANDATORY at the build-and-attest stage.
+  #
+  # This input was made required to fix the opposite defect: build-and-attest
+  # took an optional `sbom` that nothing in its plan produced, so the "no SBOM"
+  # branch ran every time and `optional: true` turned a structural wiring error
+  # into a warning nobody read.
+  #
+  # Making it required broke the sibling. `verify-artifact` shares this task
+  # file, does not need an SBOM, and has no step that produces one — so every run
+  # errored with `missing inputs: sbom` before a single step executed. A fix
+  # applied to a shared file without checking its other consumer (L0008).
+  #
+  # So: optional here, and ci/scripts/supply-chain.sh FAILS HARD when
+  # STAGE=build-and-attest and no SBOM arrived. The requirement lives where the
+  # requirement actually is, instead of on every consumer of the file.
   - name: sbom
+    optional: true
 
 outputs:
   - name: artifact
