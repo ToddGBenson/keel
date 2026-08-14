@@ -33,17 +33,53 @@ assurance that everything else relies on.
 | POAM-002 | Secret guard used keyword matching; blocked all security tooling | AIC-5, IA-5 | Medium | *unassigned* | 2026-08-07 | **Closed** — fixed + regression test |
 | POAM-003 | Secret guard matched its own patterns; blocked its own repair | AIC-5 | Medium | *unassigned* | 2026-08-07 | **Closed** — fixed + regression test |
 | POAM-004 | Without `jq`, guard scanned `old_string`; blocked removing a secret | AIC-5, IA-5 | **High** | *unassigned* | 2026-08-07 | **Closed** — fixed |
-| POAM-005 | GitHub secret scanning + push protection unavailable (private repo, Free plan) | IA-5, SI-7 | Medium | Todd Benson | 2026-08-08 | **Closed** — repo made public; verified enabled |
-| POAM-006 | `production` environment has no required reviewers — **G5 is not technically enforced** | CM-3, AC-5 | **High** | Todd Benson | 2026-08-08 | **Closed** — public repo; environment reviewer set and verified |
+| POAM-005 | GitHub secret scanning + push protection unavailable (private repo, Free plan) | IA-5, SI-7 | Medium | Todd Benson | 2026-11-12 | **REOPENED 2026-08-13** — repo made private; measured `unavailable` |
+| POAM-006 | `production` environment has no required reviewers — **G5 is not technically enforced** | CM-3, AC-5 | **High** | Todd Benson | 2026-09-12 | **REOPENED 2026-08-13** — private repo dropped the rule; measured |
 | POAM-007 | Verification routine in `configure-github.sh` reported 5 false failures | CA-2 | Medium | *unassigned* | 2026-08-07 | **Closed** — fixed + re-verified |
 | POAM-008 | **Solo operation — AC-5 separation of duties cannot be satisfied** | AC-5, CM-5 | **High** | Todd Benson | on 2nd team member | Open — accepted with compensating controls |
 | POAM-009 | Commit signing not registered with GitHub — SI-7/CM-14 unsatisfied | SI-7, CM-14 | Medium | Todd Benson | 2026-08-08 | **Closed** — key registered; GitHub verifies commits; required_signatures enabled |
-| POAM-010 | **G5 release authorization weakened by the move to Concourse** — reopens POAM-006 | CM-3, AC-5 | **High** | Todd Benson | 2026-08-13 | **Closed** — release authorization moved back to GitHub Actions before merge (ADR-0003 D2) |
+| POAM-010 | **G5 release authorization weakened by the move to Concourse** — reopens POAM-006 | CM-3, AC-5 | **High** | Todd Benson | 2026-09-12 | **REOPENED 2026-08-13** — its fix depended on POAM-006, which the private switch undid |
 | POAM-011 | GitHub attestation store unreachable from Concourse — provenance/SBOM attestations lost | SR-4(3), CM-14 | Medium | Todd Benson | 2026-11-11 | Open |
 | POAM-012 | CodeQL SARIF from Concourse does not reach GitHub code scanning | SA-11(1) | Low | Todd Benson | 2026-08-13 | **Closed** — the lane that discarded SARIF was deleted; SAST on main now ingests both languages to Mykronos |
 | POAM-013 | Monthly monitoring cadence approximated by a weekly trigger | CA-7 | Low | Todd Benson | 2026-11-11 | Open — accepted, detection is loud |
 
-### POAM-010 — G5 release authorization weakened by the move to Concourse ✅ CLOSED 2026-08-13
+### 2026-08-13 — the repository was made private, and three entries reopened
+
+**Decision.** The system owner directed that the repository be made private, having been shown
+the cost first. It was made private at 2026-08-13. The regressions below are the accepted
+consequence, not a surprise — and each was **measured after the change**, not predicted.
+
+| | Before (public) | After (private, Free plan) |
+|---|---|---|
+| Secret scanning | `enabled` | **`unavailable`** |
+| Push protection | `enabled` | **`unavailable`** |
+| GitHub Advanced Security | n/a | **`unavailable`** |
+| `production` protection rules | `required_reviewers`, 1 reviewer | **`branch_policy` only, 0 reviewers** |
+
+**The one that matters is the last row.** The required-reviewers rule was not merely
+unenforced — it was **removed**. Environments with protection rules need Pro/Team/Enterprise
+on private repositories, so the G5 gate stopped being a technical control the moment the
+switch was flipped. POAM-006 reopens, and POAM-010 with it, because POAM-010 was closed *by
+relying on* POAM-006's fix.
+
+**What still holds.** Branch protection is intact: 12 required status checks, `enforce_admins`
+on, no force-push, no deletions, linear history. CodeQL still runs on pull requests and still
+passes — verified on #51 after the change. The `Dependency review` job already detected the
+private case and skips loudly, which is why it did not simply break.
+
+**Also observed, and not caused by the visibility change:** repository-level Actions were
+found `enabled: false` shortly afterwards, which stopped all 12 required checks reporting and
+left every pull request unmergeable. Re-enabled, per the decision to keep the three
+PR-triggered workflows live. Worth knowing that this failure mode is silent — the checks do
+not fail, they simply never appear.
+
+**Closing any of these requires one of:** making the repository public again, or a GitHub plan
+that provides environments and Advanced Security on private repositories. There is no
+configuration-only path.
+
+---
+
+### POAM-010 — G5 release authorization weakened by the move to Concourse ⚠️ REOPENED 2026-08-13
 
 **Closed before the change that opened it ever merged.** Release authorization was moved
 back to GitHub Actions rather than accepted as a weakening; `release.yml` is the live G5
