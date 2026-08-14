@@ -223,6 +223,44 @@ def main() -> int:
         for step in job.get("plan", []):
             walk_steps(step, check)
 
+        # ── Can every task actually GET its required inputs? ─────────────────
+        # Concourse fails a job with `missing inputs: <name>` before a single
+        # step runs, which reads like a broken task rather than a broken plan.
+        #
+        # This is the defect that shipped: `supply-chain.yml` was given a
+        # required `sbom` input to fix one consumer, and its other consumer —
+        # `verify-artifact`, which shares the file and has no SBOM — errored on
+        # every run. A fix applied to a shared file without checking its siblings
+        # (L0008), invisible to `fly validate-pipeline` because the task and the
+        # plan are each valid on their own.
+        available: set[str] = set()
+
+        def flow(step, available=available, jname=jname):
+            if not isinstance(step, dict):
+                return
+            if "get" in step:
+                available.add(step.get("as") or step["get"])
+            if "task" in step and "file" in step:
+                tp = ROOT / step["file"].replace("repo/", "", 1)
+                if not tp.exists():
+                    return
+                t = yaml.safe_load(tp.read_text(encoding="utf-8"))
+                imap = step.get("input_mapping") or {}
+                for inp in (t.get("inputs") or []):
+                    if inp.get("optional"):
+                        continue
+                    name = imap.get(inp["name"], inp["name"])
+                    if name not in available:
+                        err(f"{jname}/{step['task']}: needs input '{name}' "
+                            f"(required by {step['file']}) which nothing in this job "
+                            f"produces — Concourse will error with 'missing inputs'")
+                omap = step.get("output_mapping") or {}
+                for out in (t.get("outputs") or []):
+                    available.add(omap.get(out["name"], out["name"]))
+
+        for step in job.get("plan", []):
+            walk_steps(step, flow)
+
     # ── Orphans: files nothing reaches ───────────────────────────────────────
     if TASK_DIR.is_dir():
         for f in sorted(TASK_DIR.glob("*.yml")):
