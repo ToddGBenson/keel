@@ -111,6 +111,45 @@ Invoke `run.cmd` by full path — on a host with `NoDefaultCurrentDirectoryInExe
 
 ---
 
+## `actions/setup-python` cannot install on a non-administrator Windows runner
+
+**Symptom.** The step hangs for minutes and eventually fails:
+
+```
+'python-3.12.10-amd64.exe' is not recognized as an internal or external command
+Error happened during Python installation
+```
+
+**Two causes, and the second is the one that matters.**
+
+The first is `NoDefaultCurrentDirectoryInExePath` — `setup.ps1` invokes the installer by bare
+name from the extract directory. If the runner inherited that variable from the shell that
+launched it, nothing in the current directory is executable by name. The wrapper above clears
+it.
+
+The second cannot be worked around: `setup-python` runs the Windows installer with
+**`InstallAllUsers=1`**, which needs elevation. Non-elevated and `/quiet`, it waits forever on
+a consent prompt it cannot display, in a window you cannot see.
+
+**Fix — seed the tool cache once, and the action never runs the installer.** It looks for
+`RUNNER_TOOL_CACHE\Python\<version>\x64` alongside a `<version>\x64.complete` marker:
+
+```powershell
+$tc = "$HOME\actions-runner-keel\_work\_tool\Python\3.12.10\x64"
+Invoke-WebRequest 'https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.exe' -OutFile $env:TEMP\py.exe
+New-Item -ItemType Directory -Force -Path $tc | Out-Null
+Start-Process $env:TEMP\py.exe -Wait -ArgumentList `
+  '/quiet','InstallAllUsers=0',"TargetDir=$tc",'Include_pip=1','PrependPath=0','Shortcuts=0'
+New-Item -ItemType File -Force -Path "$tc\..\x64.complete" | Out-Null
+```
+
+`InstallAllUsers=0` is the whole difference. **Do not** solve this by changing the workflow to
+use whatever Python is on the host: the version would then differ per fork, and on Windows the
+`python` on `PATH` is often the Microsoft Store stub, which is not an interpreter.
+
+Match the version to whatever `.github/workflows/pr-governance.yml` requests. If they disagree,
+the action falls back to installing, and you are back here.
+
 ## Keeping it running
 
 `config.cmd --runasservice` needs administrator rights. Without them, register a logon task —
