@@ -92,3 +92,5 @@ it `superseded-by:` and stop carrying it. The ledger is a working set, not an ar
 | [L0011](0011-unexecuted-code-is-a-plan.md) | Unexecuted code is not code — it is a plan | promotable | bootstrap.sh, sync-platform.sh |
 | [L0012](0012-artifacts-are-silent-about-the-hard-parts.md) | A spec is silent about exactly the parts that break | promotable | artifact-intake skill, /spec |
 | [L0013](0013-setup-scripts-must-be-idempotent.md) | A setup script must be safe to run twice | promotable | configure-github.sh |
+| [L0014](0014-fixing-the-instance-is-not-fixing-the-class.md) | After fixing a control, ask what *else* satisfies the new predicate | promotable | selfreview-check.js + tests |
+| [L0015](0015-duplication-is-not-depth.md) | Run a deterministic check once; re-run only if the answer can change | promotable | ci/pipeline.yml trigger split |

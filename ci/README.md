@@ -10,20 +10,91 @@ approve anything. Gate approval stays a human act recorded in GitHub (PD-2).
 
 ## What runs where, after the port
 
-**One sentence decides it: GitHub gates the pull request, Concourse owns `main`
-and everything scheduled.**
+**Three questions decide where a check belongs. Not two.**
 
-| Concern | Pull request | main / scheduled |
-|---|---|---|
-| Build, lint, test, coverage | Actions `ci.yml` | Concourse |
-| SAST, secrets, SCA, IaC, suppressions | Actions `security.yml` | Concourse |
-| PR governance (issue link, AI authorship, DoD, self-review) | Actions `pr-governance.yml` | — |
-| Platform integrity | Actions `pr-governance.yml` | Concourse |
-| Mykronos sast / secrets / atlas | — | Concourse |
-| AI evals, guardrails, agent assurance | — | Concourse |
-| Compliance monitoring, metrics | — | Concourse |
-| SBOM, sign, verify | — | Concourse |
-| **Release authorization (G5)** | — | **Actions `release.yml`** |
+| | Question it answers | Where | Trigger |
+|---|---|---|---|
+| **Prevent** | Is this change safe to merge? | GitHub Actions | `pull_request` |
+| **Detect** | Is `main` still clean *today*, against *today's* advisories, by a route prevention did not cover? | Concourse | `daily` / `weekly` |
+| **Ingest** | What are the findings for this exact commit, in the system of record? | Concourse | per commit |
+| **Assure** | Are the agents themselves still constrained? | Concourse | `weekly` |
+| **Authorize** | Did a named human approve the release? | GitHub Actions | manual |
+
+The pipeline originally had only *prevent* and "everything else on main", and the
+result was measurable duplication: CodeQL ran twice per language per change,
+gitleaks three times, grype/checkov/suppression-audit twice each.
+
+`main` cannot be reached except through a pull request that already ran all of
+them — `enforce_admins` on, no force-push, no deletions, linear history, 12
+required checks. **A deterministic check re-run on the merge commit re-answers a
+question the PR already answered.** It is not defence in depth; it is the same
+depth, twice, costing minutes and teaching people that a red main job is probably
+a flake.
+
+What *does* belong after the merge is anything that is **not** deterministic in
+the diff:
+
+- **time-dependent** — a clean SCA scan says nothing about a CVE published
+  yesterday, so it wants a cadence, not an echo
+- **route-dependent** — two PRs each green in isolation, a protection setting
+  changed, a merge that resolved badly
+- **commit-keyed** — Mykronos keys findings to a SHA, and a squash merge produces
+  a SHA no PR run ever saw
+- **too slow for the PR budget** — `full-suite`, which is the only CI job that
+  legitimately keeps a per-merge trigger
+
+| Concern | Pull request | main / scheduled | Required? |
+|---|---|---|---|
+| Build (scope statement — nothing to build here) | Actions `ci.yml` | Concourse | ✅ |
+| Lint: **shellcheck**, syntax, YAML, pipeline structure | Actions `ci.yml` | Concourse | ✅ |
+| Test: dashboard, self-review, guard self-test, agent evals | Actions `ci.yml` | Concourse | ✅ |
+| SAST — CodeQL, **javascript-typescript and python** | Actions `security.yml` | Concourse | ✅ ✅ |
+| Secrets, SCA, IaC, suppressions | Actions `security.yml` | Concourse | ✅ |
+| Container scan | Actions (`if: false`) | Concourse (no trigger) | ❌ inert |
+| PR governance (issue link, AI authorship, DoD, self-review) | Actions `pr-governance.yml` | — | ✅ |
+| Platform integrity (control integrity only) | Actions `pr-governance.yml` | Concourse | ✅ |
+| Mykronos sast / secrets / atlas | — | Concourse | — |
+| AI evals, guardrails, agent assurance | — | Concourse | — |
+| Compliance monitoring, metrics | — | Concourse | — |
+| SBOM, sign, verify | — | Concourse | — |
+| **Release authorization (G5)** | — | **Actions `release.yml`** | — |
+
+Twelve required status checks on `main`. Verify with:
+
+```sh
+gh api repos/ToddGBenson/keel/branches/main/protection \
+  --jq '.required_status_checks.contexts[]'
+```
+
+### What was wrong, and is now fixed
+
+Three of those checks used to verify nothing. `Build`, `Lint & static typing` and
+`Test & coverage` each echoed `ADAPT: ...` and exited 0 — required, green on every
+PR, asserting nothing — while every real test in the repository ran under a job
+called *Platform integrity*. The names were backwards.
+
+And the largest language here had no check at all: **3,785 lines of shell across
+28 files**, with `shellcheck` appearing in the repo only as a string inside the
+suppression-audit pattern. Two of the Concourse port's High defects were shell
+bugs, and shellcheck catches one of them outright — SC2097/SC2098, the
+assignment-prefix bug that made every Mykronos upload abort before calling the
+CLI. It does not catch the pipefail/SIGPIPE inversion. One of two.
+
+`SAST — CodeQL (python)` ran but was not required, while the js-ts lane was —
+and for most of this repo's life js-ts matched no files at all.
+
+### Deliberately not required
+
+- **Container image scan** — inert until this repo ships an image. Requiring a
+  check that can never report would block every PR.
+- **SCA and IaC skip loudly and pass**, because there are no manifests and no IaC.
+  That is correct: they become applicable the moment either appears, and the skip
+  prints "THIS IS NOT A PASS" rather than going quietly green. They stay required
+  so the day input arrives, the gate is already in place.
+- **Task images are pinned by tag, not digest.** `scripts/validate-pipeline.py`
+  warns rather than fails. Digest-pinning `python:3.13` would stop base-image CVE
+  fixes arriving — a patch-currency risk traded for a supply-chain one. Promote to
+  an error once Dependabot updates digests.
 
 ### Why the pull-request half stayed on Actions
 

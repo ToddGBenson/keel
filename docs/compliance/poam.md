@@ -40,7 +40,7 @@ assurance that everything else relies on.
 | POAM-009 | Commit signing not registered with GitHub — SI-7/CM-14 unsatisfied | SI-7, CM-14 | Medium | Todd Benson | 2026-08-08 | **Closed** — key registered; GitHub verifies commits; required_signatures enabled |
 | POAM-010 | **G5 release authorization weakened by the move to Concourse** — reopens POAM-006 | CM-3, AC-5 | **High** | Todd Benson | 2026-08-13 | **Closed** — release authorization moved back to GitHub Actions before merge (ADR-0003 D2) |
 | POAM-011 | GitHub attestation store unreachable from Concourse — provenance/SBOM attestations lost | SR-4(3), CM-14 | Medium | Todd Benson | 2026-11-11 | Open |
-| POAM-012 | CodeQL SARIF from Concourse does not reach GitHub code scanning | SA-11(1) | Low | Todd Benson | 2026-11-11 | Open — reduced scope; PR commits still populate the Security tab |
+| POAM-012 | CodeQL SARIF from Concourse does not reach GitHub code scanning | SA-11(1) | Low | Todd Benson | 2026-08-13 | **Closed** — the lane that discarded SARIF was deleted; SAST on main now ingests both languages to Mykronos |
 | POAM-013 | Monthly monitoring cadence approximated by a weekly trigger | CA-7 | Low | Todd Benson | 2026-11-11 | Open — accepted, detection is loud |
 
 ### POAM-010 — G5 release authorization weakened by the move to Concourse ✅ CLOSED 2026-08-13
@@ -151,7 +151,22 @@ by attempting to verify an artifact that was never signed — the check must ref
 
 ---
 
-### POAM-012 — CodeQL SARIF no longer reaches GitHub code scanning
+### POAM-012 — CodeQL SARIF no longer reaches GitHub code scanning ✅ CLOSED 2026-08-13
+
+**Closed by deleting the lane rather than by accepting the gap.** The Concourse `sast` job
+ran CodeQL over javascript-typescript a second time — after the pull request had already run
+it — and wrote the SARIF to a build volume Concourse garbage-collects. Results reached
+nothing.
+
+`mykronos-sast` now runs both languages and ingests both to Mykronos, which is the designated
+system of record for findings. PR-time CodeQL continues to populate the GitHub Security tab
+for both languages. So SAST results now land in exactly two places, both of them durable, and
+one duplicate analysis per merge disappeared.
+
+**The stale-results warning below still stands** and is the reason to read this entry.
+
+<details>
+<summary>Original finding, retained for the audit trail</summary>
 
 **Weakness.** The code scanning upload API is reachable only from Actions. The keel-owned
 `sast` lane now emits SARIF as a build artifact with a printed finding summary instead of
@@ -167,6 +182,8 @@ alerts or add a banner, and do not cite that tab as SA-11(1) evidence for any co
 2026-08-13.
 
 **Owner.** Todd Benson. **Due.** 2026-11-11.
+
+</details>
 
 ---
 

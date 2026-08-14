@@ -134,7 +134,7 @@ groups:
   - name: ci
     jobs: [build, lint, test, full-suite]
   - name: security
-    jobs: [sast, secrets, sca, iac, container-scan, suppression-audit]
+    jobs: [secrets, sca, iac, container-scan, suppression-audit]
   - name: mykronos
     jobs: [mykronos-sast, mykronos-secrets, mykronos-atlas]
   - name: platform
@@ -163,6 +163,7 @@ jobs:
     public: true
     plan:
       - get: repo
+      - get: daily
         trigger: true
       - task: build
         file: repo/ci/tasks/ci-stage.yml
@@ -172,7 +173,14 @@ jobs:
     public: true
     plan:
       - get: repo
+      - get: daily
         trigger: true
+      # Separate task because shellcheck ships its own Alpine image and the rest
+      # of the lint stage needs Python. Its report is an input to the stage
+      # below, which fails if it is missing — so the linter cannot be skipped
+      # silently.
+      - task: shellcheck
+        file: repo/ci/tasks/shellcheck.yml
       - task: lint
         file: repo/ci/tasks/ci-stage.yml
         params: { STAGE: lint }
@@ -181,6 +189,7 @@ jobs:
     public: true
     plan:
       - get: repo
+      - get: daily
         trigger: true
       - task: test
         file: repo/ci/tasks/ci-stage.yml
@@ -197,8 +206,8 @@ jobs:
     public: true
     plan:
       - get: repo
-        trigger: true
         passed: [build, lint, test]
+        trigger: true
       - task: full-suite
         file: repo/ci/tasks/ci-stage.yml
         params: { STAGE: full-suite }
@@ -209,30 +218,19 @@ jobs:
   # at which point it stops being a control and becomes decoration. The existing
   # backlog is driven down on SLA through the POA&M.
 
-  - name: sast
-    public: true
-    plan:
-      - get: repo
-        trigger: true
-      - get: daily
-        trigger: true
-      - task: codeql
-        file: repo/ci/tasks/codeql.yml
-        params:
-          # ADAPT: your languages. Note this is the keel-owned SAST lane and
-          # scans javascript-typescript; the Mykronos lane scans python. Both
-          # were present in the Actions setup and both are ported as they stood.
-          CODEQL_LANGUAGE: javascript-typescript
-          CODEQL_QUERIES: security-extended,security-and-quality
-          CODEQL_BUNDLE_VERSION: ((codeql_bundle_version))
-          CODEQL_BUNDLE_SHA256: ((codeql_bundle_sha256))
-          UPLOAD_TO_MYKRONOS: "false"
-
+  # ── DAILY, NOT PER-COMMIT ───────────────────────────────────────────────────
+  # `main` cannot be reached except through a pull request that already ran
+  # gitleaks (enforce_admins on, no force-push, 12 required checks). Re-running
+  # it on every merge re-answers a question the PR already answered.
+  #
+  # What it is FOR is detection: a secret that arrives by a route prevention did
+  # not cover — two PRs green in isolation, a protection setting changed, a merge
+  # that resolved badly. Detection wants a cadence. This one still blocks, which
+  # is the difference between it and the ingestion lane below.
   - name: secrets
     public: true
     plan:
       - get: repo
-        trigger: true
       - get: daily
         trigger: true
       - task: gitleaks
@@ -246,7 +244,6 @@ jobs:
     public: true
     plan:
       - get: repo
-        trigger: true
       - get: daily
         trigger: true
       - task: grype
@@ -260,7 +257,6 @@ jobs:
     public: true
     plan:
       - get: repo
-        trigger: true
       - get: daily
         trigger: true
       - task: checkov
@@ -285,6 +281,7 @@ jobs:
     public: true
     plan:
       - get: repo
+      - get: daily
         trigger: true
       - task: suppression-audit
         file: repo/ci/tasks/suppression-audit.yml
@@ -301,24 +298,54 @@ jobs:
         trigger: true
       - get: weekly
         trigger: true
+      # BOTH languages, in one lane. There used to be a second `sast` job running
+      # CodeQL over javascript-typescript and then throwing the SARIF away
+      # (POAM-012) — a duplicate analysis whose results reached nothing. This is
+      # now the only SAST on main, and it ingests every language to the system of
+      # record. Deleting the other job closed POAM-012 rather than tracking it.
+      #
+      # output_mapping/input_mapping keep the two runs' results apart: the task
+      # always writes `mykronos-results`, so each is renamed on the way out and
+      # renamed back for its own upload.
       - do:
           - *mykronos_preflight
-          - task: codeql
+          - task: codeql-python
             file: repo/ci/tasks/codeql.yml
+            output_mapping: { mykronos-results: results-python }
             params:
               CODEQL_LANGUAGE: python
               CODEQL_QUERIES: security-extended
               CODEQL_BUNDLE_VERSION: ((codeql_bundle_version))
               CODEQL_BUNDLE_SHA256: ((codeql_bundle_sha256))
               UPLOAD_TO_MYKRONOS: "true"
+          - task: codeql-javascript
+            file: repo/ci/tasks/codeql.yml
+            output_mapping: { mykronos-results: results-javascript }
+            params:
+              CODEQL_LANGUAGE: javascript-typescript
+              CODEQL_QUERIES: security-extended
+              CODEQL_BUNDLE_VERSION: ((codeql_bundle_version))
+              CODEQL_BUNDLE_SHA256: ((codeql_bundle_sha256))
+              UPLOAD_TO_MYKRONOS: "true"
         ensure:
-          task: upload
-          file: repo/ci/tasks/mykronos-upload.yml
-          params:
-            <<: *mykronos_upload_params
-            CAPABILITY: sast
-            TOOL: codeql
-            TRIGGERED_BY: schedule
+          do:
+            - task: upload-python
+              file: repo/ci/tasks/mykronos-upload.yml
+              input_mapping: { mykronos-results: results-python }
+              params:
+                <<: *mykronos_upload_params
+                CAPABILITY: sast
+                TOOL: codeql
+                TRIGGERED_BY: schedule
+              ensure:
+                task: upload-javascript
+                file: repo/ci/tasks/mykronos-upload.yml
+                input_mapping: { mykronos-results: results-javascript }
+                params:
+                  <<: *mykronos_upload_params
+                  CAPABILITY: sast
+                  TOOL: codeql
+                  TRIGGERED_BY: schedule
 
   - name: mykronos-secrets
     public: true
@@ -402,6 +429,7 @@ jobs:
     public: true
     plan:
       - get: repo
+      - get: daily
         trigger: true
       - task: platform-integrity
         file: repo/ci/tasks/platform-integrity.yml
@@ -428,6 +456,7 @@ jobs:
     public: true
     plan:
       - get: repo
+      - get: weekly
         trigger: true
       - task: guardrails
         file: repo/ci/tasks/ai.yml

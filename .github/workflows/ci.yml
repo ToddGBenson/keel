@@ -6,8 +6,18 @@
 # assessment. Affected tests on PR, full suite on merge.
 #
 # ── ADAPT ME ──────────────────────────────────────────────────────────────────
-# Replace the `run:` steps with your toolchain. The STRUCTURE is the process control:
-# required checks, coverage that cannot drop, fail-on-new rather than fail-on-total.
+# The language-specific commands are yours to replace. The STRUCTURE is the process
+# control: required checks, coverage that cannot drop, fail-on-new not fail-on-total.
+#
+# ── THESE WERE STUBS UNTIL 2026-08-13 ─────────────────────────────────────────
+# Build, Lint and Test are three of `main`'s eleven required status checks, and all
+# three used to `echo "ADAPT: ..."` and exit 0. Three required checks that verified
+# nothing, on a repository whose largest body of code — 3,785 lines of shell across
+# 28 files — had no linter at all.
+#
+# Two of this session's High defects were shell bugs. shellcheck catches one of them
+# outright (SC2097/SC2098, the assignment-prefix token bug that broke every Mykronos
+# upload); it does not catch the other. One of two is worth having.
 
 name: CI
 
@@ -46,69 +56,123 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      # ADAPT: language setup + dependency cache.
-      # Cache dependencies, never cache RESULTS — a cached test result is not evidence.
-      # - uses: actions/setup-node@... with: { node-version: '22', cache: 'npm' }
-      # - uses: actions/setup-python@... with: { python-version: '3.12', cache: 'pip' }
-
-      - name: Install dependencies
+      # This repository ships no build artifact — it is a process platform of
+      # shell, Python and Markdown. Rather than echo a fake build step, say so
+      # in the same shape the scanners use for absent input: a scope statement,
+      # not a pass. It becomes a real build the moment there is one to run.
+      #
+      # ADAPT: replace this with your build, and install from a frozen lockfile
+      # so integrity is verified (SR-3, SR-4): `npm ci`, not `npm install`;
+      # `pip install -r requirements.txt --require-hashes`; `go mod verify`.
+      - name: Is there anything to build?
         run: |
-          echo "ADAPT: install with a frozen lockfile — integrity verified (SR-3, SR-4)"
-          # npm ci            # not `npm install`
-          # pip install -r requirements.txt --require-hashes
-          # go mod download && go mod verify
-
-      - name: Build
-        run: |
-          echo "ADAPT: build command"
+          if [ -f package.json ] || [ -f pyproject.toml ] || [ -f go.mod ]              || [ -f Cargo.toml ] || [ -f pom.xml ]; then
+            echo "::error::A build manifest exists but no build step is configured."
+            echo "This job would report success without building. Adapt it."
+            exit 1
+          fi
+          {
+            echo "### Build: nothing to build"
+            echo ""
+            echo "No build manifest in this repository, so there is no artifact to"
+            echo "produce. **This is a scope statement, not a pass.** The job fails"
+            echo "the moment a manifest appears without a build step, so this cannot"
+            echo "quietly stay green once there is something to compile."
+          } >> "$GITHUB_STEP_SUMMARY"
 
   lint:
     name: Lint & static typing
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-      - name: Lint
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.12'
+      - run: pip install --quiet pyyaml
+
+      # The largest language in this repo, and until now the only one with no
+      # check of any kind. -S warning: style noise would get this muted.
+      - name: shellcheck
         run: |
-          echo "ADAPT: linter"
-      - name: Static typing
+          shellcheck --version
+          mapfile -t files < <(find . -path ./.git -prune -o -name '*.sh' -print | sort)
+          echo "Checking ${#files[@]} shell script(s)"
+          shellcheck -S warning -f gcc "${files[@]}"
+
+      # Catches syntax errors shellcheck's parser recovers from.
+      - name: Shell syntax
+        run: find . -path ./.git -prune -o -name '*.sh' -print -exec bash -n {} \;
+
+      - name: Python syntax
+        run: python -m compileall -q scripts test src 2>/dev/null || python -m compileall -q scripts test
+
+      - name: JavaScript syntax
+        run: find . -path ./.git -prune -o -path ./node_modules -prune -o -name '*.js' -print -exec node --check {} \;
+
+      - name: YAML parses
         run: |
-          echo "ADAPT: type checker"
-      - name: Format check
-        run: |
-          echo "ADAPT: formatter --check"
+          python - <<'EOF'
+          import glob, sys, yaml
+          bad = 0
+          for f in sorted(glob.glob('.github/workflows/*.yml') + glob.glob('ci/**/*.yml', recursive=True)
+                          + ['platform/MANIFEST.yml', 'automation-policy.yml']):
+              try:
+                  yaml.safe_load(open(f, encoding='utf-8'))
+              except Exception as exc:
+                  print(f"FAIL {f}: {exc}"); bad = 1
+          print("all YAML parses" if not bad else "")
+          sys.exit(bad)
+          EOF
+
+      # `fly validate-pipeline` checks the schema. This checks the things that
+      # have actually broken: a task file that does not exist, a script a task
+      # points at that does not exist, a param a job passes that the task never
+      # declared, and the no-third-party-resource-types rule the pipeline claims
+      # for itself. No Concourse required.
+      - name: Concourse pipeline structure
+        run: python scripts/validate-pipeline.py
 
   test:
     name: Test & coverage
     runs-on: ubuntu-latest
-    # ADAPT: real collaborators for integration tests. Unit-mocked authz proves nothing
-    # about the real authorizer, and mocked persistence proves nothing about migrations.
-    # services:
-    #   postgres:
-    #     image: postgres:17
-    #     env: { POSTGRES_PASSWORD: postgres }
-    #     options: >-
-    #       --health-cmd pg_isready --health-interval 10s
-    #       --health-timeout 5s --health-retries 5
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0   # needed to compare coverage against the merge base
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.12'
+      - run: pip install --quiet pyyaml
 
-      - name: Unit tests
-        run: |
-          echo "ADAPT: unit test command with coverage output"
+      # The repository's actual test suites. These previously ran inside
+      # "Platform integrity", which made that job's name untrue and left this one
+      # — the job called Test — running nothing.
+      - name: Dashboard generator tests
+        run: python test/dashboard.test.py
 
-      - name: Integration tests
-        run: |
-          echo "ADAPT: integration tests against real collaborators"
-          echo "MUST include the negative-case tests for every allocated control —"
-          echo "the test proving the control DENIES is the security evidence (SA-11)."
+      # 33 assertions, mutation-verified, incl. one against a real filesystem.
+      # This is the compensating control for POAM-008; see scripts/selfreview-check.js.
+      - name: Self-review check tests (POAM-008)
+        run: node test/selfreview-check.test.js
 
-      - name: Coverage threshold
-        run: |
-          echo "ADAPT: assert coverage >= ${COVERAGE_THRESHOLD}%"
-          # A coverage DROP vs. main fails even when above the threshold — otherwise a
-          # large untested change passes by diluting an already-high number.
+      # TEST beats EXAMINE: three real defects in these guards were found only by
+      # exercising them (POAM-002/003/004), including one that blocked edits
+      # REMOVING a secret.
+      - name: Guard hook self-test
+        run: bash .claude/hooks/selftest.sh
+
+      # AIC-12 structural half. The behavioural half needs a live model and is run
+      # by the operator monthly — not faked here.
+      - name: Agent assurance (AIC-12 structural)
+        run: bash evals/run-agent-evals.sh
+
+      # ADAPT: unit and integration tests for your application code, with
+      # coverage >= ${COVERAGE_THRESHOLD}% and no drop against main. There is no
+      # application code in this repository yet; when there is, a coverage gate
+      # goes here and this comment goes away.
+      #
+      # MUST include the negative-case test for every control the threat model
+      # allocated — the test proving the control DENIES is the security evidence.
 
       - name: Upload test evidence
         if: always()   # evidence of a FAILING run is evidence too
@@ -119,12 +183,4 @@ jobs:
             **/test-results/**
             **/coverage/**
           retention-days: 90
-          if-no-files-found: warn
-
-  # The post-merge full suite lived here, gated on
-  # `github.event_name == 'push' && github.ref == 'refs/heads/main'`. With the
-  # push trigger gone that condition can never be true, so the job is removed
-  # rather than left as config that looks active and never runs.
-  #
-  # It is now the `full-suite` job in ci/pipeline.yml, which runs on every main
-  # commit after build, lint and test pass.
+          if-no-files-found: ignore

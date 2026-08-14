@@ -12,6 +12,10 @@ image_resource:
 
 inputs:
   - name: repo
+  # Produced by the shellcheck task; consumed only by STAGE=lint, which FAILS if
+  # it is absent rather than treating a missing linter as a pass.
+  - name: shellcheck-report
+    optional: true
 
 outputs:
   - name: test-evidence
