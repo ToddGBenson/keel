@@ -132,7 +132,7 @@ resources:
 
 groups:
   - name: ci
-    jobs: [build, lint, test, full-suite]
+    jobs: [set-pipeline, build, lint, test, full-suite]
   - name: security
     jobs: [secrets, sca, iac, container-scan, suppression-audit]
   - name: mykronos
@@ -153,6 +153,30 @@ groups:
 # ══════════════════════════════════════════════════════════════════════════════
 
 jobs:
+
+  # ── THE PIPELINE UPDATES ITSELF ─────────────────────────────────────────────
+  # Without this, every change to ci/pipeline.yml needs someone to remember
+  # `fly set-pipeline`, and the running pipeline silently drifts from the one in
+  # git. That drift is invisible: the UI shows a pipeline, and nothing says it is
+  # three commits behind the file that is supposed to define it.
+  #
+  # `set_pipeline: self` closes it — main is the definition, and Concourse
+  # applies it. This job is first in the file because it is what makes every
+  # other job in it trustworthy.
+  #
+  # var_files points at vars.example.yml deliberately: that file holds this
+  # repository's real NON-SECRET configuration (tool pins, URLs, versions), and
+  # every actual secret is a ((var)) resolved from Vault at build time. A fork
+  # changes the values there. Nothing sensitive is committed, which is the whole
+  # reason a credential manager exists.
+  - name: set-pipeline
+    public: true
+    plan:
+      - get: repo
+        trigger: true
+      - set_pipeline: self
+        file: repo/ci/pipeline.yml
+        var_files: [repo/ci/vars.example.yml]
 
   # ── CI ──────────────────────────────────────────────────────────────────────
   # Target: feedback under 10 minutes. Slow pipelines get bypassed, and a
