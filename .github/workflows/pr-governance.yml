@@ -6,31 +6,38 @@
 
 name: PR Governance
 
-# ── DISABLED 2026-08-13. Concourse is the delivery pipeline. Refs: #42, #50 ───
-# Triggers reduced to workflow_dispatch. It could not run regardless — the
-# repository is private and Actions fail to start on billing (POAM-014) — but
-# "cannot run" and "is not configured to run" are different statements, and the
-# second is the one that should be true.
+# ── RESTORED 2026-08-14 on a self-hosted runner. Refs: #58 ────────────────────
+# Disabled 2026-08-13 because Actions could not start at all:
+#   "The job was not started because recent account payments have failed or your
+#    spending limit needs to be increased."
+# A self-hosted runner does not consume included minutes. That it would therefore
+# still run was a HYPOTHESIS, and it was tested before anything was built on it:
+# run 31828759203 executed on runner `keel-local` while hosted runners were
+# refusing. Measured, not assumed.
 #
-# WHAT DOES NOT EXIST IN CONCOURSE, and is therefore simply gone:
+# THE DIVISION OF LABOUR, which is the point and not an accident of history:
+# Concourse is the delivery pipeline — it builds, tests, scans and records
+# evidence. It does not have a pull-request concept at all. This workflow does
+# the one thing Concourse structurally cannot: read the pull request. Issue
+# linkage, AI-authorship declaration, the DoD checklist, and the self-review
+# artifact that is POAM-008's compensating control all live in the PR body.
 #
-#   - Process compliance (this job). It reads the PULL REQUEST BODY through the
-#     GitHub API: issue linkage, AI-authorship declaration, the DoD checklist,
-#     and the self-review artifact that is POAM-008's compensating control.
-#     Concourse cannot see a PR body — it has no pull-request concept at all.
-#     Solo operation was accepted on the basis that this check enforced a
-#     self-review in place of a second approver. Nothing enforces it now.
+# WHAT IS STILL NOT GATED, and is tracked rather than papered over:
 #
-#   - Dependency review. A GitHub feature rather than a tool, so there is nothing
-#     to port. The SCA function is covered by grype and osv-scanner in Concourse;
-#     the new-vulnerabilities-in-this-diff framing is not.
+#   - Tests, scans and build. Those run in Concourse AFTER merge, against `main`.
+#     So this gate verifies the PROCESS of a change, not the CODE in it. That is
+#     a real remaining hole and POAM-014 stays open, re-scoped, until Concourse
+#     can see PR branches. Do not read a green check here as "the code is good".
 #
-#   Platform integrity DID move, and runs in Concourse on every commit.
+#   - Dependency review. A GitHub feature, not a tool, and it needs Advanced
+#     Security on private repositories. POAM-005, unchanged by any of this.
 #
-# Both losses are tracked in POAM-014. Restoring them means: fix Actions billing,
-# restore this `on:` block, and re-add the check names to branch protection —
-# all three, or none of it takes effect.
+# THREE THINGS OR NONE: this `on:` block, a runner that is actually online, and
+# the check name in branch protection. Any one of them missing and the gate is
+# decorative — which is exactly the state POAM-014 describes.
 on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
 
 permissions:
@@ -41,11 +48,29 @@ concurrency:
   group: pr-governance-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
+defaults:
+  run:
+    # Explicit because this runs on Windows here and on Linux in most forks. The
+    # Windows default is pwsh, and the steps below are written in sh.
+    shell: bash
+
 jobs:
   governance:
     name: Process compliance
-    runs-on: ubuntu-latest
-    if: github.event.pull_request.draft == false
+    # WHERE THIS RUNS IS CONFIGURATION, NOT A FORK-TIME MERGE CONFLICT.
+    # `.github/workflows` is merge_required in platform/MANIFEST.yml, so every
+    # line here is one a fork has to reconcile by hand. A fork with working
+    # hosted runners changes nothing and gets ubuntu-latest; this repository sets
+    # the KEEL_RUNNER_LABELS variable to ["self-hosted","keel"]. A malformed
+    # value fails loudly at fromJSON, which is the correct direction to fail.
+    runs-on: ${{ fromJSON(vars.KEEL_RUNNER_LABELS || '["ubuntu-latest"]') }}
+    # NEVER RUN FORK CODE ON THE SELF-HOSTED RUNNER. It shares a host with
+    # Concourse and Vault, so a workflow step here reaches localhost:8080 and
+    # localhost:8200. `pull_request` uses the base repo's workflow file, but the
+    # steps still check out and can execute the fork's code.
+    if: >-
+      github.event.pull_request.draft == false &&
+      github.event.pull_request.head.repo.full_name == github.repository
     steps:
       - name: Check out
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -278,8 +303,15 @@ jobs:
 
   platform-integrity:
     name: Platform integrity (AIC-3, AIC-8, AU-9)
-    runs-on: ubuntu-latest
-    if: github.event.pull_request.draft == false
+    runs-on: ${{ fromJSON(vars.KEEL_RUNNER_LABELS || '["ubuntu-latest"]') }}
+    # This IS also a Concourse job, and the duplication is deliberate rather than
+    # an oversight. Concourse runs it on `main`, after merge — that is detection.
+    # Here it runs on the PR, before merge — that is prevention. The check that
+    # catches a hallucinated action SHA or agent tool-grant drift is worth
+    # roughly nothing if it can only tell you afterwards.
+    if: >-
+      github.event.pull_request.draft == false &&
+      github.event.pull_request.head.repo.full_name == github.repository
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
@@ -310,8 +342,10 @@ jobs:
 
   dependency-review:
     name: Dependency review (SR-3, SR-4, AIC-7)
-    runs-on: ubuntu-latest
-    if: github.event.pull_request.draft == false
+    runs-on: ${{ fromJSON(vars.KEEL_RUNNER_LABELS || '["ubuntu-latest"]') }}
+    if: >-
+      github.event.pull_request.draft == false &&
+      github.event.pull_request.head.repo.full_name == github.repository
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
