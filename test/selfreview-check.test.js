@@ -362,6 +362,35 @@ check('INTEGRATION: traversal payloads resolve to nothing on a real tree', () =>
       assert.ok(r.failures.length > 0, 'no failure raised for: ' + p);
     }
 
+    // A REAL symlink, not an injected `isSymlink: () => true`. git stores
+    // symlinks and actions/checkout materialises them, so this is committable:
+    // evidence/44's record as a link to evidence/42's real one.
+    //
+    // Skipped LOUDLY on hosts that cannot create symlinks (Windows without
+    // Developer Mode returns EPERM) — the assertion is not silently dropped,
+    // because this is the one case injection cannot represent. Verified passing
+    // on linux in node:22-alpine.
+    const linkPath = nodePath.join(root, 'evidence', '44', 'g3', 'self-review.md');
+    let linked = false;
+    try {
+      fs.symlinkSync('../../42/g3/self-review.md', linkPath);
+      linked = fs.lstatSync(linkPath).isSymbolicLink();
+    } catch (err) {
+      console.log(`         (symlink case SKIPPED on this host: ${err.code} — ` +
+                  `runs on the Linux runner, where it is not optional)`);
+    }
+    if (linked) {
+      assert.ok(fs.readFileSync(linkPath, 'utf8').includes('Not verified'),
+                'the link must actually resolve, or the case proves nothing');
+      const sym = evaluate({
+        body: 'Closes #44\n\nRecord: evidence/44/g3/self-review.md',
+        title: 'fix: x', prNumber: 46, ...realFs,
+      });
+      assert.strictEqual(sym.found, false, 'a symlinked record must be rejected');
+      assert.match(sym.failures[0], /symbolic link/i);
+      fs.unlinkSync(linkPath);
+    }
+
     // And the honest path on the same real tree still works.
     fs.writeFileSync(nodePath.join(root, 'evidence', '44', 'g3', 'self-review.md'),
                      GOOD_RECORD.replace('PR: #43', 'PR: #46'));
