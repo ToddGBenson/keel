@@ -67,10 +67,19 @@ resources:
     check_every: 1m
     webhook_token: ((webhook_token))
     source:
+      # SSH with a READ-ONLY DEPLOY KEY, not HTTPS with a token.
+      #
+      # The repository went private, and the git resource then failed with
+      # `could not read Username for 'https://github.com'` — which took the whole
+      # pipeline down, because every job gets this resource. A personal access
+      # token would have fixed it and would have put a credential that can write
+      # to every repository the owner has into a pipeline that needs to read one.
+      #
+      # A deploy key is scoped to this repository and marked read_only, so the
+      # worst case is disclosure of source Concourse already checks out.
       uri: ((git_uri))
       branch: main
-      username: ((github_user))
-      password: ((github_token))
+      private_key: ((git_private_key))
       # Full history. Two independent reasons: the Mykronos adapters read
       # surrounding source to build the snippet fingerprint that gives a finding
       # stable identity, and a secret deleted in a later commit is still leaked.

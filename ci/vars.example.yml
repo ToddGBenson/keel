@@ -26,10 +26,11 @@
 # through a PR, and the scanner's own output is the regression test.
 
 # ── Repository ────────────────────────────────────────────────────────────────
-git_uri: https://github.com/ToddGBenson/keel.git
+# SSH, because the repository is private and the git resource authenticates
+# with a read-only deploy key rather than a token that can write everywhere.
+git_uri: git@github.com:ToddGBenson/keel.git
 github_owner: ToddGBenson
 github_repo: keel
-github_user: x-access-token          # with a PAT as the password
 
 # ── Concourse ─────────────────────────────────────────────────────────────────
 # Used in evidence records so a build URL in an audit trail actually resolves.
@@ -99,8 +100,9 @@ production_url: ""
 # SUPPLIED BY THE CREDENTIAL MANAGER — never put these in a -l file
 # ══════════════════════════════════════════════════════════════════════════════
 #
-#   ((github_token))              repo read; PR governance stays on Actions, so
-#                                 this needs no write scope
+#   ((git_private_key))           read-only DEPLOY KEY for this repo (SSH).
+#                                 Scoped to one repository; cannot write.
+#   ((github_token))              only the github-release resource needs this.
 #   ((webhook_token))             shared secret in the GitHub webhook URL
 #   ((mykronos_ingestion_token))  scoped to this repository, with the sast,
 #                                 secrets and atlas capabilities granted
