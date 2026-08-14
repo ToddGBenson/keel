@@ -32,7 +32,15 @@ if [ -f sbom/sbom.json ]; then
     -H "Authorization: Bearer ${MYKRONOS_INGESTION_TOKEN}" \
     -H "Content-Type: application/octet-stream" \
     --data-binary @sbom/sbom.json \
-    | python3 -c 'import json,sys; print(json.load(sys.stdin).get("raw_output_ref",""))')"; then
+    | python3 -c 'import json, sys
+# Tolerant on purpose. curl --fail already decides whether the archive
+# succeeded; when it fails the body is empty and json.load raised a traceback
+# that printed ABOVE the warning explaining what happened — so the loudest thing
+# in the log was a stack trace for a condition the script handles.
+try:
+    print(json.load(sys.stdin).get("raw_output_ref", ""))
+except Exception:
+    print("")')"; then
     echo "WARNING: could not archive the SBOM. Continuing so the evidence record" >&2
     echo "still lands — it will simply carry no sbom_ref." >&2
     SBOM_REF=""
