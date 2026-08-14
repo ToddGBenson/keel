@@ -110,6 +110,36 @@ def main() -> int:
     for orphan in sorted(jobs - grouped):
         warn(f"job '{orphan}' appears in no group but 'all' — it will be hard to find")
 
+    # ── Broken chains in a group view ────────────────────────────────────────
+    # Concourse draws each group as its own DAG. A group containing a job but not
+    # the job it `passed:` from renders that dependency as an arrow from nowhere,
+    # so the one traceable path in the pipeline reads as unrelated boxes.
+    #
+    # This is not hypothetical: `build`/`lint`/`test` lived in a `ci` group while
+    # `build-and-attest`, which they feed, lived in `supply-chain`. Both views
+    # were missing half the chain and neither said so.
+    upstream: dict[str, set[str]] = {}
+    for job in pipeline.get("jobs", []):
+        deps: set[str] = set()
+
+        def collect(step, deps=deps):
+            if isinstance(step, dict):
+                deps.update(step.get("passed", []) or [])
+        for step in job.get("plan", []):
+            walk_steps(step, collect)
+        if deps:
+            upstream[job["name"]] = deps
+
+    for group in pipeline.get("groups", []) or []:
+        if group.get("name") == "all":
+            continue
+        members = set(group.get("jobs", []) or [])
+        for job_name in sorted(members):
+            missing = upstream.get(job_name, set()) - members
+            if missing:
+                warn(f"group '{group['name']}' has '{job_name}' but not its upstream "
+                     f"{sorted(missing)} — the chain will render broken in that view")
+
     referenced_tasks: set[Path] = set()
     referenced_scripts: set[Path] = set()
 
