@@ -25,6 +25,14 @@ assurance that everything else relies on.
 | Compensating control | What reduces exposure meanwhile |
 | Evidence of closure | Required to close — a rescan, a test, an assessment result |
 
+> **2026-08-14 — keel is a TEMPLATE, and three entries were scoped as if it were a
+> service.** It ships no artifact and has no production environment (ADR-0004). POAM-006,
+> POAM-010 and POAM-011 were written about deploying and signing an artifact that does not
+> exist. They are **not closed** — the underlying control still matters, because a platform
+> release is fast-forwarded into every fork's platform-owned paths and has a WIDER blast
+> radius than one deploy. They are re-scoped to what is actually released: a tagged version
+> that forks sync. See each entry.
+
 **Last reviewed:** 2026-08-14 — every row measured against the live system, not carried
 forward. Record: `evidence/assessments/2026-08-14-poam-review.md`. Nothing was closed.
 
@@ -47,7 +55,7 @@ forward. Record: `evidence/assessments/2026-08-14-poam-review.md`. Nothing was c
 | POAM-008 | **Solo operation — AC-5 separation of duties cannot be satisfied** | AC-5, CM-5 | **High** | Todd Benson | on 2nd team member | Open — accepted with compensating controls |
 | POAM-009 | Commit signing not registered with GitHub — SI-7/CM-14 unsatisfied | SI-7, CM-14 | Medium | Todd Benson | 2026-08-08 | **Closed** — key registered; GitHub verifies commits; required_signatures enabled |
 | POAM-010 | **G5 release authorization weakened by the move to Concourse** — reopens POAM-006 | CM-3, AC-5 | **High** | Todd Benson | 2026-09-12 | **REOPENED 2026-08-13** — its fix depended on POAM-006, which the private switch undid |
-| POAM-011 | GitHub attestation store unreachable from Concourse — provenance/SBOM attestations lost | SR-4(3), CM-14 | Medium | Todd Benson | 2026-11-11 | Open |
+| POAM-011 | No provenance for what forks receive — cosign sign/attest are stubs (re-scoped 2026-08-14: the subject is the platform release, not an artifact) | SR-4(3), CM-14 | Medium | Todd Benson | 2026-11-11 | Open |
 | POAM-012 | CodeQL SARIF from Concourse does not reach GitHub code scanning | SA-11(1) | Low | Todd Benson | 2026-08-13 | **Closed** — the lane that discarded SARIF was deleted; SAST on main now ingests both languages to Mykronos |
 | POAM-013 | Monthly monitoring cadence approximated by a weekly trigger | CA-7 | Low | Todd Benson | 2026-11-11 | Open — accepted, detection is loud |
 | POAM-014 | **No merge gate exists. Nothing verifies a change before it reaches `main`.** | CM-3, CM-5, AC-5, SA-11 | **Critical** | Todd Benson | 2026-08-20 | Open — accepted by the system owner |
@@ -232,6 +240,31 @@ attempting it, not by reading the config.
 
 ---
 
+### POAM-011 — no provenance for what forks receive
+
+**Re-scoped 2026-08-14.** This was written about attesting a build artifact. keel builds no
+artifact, so read literally the entry was unclosable and meaningless — the temptation is to
+mark it N/A and move on.
+
+That would be wrong. **keel does distribute something**: `scripts/sync-platform.sh`
+fast-forwards platform-owned paths into every fork, overwriting local edits there by design.
+A fork has no way to verify that what it just pulled is what upstream intended. That is the
+same property SR-4(3) is about, applied to the thing this repository actually ships.
+
+**Measured:** `cosign sign`, `cosign attest` and `cosign verify` are five `ADAPT:` echo lines
+in `ci/scripts/supply-chain.sh`. Nothing is signed, and `verify-artifact` prints "Failure here
+is a hard block" having verified nothing.
+
+**What closing it looks like now:** a signed checksum manifest of platform-owned paths,
+produced at release and verifiable by `sync-platform.sh` before it overwrites anything.
+
+**Owner.** Todd Benson. **Due.** 2026-11-11.
+
+---
+
+<details>
+<summary>Original artifact-scoped finding, retained for the audit trail</summary>
+
 ### POAM-011 — GitHub attestation store unreachable from Concourse
 
 **Weakness.** `actions/attest-build-provenance` and `actions/attest-sbom` write to GitHub's
@@ -261,6 +294,8 @@ not be read as a pass.
 by attempting to verify an artifact that was never signed — the check must refuse it.
 
 **Owner.** Todd Benson. **Due.** 2026-11-11 (Medium, 90 days).
+
+</details>
 
 ---
 
