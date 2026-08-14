@@ -67,10 +67,11 @@ All fixed in this PR except `sprint.sh`, filed as #47.
 
 ## Not verified
 
-- **The symlink rejection has never executed against a real symlink.** Windows blocked
-  `ln -s` for me and for the agent who raised it. The unit test injects `isSymlink: () => true`;
-  nothing has confirmed `fs.lstatSync().isSymbolicLink()` behaves as expected on a
-  `actions/checkout` tree with a committed mode-120000 entry. **Unverified, not passed.**
+- ~~The symlink rejection has never executed against a real symlink.~~ **Now verified.**
+  Run in `node:22-alpine` against a real symlink resolving to real content: rejected. Added
+  as an integration assertion that executes on the Linux runner and skips loudly elsewhere,
+  naming the errno. Still unverified: that `actions/checkout` materialises a committed
+  mode-120000 entry as a symlink rather than a text file — plausible, not demonstrated.
 - **Whether `Process compliance` is still a required status check on `main`.** I read it
   earlier in the session and it was; I have not re-read it since. Everything here is moot if
   it is not.
