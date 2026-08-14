@@ -85,16 +85,6 @@ resources:
       # stable identity, and a secret deleted in a later commit is still leaked.
       fetch_tags: true
 
-  - name: github-release
-    type: github-release
-    icon: tag
-    source:
-      owner: ((github_owner))
-      repository: ((github_repo))
-      access_token: ((github_token))
-      drafts: false
-      pre_release: false
-
   # ── Schedules ───────────────────────────────────────────────────────────────
   # Concourse's bundled `time` resource has no cron syntax and no day-of-month
   # support.
@@ -559,8 +549,21 @@ jobs:
     plan:
       - get: repo
         trigger: true
-      - get: github-release
-        trigger: true
+      # `github-release` removed 2026-08-14. It resolved to
+      #   GET /repos/ToddGBenson/keel/releases -> 404 Not Found
+      # because the repository is private and ((github_token)) is empty, and an
+      # unauthenticated call to a private repo returns 404 rather than 401. The
+      # failing resource check left this whole lane PENDING — not failed, just
+      # never scheduled, which is the least visible way for a lane to stop.
+      #
+      # It bought one thing: stamping `tag_or_release` on Atlas evidence when a
+      # build sits at a release commit. This repository has never cut a release,
+      # so the resource was blocking a lane in exchange for a field that has
+      # always been empty. atlas-evidence already treats it as optional and omits
+      # the tag when absent.
+      #
+      # To restore: put a read-only token in ((github_token)) and add the get
+      # back. Do not add it back without the token.
       - get: weekly
         trigger: true
       - do:
