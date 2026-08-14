@@ -43,9 +43,39 @@ osv-scanner --version
 # means nothing was scanned, and a capability that scanned nothing must not
 # report a clean supply chain. A blanket `|| true` here is what hid both of the
 # bugs above for the entire life of this lane.
+# ── EXIT 128 IS OVERLOADED ────────────────────────────────────────────────────
+# 128 with "No package sources found" means the repository declares no
+# dependencies — a docs repo, a shell-script repo, a project before its first
+# manifest. That is a legitimate state, not an error and not a finding, and keel
+# is exactly such a repository.
+#
+# Treating it as a failure costs both directions: the lane goes permanently red
+# for repos that will never have a manifest, so operators learn to ignore it —
+# and a genuinely broken scanner then looks exactly like an empty repository.
+#
+# Ported from the upstream Mykronos template 2.1.0 (mykronos PR #45), which fixed
+# this in the Actions workflow. This script was a port of 2.0.0 and carried the
+# old behaviour, so the Concourse lane failed on keel while the workflow it
+# replaced would have passed.
+#
+# Match on the MESSAGE, not the code alone: a different 128 is still a real
+# failure.
+NO_PACKAGES=0
+
 run_osv() {
-  local rc=0
-  ( cd repo && osv-scanner scan source --recursive --no-resolve "$@" . ) || rc=$?
+  local rc=0 out
+  out="$(cd repo && osv-scanner scan source --recursive --no-resolve "$@" . 2>&1)" || rc=$?
+  printf '%s
+' "$out"
+
+  if [ "$rc" -eq 128 ] && printf '%s' "$out" | grep -qi 'no package sources found'; then
+    NO_PACKAGES=1
+    return 0
+  fi
+
+  # Exit 1 means vulnerabilities were found, which is a result and not an error.
+  # Everything else fails: a capability that scanned nothing must not report a
+  # clean supply chain.
   if [ "$rc" -gt 1 ]; then
     echo "ERROR: osv-scanner exited ${rc} — that is a scan failure, not a findings result" >&2
     exit "$rc"
@@ -55,8 +85,48 @@ run_osv() {
 run_osv --format sarif --output-file "${PWD}/mykronos-results/osv.sarif"
 run_osv --format json  --output-file "${PWD}/osv-json/osv.json"
 
-# The atlas counts step downstream reads this file unconditionally. An absent one
-# there would be an unhelpful crash; an empty result set is a legitimate answer.
-test -s osv-json/osv.json || echo '{"results":[]}' > osv-json/osv.json
+if [ "$NO_PACKAGES" -eq 1 ]; then
+  # Loudly. A silent empty result is the failure mode this change could otherwise
+  # introduce, and a false green is worse than the false red it replaces —
+  # nobody investigates a green lane.
+  cat <<'EOF'
+
+================================================================================
+No package sources found.
+
+This repository declares no dependencies for osv-scanner to read, so there is
+nothing to scan. Recording an EMPTY RESULT.
+
+This is NOT a clean bill of health for dependencies that exist. It is a statement
+that none were declared. It becomes a real scan the moment a manifest appears.
+================================================================================
+
+EOF
+
+  # A valid, explicitly-empty SARIF, so downstream reads "scanned, found nothing"
+  # rather than "produced no output" — the latter is what the upload step reports
+  # as a scan failure, which is precisely how this lane went red.
+  #
+  # A heredoc is fine here, unlike upstream: that constraint is a Jinja
+  # delimiter collision in the template set, and this is a plain shell script.
+  cat > mykronos-results/osv.sarif <<'EOF'
+{"$schema":"https://json.schemastore.org/sarif-2.1.0.json",
+ "version":"2.1.0",
+ "runs":[{"tool":{"driver":{"name":"osv-scanner",
+   "informationUri":"https://github.com/google/osv-scanner","rules":[]}},
+  "results":[],
+  "invocations":[{"executionSuccessful":true,"exitCode":128,
+   "exitCodeDescription":"no package sources found - repository declares no dependencies"}]}]}
+EOF
+
+  # Fail loudly if that JSON is malformed rather than shipping a broken artifact
+  # that reads as evidence.
+  python3 -c 'import json,sys; json.load(open("mykronos-results/osv.sarif"))'     || { echo "ERROR: generated an invalid empty SARIF" >&2; exit 1; }
+
+  printf '%s' '{"results":[]}' > osv-json/osv.json
+fi
+
+# The atlas counts step downstream reads this file unconditionally.
+test -s osv-json/osv.json || printf '%s' '{"results":[]}' > osv-json/osv.json
 
 echo "OSV scan complete."
