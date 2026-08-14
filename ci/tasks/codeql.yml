@@ -28,6 +28,9 @@ params:
   CODEQL_BUNDLE_VERSION: ""
   CODEQL_BUNDLE_SHA256: ""
   UPLOAD_TO_MYKRONOS: "false"
+  # Only the keel-owned lane gates. The Mykronos lane leaves blocking policy to
+  # the uploader, which applies this repository's configured threshold.
+  FAIL_ON_SECURITY_FINDING: "false"
 
 run:
   path: bash

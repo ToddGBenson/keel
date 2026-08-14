@@ -10,78 +10,95 @@ approve anything. Gate approval stays a human act recorded in GitHub (PD-2).
 
 ## What runs where, after the port
 
-**Three questions decide where a check belongs. Not two.**
+> ## ⚠️ READ THIS FIRST — Concourse is the whole pipeline, and nothing gates a merge
+>
+> As of 2026-08-13: the repository is **private**, GitHub Actions **cannot run** (billing —
+> `job was not started because recent account payments have failed or your spending limit
+> needs to be increased`), **all ten workflows are disabled**, and every required status check
+> has been removed from `main`.
+>
+> **Nothing verifies a change before it lands.** `required_approving_review_count` is 0 and
+> there are no status checks. Everything below is detection *after* the fact — which is why
+> the deterministic lanes were put back on per-commit triggers.
+>
+> **Two capabilities have no Concourse equivalent and are simply gone:**
+>
+> - **Process compliance** — it read the pull request *body* (issue linkage, AI-authorship
+>   declaration, DoD checklist, and the self-review artifact that is POAM-008's compensating
+>   control). Concourse has no pull-request concept. Solo operation was accepted on the basis
+>   that this check enforced a self-review in place of a second approver. Nothing enforces it.
+> - **Dependency review** — a GitHub feature, not a tool. grype and osv-scanner cover the SCA
+>   function; the new-vulnerabilities-in-this-diff framing is not reproduced.
+>
+> Tracked as **POAM-014 (Critical)**. Closing it: fix Actions billing, go public again, or add
+> a self-hosted runner (free on private repos — the box already running Concourse would do).
 
-| | Question it answers | Where | Trigger |
-|---|---|---|---|
-| **Prevent** | Is this change safe to merge? | GitHub Actions | `pull_request` |
-| **Detect** | Is `main` still clean *today*, against *today's* advisories, by a route prevention did not cover? | Concourse | `daily` / `weekly` |
-| **Ingest** | What are the findings for this exact commit, in the system of record? | Concourse | per commit |
-| **Assure** | Are the agents themselves still constrained? | Concourse | `weekly` |
-| **Authorize** | Did a named human approve the release? | GitHub Actions | manual |
+## Where things run
 
-The pipeline originally had only *prevent* and "everything else on main", and the
-result was measurable duplication: CodeQL ran twice per language per change,
-gitleaks three times, grype/checkov/suppression-audit twice each.
+Everything is in `ci/pipeline.yml`. There is no second system.
 
-`main` cannot be reached except through a pull request that already ran all of
-them — `enforce_admins` on, no force-push, no deletions, linear history, 12
-required checks. **A deterministic check re-run on the merge commit re-answers a
-question the PR already answered.** It is not defence in depth; it is the same
-depth, twice, costing minutes and teaching people that a red main job is probably
-a flake.
+| Concern | Job | Trigger |
+|---|---|---|
+| Pipeline updates itself from `main` | `set-pipeline` | per commit |
+| Build, lint, test, full suite | `build` `lint` `test` `full-suite` | per commit + daily |
+| **SAST — CodeQL, python + js, GATES on findings** | `sast` | per commit + daily |
+| Secrets, SCA, IaC, suppressions | `secrets` `sca` `iac` `suppression-audit` | per commit + daily |
+| Container scan | `container-scan` | manual (inert until an image exists) |
+| Platform / control integrity | `platform-integrity` | per commit + daily |
+| Mykronos ingestion | `mykronos-*` | per commit + weekly — **PAUSED, no token** |
+| AI evals, guardrails, agent assurance | `ai-*` `agent-assurance` | per commit / weekly |
+| Compliance monitoring, metrics | `compliance-*` `metrics-snapshot` | daily / weekly |
+| SBOM, sign, verify | `build-and-attest` `verify-artifact` | per commit |
+| **Release G5** | `release-preflight` → `deploy-staging` → `authorize-production` | **manual only** |
 
-What *does* belong after the merge is anything that is **not** deterministic in
-the diff:
+`sast` **gates** — it is the only thing in the system that blocks anything, and it blocks a
+build rather than a merge. It fails on CodeQL security findings at severity ≥ medium; quality
+findings do not gate, or `security-and-quality` becomes a style gate and the lane gets
+switched off within a week.
 
-- **time-dependent** — a clean SCA scan says nothing about a CVE published
-  yesterday, so it wants a cadence, not an echo
-- **route-dependent** — two PRs each green in isolation, a protection setting
-  changed, a merge that resolved badly
-- **commit-keyed** — Mykronos keys findings to a SHA, and a squash merge produces
-  a SHA no PR run ever saw
-- **too slow for the PR budget** — `full-suite`, which is the only CI job that
-  legitimately keeps a per-merge trigger
+`authorize-production` has no trigger and refuses to run when Concourse records no triggering
+human. That is the entire G5 control now — see POAM-006/010.
 
-| Concern | Pull request | main / scheduled | Required? |
-|---|---|---|---|
-| Build (scope statement — nothing to build here) | Actions `ci.yml` | Concourse | ✅ |
-| Lint: **shellcheck**, syntax, YAML, pipeline structure | Actions `ci.yml` | Concourse | ✅ |
-| Test: dashboard, self-review, guard self-test, agent evals | Actions `ci.yml` | Concourse | ✅ |
-| SAST — CodeQL, **javascript-typescript and python** | Actions `security.yml` | Concourse | ✅ ✅ |
-| Secrets, SCA, IaC, suppressions | Actions `security.yml` | Concourse | ✅ |
-| Container scan | Actions (`if: false`) | Concourse (no trigger) | ❌ inert |
-| PR governance (issue link, AI authorship, DoD, self-review) | Actions `pr-governance.yml` | — | ✅ |
-| Platform integrity (control integrity only) | Actions `pr-governance.yml` | Concourse | ✅ |
-| Mykronos sast / secrets / atlas | — | Concourse | — |
-| AI evals, guardrails, agent assurance | — | Concourse | — |
-| Compliance monitoring, metrics | — | Concourse | — |
-| SBOM, sign, verify | — | Concourse | — |
-| **Release authorization (G5)** | — | **Actions `release.yml`** | — |
+## Where a check belongs — the model, and how it changed
 
-Twelve required status checks on `main`. Verify with:
+| | Question it answers | Trigger |
+|---|---|---|
+| **Prevent** | Is this change safe to merge? | **Nothing does this any more — POAM-014** |
+| **Detect** | Is `main` still clean, against today's advisories, by a route prevention missed? | daily / weekly |
+| **Ingest** | What are the findings for this exact commit, in the system of record? | per commit |
+| **Assure** | Are the agents themselves still constrained? | weekly |
+| **Authorize** | Did a named human approve the release? | manual, `authorize-production` |
 
-```sh
-gh api repos/ToddGBenson/keel/branches/main/protection \
-  --jq '.required_status_checks.contexts[]'
-```
+The original split was by *engine* — Actions gates the PR, Concourse owns main — and the
+measurable result was duplication: CodeQL ran twice per language per change, gitleaks three
+times, grype/checkov/suppression-audit twice each. `main` could not be reached except through
+a PR that had already run all of them, so the second run re-answered a question the first had
+answered. That is not defence in depth; it is the same depth twice, and it teaches people to
+read a red main job as a flake.
 
-### What was wrong, and is now fixed
+So the deterministic lanes moved to a cadence, and only four properties justified running
+anything after the merge: **time-dependent**, **route-dependent**, **commit-keyed**, or **too
+slow for the PR budget**.
 
-Three of those checks used to verify nothing. `Build`, `Lint & static typing` and
-`Test & coverage` each echoed `ADAPT: ...` and exited 0 — required, green on every
-PR, asserting nothing — while every real test in the repository ran under a job
-called *Platform integrity*. The names were backwards.
+**That premise is now false.** There is no PR run. So the deterministic lanes are back on
+per-commit triggers — post-merge detection is no longer a duplicate of anything, it is the
+whole of it, and a daily cadence would leave up to 24 hours of unverified `main`.
 
-And the largest language here had no check at all: **3,785 lines of shell across
-28 files**, with `shellcheck` appearing in the repo only as a string inside the
-suppression-audit pattern. Two of the Concourse port's High defects were shell
-bugs, and shellcheck catches one of them outright — SC2097/SC2098, the
-assignment-prefix bug that made every Mykronos upload abort before calling the
-CLI. It does not catch the pipefail/SIGPIPE inversion. One of two.
+**If Actions ever run again, revert that hunk.** The duplication argument becomes correct
+again the moment something blocks a merge. The reasoning is in `ci/pipeline.yml` beside the
+triggers, not only here.
 
-`SAST — CodeQL (python)` ran but was not required, while the js-ts lane was —
-and for most of this repo's life js-ts matched no files at all.
+### What was fixed along the way
+
+Three checks used to verify nothing: `Build`, `Lint & static typing` and `Test & coverage`
+each echoed `ADAPT: ...` and exited 0 — required, green on every PR, asserting nothing — while
+every real test ran under a job called *Platform integrity*. The names were backwards.
+
+The largest language had no check at all: **3,785 lines of shell across 28 files**, with
+`shellcheck` appearing only as a string inside the suppression-audit pattern. It catches
+SC2097/SC2098 — the assignment-prefix bug that made every Mykronos upload abort before calling
+the CLI — and does not catch the pipefail/SIGPIPE inversion. One of two, and it has since
+caught an SC2183 in a later commit.
 
 ### Deliberately not required
 

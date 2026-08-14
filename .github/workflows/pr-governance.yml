@@ -2,13 +2,36 @@
 # Controls: CM-3, CM-5, AC-5, AIC-2, AIC-6, AIC-7, SR-3
 #
 # This is the workflow that enforces the parts of the process a reviewer would otherwise
-# have to notice. Everything here is a REQUIRED status check on `main`.
+# have to notice. Everything here WAS a required status check on `main`.
 
 name: PR Governance
 
+# ── DISABLED 2026-08-13. Concourse is the delivery pipeline. Refs: #42, #50 ───
+# Triggers reduced to workflow_dispatch. It could not run regardless — the
+# repository is private and Actions fail to start on billing (POAM-014) — but
+# "cannot run" and "is not configured to run" are different statements, and the
+# second is the one that should be true.
+#
+# WHAT DOES NOT EXIST IN CONCOURSE, and is therefore simply gone:
+#
+#   - Process compliance (this job). It reads the PULL REQUEST BODY through the
+#     GitHub API: issue linkage, AI-authorship declaration, the DoD checklist,
+#     and the self-review artifact that is POAM-008's compensating control.
+#     Concourse cannot see a PR body — it has no pull-request concept at all.
+#     Solo operation was accepted on the basis that this check enforced a
+#     self-review in place of a second approver. Nothing enforces it now.
+#
+#   - Dependency review. A GitHub feature rather than a tool, so there is nothing
+#     to port. The SCA function is covered by grype and osv-scanner in Concourse;
+#     the new-vulnerabilities-in-this-diff framing is not.
+#
+#   Platform integrity DID move, and runs in Concourse on every commit.
+#
+# Both losses are tracked in POAM-014. Restoring them means: fix Actions billing,
+# restore this `on:` block, and re-add the check names to branch protection —
+# all three, or none of it takes effect.
 on:
-  pull_request:
-    types: [opened, edited, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
 
 permissions:
   contents: read

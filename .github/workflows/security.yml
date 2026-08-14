@@ -14,23 +14,24 @@
 
 name: Security
 
-# ── PR-ONLY since 2026-08-13 — partially ported to Concourse. Refs: #42 ───────
-# `push` and the daily rescan cron moved to the `sast`, `secrets`, `sca`, `iac`,
-# `container-scan` and `suppression-audit` jobs in ci/pipeline.yml, driven there
-# by the `daily` time resource. A clean scan at build time still says nothing
-# about a CVE published yesterday, and that control moved with the rest.
+
+# ── DISABLED 2026-08-13. Concourse is the delivery pipeline. Refs: #42, #50 ───
+# Every lane in this file now lives in ci/pipeline.yml. Triggers reduced to
+# workflow_dispatch: the file is kept so the port stays reviewable and so
+# restoring PR-time gating is a one-hunk revert, not a rewrite.
 #
-# `pull_request` stays HERE, deliberately. Concourse cannot report a commit
-# status back to GitHub without an archived third-party resource, so disabling
-# this outright would have meant no SAST, secret, SCA, IaC or suppression gate on
-# any pull request — a High CVE would merge, then turn main red. Five of `main`'s
-# required status checks come from this file.
+# It could not run regardless — the repository is private and Actions fail to
+# start on billing (POAM-014) — but "cannot run" and "is not configured to run"
+# are different statements, and the second is the one that should be true.
 #
-# Side effect worth knowing: because this still runs on pull requests, CodeQL
-# SARIF DOES still reach the GitHub Security tab for PR commits. Only
-# main-branch and scheduled runs are affected by POAM-012.
+# WHAT DOES NOT EXIST IN CONCOURSE, and is therefore simply gone:
+#   nothing — SAST, secrets, SCA, IaC, container and the suppression audit
+#   are all in Concourse, and the SAST lane there now GATES on findings.
+#
+# Restoring PR gating means: fix Actions billing, restore the `on:` block here,
+# and re-add the check names to branch protection. All three, or none of it
+# takes effect.
 on:
-  pull_request:
   workflow_dispatch:
 
 permissions:

@@ -125,6 +125,20 @@ def main() -> int:
                     if upstream not in jobs:
                         err(f"{jname}: passed: references unknown job '{upstream}'")
 
+            # A set_pipeline step pointing at a file that does not exist fails at
+            # RUN time, which for a self-updating pipeline means it stops
+            # updating itself and nothing says so — the pipeline just quietly
+            # stops tracking git, which is the exact drift it exists to prevent.
+            if "set_pipeline" in step:
+                for key in ("file",):
+                    ref = step.get(key)
+                    if ref and not (ROOT / ref.replace("repo/", "", 1)).exists():
+                        err(f"{jname}: set_pipeline {key} missing -> {ref}")
+                for ref in (step.get("var_files") or []):
+                    if not (ROOT / ref.replace("repo/", "", 1)).exists():
+                        err(f"{jname}: set_pipeline var_file missing -> {ref}")
+                return
+
             if "task" not in step:
                 return
             if "file" not in step:
