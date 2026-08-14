@@ -14,6 +14,16 @@
 # not contain anyway. They are insurance: cataloguing a vendored tree turns a
 # minute into tens of minutes and describes software this repository does not
 # ship.
+# ── THE BINARY IS AT /syft, NOT ON PATH ──────────────────────────────────────
+# anchore/syft is a distroless image: no shell, and the binary sits at the root
+# rather than in /usr/bin. `path: syft` therefore fails with
+# `exec: "syft": executable file not found in $PATH` — and it failed for BOTH
+# consumers of this task, mykronos-atlas and build-and-attest.
+#
+# Found by running the pipeline, not by reading it: fly validate-pipeline
+# accepts it, the structural validator accepts it, and shellcheck never sees it,
+# because nothing static knows what is inside an image.
+#
 platform: linux
 
 image_resource:
@@ -29,7 +39,7 @@ outputs:
   - name: sbom
 
 run:
-  path: syft
+  path: /syft
   args:
     - scan
     - dir:repo
