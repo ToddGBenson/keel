@@ -7,29 +7,34 @@
 
 name: Mykronos atlas
 
-# ── DISABLED 2026-08-13 — ported to Concourse. Refs: #42 ──────────────────────
-# Now the `mykronos-atlas` job in ci/pipeline.yml: the same checksum-verified
-# OSV-Scanner v2.5.0, the same pinned syft v1.51.0, the same
-# /api/ingest/raw and /api/ingest/atlas calls, and the same
-# `python -m mykronos.upload` CLI at the same ref.
-#
-# TWO THINGS CHANGED, both stated in the evidence rather than hidden:
-#   - provenance.builder_id is "concourse", not "github-actions", because that is
-#     what builds it now.
-#   - tag_or_release is set only when the commit under scan matches the release
-#     commit. Concourse has no release-event signal, and the github-release
-#     resource hands over the latest release on every build — stamping routine
-#     builds with a tag they do not belong to would have been the easy bug here.
-#
-# The manifest path filter above is gone: the Concourse job runs on every main
-# commit. More often, not less.
-#
-# ⚠️  THIS EDIT IS AGAINST THE INSTRUCTION AT THE TOP OF THIS FILE ⚠️
-# A template resync WILL overwrite this and restore the triggers, at which point
-# both this workflow and the Concourse job will scan and ingest. Asked upstream
-# for a Concourse target in ToddGBenson/mykronos#13. Until that lands, treat a
-# resync of this file as a merge conflict to resolve, not a diff to accept.
 on:
+
+  pull_request:
+    # Manifests only. The dependency tree cannot change without one of these
+    # changing, so anything else would re-derive the same answer (spec 07 §4).
+    paths:
+      - "**/package.json"
+      - "**/package-lock.json"
+      - "**/pnpm-lock.yaml"
+      - "**/yarn.lock"
+      - "**/requirements*.txt"
+      - "**/pyproject.toml"
+      - "**/poetry.lock"
+      - "**/uv.lock"
+      - "**/go.mod"
+      - "**/go.sum"
+      - "**/Gemfile.lock"
+      - "**/Cargo.lock"
+      - "**/pom.xml"
+      - "**/build.gradle*"
+  push:
+    branches: ["main"]
+  release:
+    types: [published]
+  schedule:
+    # New advisories land against dependencies that have not changed, which is
+    # the one way this capability's answer goes stale without a commit.
+    - cron: "23 4 * * 1"
   workflow_dispatch:
 
 
