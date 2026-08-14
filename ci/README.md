@@ -59,78 +59,46 @@ switched off within a week.
 `authorize-production` has no trigger and refuses to run when Concourse records no triggering
 human. That is the entire G5 control now — see POAM-006/010.
 
-**Three questions decide where a check belongs. Not two.**
+## Where a check belongs — the model, and how it changed
 
-| | Question it answers | Where | Trigger |
-|---|---|---|---|
-| **Prevent** | Is this change safe to merge? | GitHub Actions | `pull_request` |
-| **Detect** | Is `main` still clean *today*, against *today's* advisories, by a route prevention did not cover? | Concourse | `daily` / `weekly` |
-| **Ingest** | What are the findings for this exact commit, in the system of record? | Concourse | per commit |
-| **Assure** | Are the agents themselves still constrained? | Concourse | `weekly` |
-| **Authorize** | Did a named human approve the release? | GitHub Actions | manual |
+| | Question it answers | Trigger |
+|---|---|---|
+| **Prevent** | Is this change safe to merge? | **Nothing does this any more — POAM-014** |
+| **Detect** | Is `main` still clean, against today's advisories, by a route prevention missed? | daily / weekly |
+| **Ingest** | What are the findings for this exact commit, in the system of record? | per commit |
+| **Assure** | Are the agents themselves still constrained? | weekly |
+| **Authorize** | Did a named human approve the release? | manual, `authorize-production` |
 
-The pipeline originally had only *prevent* and "everything else on main", and the
-result was measurable duplication: CodeQL ran twice per language per change,
-gitleaks three times, grype/checkov/suppression-audit twice each.
+The original split was by *engine* — Actions gates the PR, Concourse owns main — and the
+measurable result was duplication: CodeQL ran twice per language per change, gitleaks three
+times, grype/checkov/suppression-audit twice each. `main` could not be reached except through
+a PR that had already run all of them, so the second run re-answered a question the first had
+answered. That is not defence in depth; it is the same depth twice, and it teaches people to
+read a red main job as a flake.
 
-`main` cannot be reached except through a pull request that already ran all of
-them — `enforce_admins` on, no force-push, no deletions, linear history, 12
-required checks. **A deterministic check re-run on the merge commit re-answers a
-question the PR already answered.** It is not defence in depth; it is the same
-depth, twice, costing minutes and teaching people that a red main job is probably
-a flake.
+So the deterministic lanes moved to a cadence, and only four properties justified running
+anything after the merge: **time-dependent**, **route-dependent**, **commit-keyed**, or **too
+slow for the PR budget**.
 
-What *does* belong after the merge is anything that is **not** deterministic in
-the diff:
+**That premise is now false.** There is no PR run. So the deterministic lanes are back on
+per-commit triggers — post-merge detection is no longer a duplicate of anything, it is the
+whole of it, and a daily cadence would leave up to 24 hours of unverified `main`.
 
-- **time-dependent** — a clean SCA scan says nothing about a CVE published
-  yesterday, so it wants a cadence, not an echo
-- **route-dependent** — two PRs each green in isolation, a protection setting
-  changed, a merge that resolved badly
-- **commit-keyed** — Mykronos keys findings to a SHA, and a squash merge produces
-  a SHA no PR run ever saw
-- **too slow for the PR budget** — `full-suite`, which is the only CI job that
-  legitimately keeps a per-merge trigger
+**If Actions ever run again, revert that hunk.** The duplication argument becomes correct
+again the moment something blocks a merge. The reasoning is in `ci/pipeline.yml` beside the
+triggers, not only here.
 
-| Concern | Pull request | main / scheduled | Required? |
-|---|---|---|---|
-| Build (scope statement — nothing to build here) | Actions `ci.yml` | Concourse | ✅ |
-| Lint: **shellcheck**, syntax, YAML, pipeline structure | Actions `ci.yml` | Concourse | ✅ |
-| Test: dashboard, self-review, guard self-test, agent evals | Actions `ci.yml` | Concourse | ✅ |
-| SAST — CodeQL, **javascript-typescript and python** | Actions `security.yml` | Concourse | ✅ ✅ |
-| Secrets, SCA, IaC, suppressions | Actions `security.yml` | Concourse | ✅ |
-| Container scan | Actions (`if: false`) | Concourse (no trigger) | ❌ inert |
-| PR governance (issue link, AI authorship, DoD, self-review) | Actions `pr-governance.yml` | — | ✅ |
-| Platform integrity (control integrity only) | Actions `pr-governance.yml` | Concourse | ✅ |
-| Mykronos sast / secrets / atlas | — | Concourse | — |
-| AI evals, guardrails, agent assurance | — | Concourse | — |
-| Compliance monitoring, metrics | — | Concourse | — |
-| SBOM, sign, verify | — | Concourse | — |
-| **Release authorization (G5)** | — | **Actions `release.yml`** | — |
+### What was fixed along the way
 
-Twelve required status checks on `main`. Verify with:
+Three checks used to verify nothing: `Build`, `Lint & static typing` and `Test & coverage`
+each echoed `ADAPT: ...` and exited 0 — required, green on every PR, asserting nothing — while
+every real test ran under a job called *Platform integrity*. The names were backwards.
 
-```sh
-gh api repos/ToddGBenson/keel/branches/main/protection \
-  --jq '.required_status_checks.contexts[]'
-```
-
-### What was wrong, and is now fixed
-
-Three of those checks used to verify nothing. `Build`, `Lint & static typing` and
-`Test & coverage` each echoed `ADAPT: ...` and exited 0 — required, green on every
-PR, asserting nothing — while every real test in the repository ran under a job
-called *Platform integrity*. The names were backwards.
-
-And the largest language here had no check at all: **3,785 lines of shell across
-28 files**, with `shellcheck` appearing in the repo only as a string inside the
-suppression-audit pattern. Two of the Concourse port's High defects were shell
-bugs, and shellcheck catches one of them outright — SC2097/SC2098, the
-assignment-prefix bug that made every Mykronos upload abort before calling the
-CLI. It does not catch the pipefail/SIGPIPE inversion. One of two.
-
-`SAST — CodeQL (python)` ran but was not required, while the js-ts lane was —
-and for most of this repo's life js-ts matched no files at all.
+The largest language had no check at all: **3,785 lines of shell across 28 files**, with
+`shellcheck` appearing only as a string inside the suppression-audit pattern. It catches
+SC2097/SC2098 — the assignment-prefix bug that made every Mykronos upload abort before calling
+the CLI — and does not catch the pipefail/SIGPIPE inversion. One of two, and it has since
+caught an SC2183 in a later commit.
 
 ### Deliberately not required
 
