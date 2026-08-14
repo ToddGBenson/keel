@@ -156,6 +156,13 @@ surface, because it is:
 - **Workflow files are CODEOWNER-protected** — a PR that edits `.github/workflows/` requires
   security review, because otherwise the pipeline gates itself out of existence. (CM-5)
 - **Ephemeral runners**; no state carried between jobs except declared artifacts.
+  **keel itself no longer satisfies this.** Its PR gate runs on a persistent self-hosted
+  runner because hosted Actions are billing-blocked (POAM-014). A persistent runner keeps a
+  work directory and a tool cache between jobs, and shares a host with Concourse and Vault.
+  The compensating rules — fork PRs refused, no Vault or Concourse credentials in Actions
+  secrets, repository-scoped rather than org-scoped — are in
+  `docs/runbooks/self-hosted-runner.md`. Prefer hosted runners if you have them; this is a
+  deviation recorded as such, not a recommendation.
 - **Signed, immutable audit logs** of every run, retained per `10-definitions.md`. (AU-9, AU-11)
 
 ## When the pipeline is the bottleneck

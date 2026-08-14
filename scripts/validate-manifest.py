@@ -73,16 +73,25 @@ def main() -> int:
                for k, v in manifest.items() if isinstance(v, list)}
 
     files = tracked_files()
-    top_level = sorted({p.split("/")[0] + ("/" if "/" in p else "") for p in files})
 
     claimed: dict[str, list[str]] = {}
     for bucket, entries in buckets.items():
         for entry in entries:
             claimed.setdefault(entry, []).append(bucket)
 
-    # 1 — every tracked top-level path is governed by some bucket.
-    for path in top_level:
-        if not any(path == c or path.startswith(c) or c.startswith(path) for c in claimed):
+    # 1 — every tracked FILE is governed by some bucket.
+    #
+    # This checked top-level paths only in its first version, which made it
+    # answer a much weaker question than the one it claimed to: `docs/` was
+    # "governed" because SOME docs were listed, while the manifest enumerates
+    # docs file by file. Six were missing, among them
+    # docs/13-solo-operation.md — the document that defines the compensating
+    # control a fork's self-review gate depends on.
+    #
+    # The gap was also invisible to a human reading the manifest: 12 and 18 were
+    # both present, so the run of numbered docs looked complete.
+    for path in sorted(files):
+        if not any(path == c or path.startswith(c.rstrip("/") + "/") for c in claimed):
             errors.append(
                 f"'{path}' is tracked but classified by no bucket. sync-platform.sh "
                 f"will never deliver it to a fork, and no fork can notice a file it "
@@ -115,8 +124,7 @@ def main() -> int:
             f"({', '.join(sorted(absent)[:4])}…)")
 
     print("Platform manifest validation")
-    print(f"  {len(files)} tracked files, {len(top_level)} top-level paths, "
-          f"{len(claimed)} manifest entries")
+    print(f"  {len(files)} tracked files, {len(claimed)} manifest entries")
     for w in warnings:
         print(f"  [warn]  {w}")
     for e in errors:

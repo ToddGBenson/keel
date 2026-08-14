@@ -42,14 +42,31 @@ platform_owned:
   - docs/10-definitions.md
   - docs/11-ai-agent-controls.md
   - docs/12-ai-feature-governance.md
+  # 13-17 were missing while 12 and 18 were listed, so the gap was invisible by
+  # reading — it looked like a complete run of numbered docs. Found by checking
+  # coverage per FILE rather than per top-level directory (#58).
+  #
+  # docs/13 is the worst of the six: it is the document that DEFINES solo
+  # operation and POAM-008's compensating control. A fork inheriting the
+  # self-review gate would never have received the document explaining what the
+  # gate is for.
+  - docs/13-solo-operation.md
+  - docs/14-fast-lane.md
+  - docs/15-tracking.md
+  - docs/16-sprint-automation.md
+  - docs/17-unattended-operation.md
   - docs/18-automation-policy.md
   - docs/19-batched-verification.md
   - docs/templates/
+  # Operating a fork's own infrastructure. Platform-owned because the failure
+  # modes are the platform's, not the project's.
+  - docs/runbooks/
   - docs/compliance/nist-800-53-control-map.md
   - docs/compliance/ssdf-crosswalk.md
   - docs/compliance/evidence-model.md
   - docs/compliance/assessment-plan.md
   - docs/compliance/ssp-outline.md
+  - docs/compliance/cis-supply-chain-map.md
   - docs/lessons/
   # The CLI a solo operator actually types. It was unclassified, so no fork has
   # ever received it — the single most-used entry point in the platform.

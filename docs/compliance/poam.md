@@ -36,10 +36,11 @@ assurance that everything else relies on.
 **Last reviewed:** 2026-08-14 — every row measured against the live system, not carried
 forward. Record: `evidence/assessments/2026-08-14-poam-review.md`. Nothing was closed.
 
-> **POAM-008's compensating control is inoperative.** Solo operation is accepted on the basis
-> that `Process compliance` enforces a self-review artifact in place of a second approver.
-> That check is a GitHub Action and Actions cannot run (POAM-014). The acceptance currently
-> rests on a control that does not execute.
+> **POAM-008's compensating control executes again as of 2026-08-14.** Solo operation is
+> accepted on the basis that `Process compliance` enforces a self-review artifact in place of a
+> second approver. That check is a GitHub Action, and Actions could not start at all. It now
+> runs on a self-hosted runner and is a required status check — verified by watching it block
+> and pass, not by observing that it was configured (#58).
 
 ## Register
 
@@ -58,7 +59,8 @@ forward. Record: `evidence/assessments/2026-08-14-poam-review.md`. Nothing was c
 | POAM-011 | No provenance for what forks receive — cosign sign/attest are stubs (re-scoped 2026-08-14: the subject is the platform release, not an artifact) | SR-4(3), CM-14 | Medium | Todd Benson | 2026-11-11 | Open |
 | POAM-012 | CodeQL SARIF from Concourse does not reach GitHub code scanning | SA-11(1) | Low | Todd Benson | 2026-08-13 | **Closed** — the lane that discarded SARIF was deleted; SAST on main now ingests both languages to Mykronos |
 | POAM-013 | Monthly monitoring cadence approximated by a weekly trigger | CA-7 | Low | Todd Benson | 2026-11-11 | Open — accepted, detection is loud |
-| POAM-014 | **No merge gate exists. Nothing verifies a change before it reaches `main`.** | CM-3, CM-5, AC-5, SA-11 | **Critical** | Todd Benson | 2026-08-20 | Open — accepted by the system owner |
+| POAM-014 | **The merge gate verifies process, not code.** Tests and scans run in Concourse *after* merge (re-scoped 2026-08-14 from "no merge gate exists") | CM-3, CM-5, AC-5, SA-11 | **High** | Todd Benson | 2026-09-14 | Open — process gate restored and enforced; code verification still post-merge |
+| POAM-015 | Manifest coverage was checked per top-level directory, so six platform docs were never delivered to forks | CM-2, SA-10 | Medium | Todd Benson | 2026-08-14 | **Closed** — check now per file; six docs classified; both directions proven (#58) |
 
 ### 2026-08-13 — the repository was made private, and three entries reopened
 
@@ -96,7 +98,35 @@ configuration-only path.
 
 ---
 
-### POAM-014 — No merge gate exists ⚠️ CRITICAL
+### POAM-014 — The merge gate verifies process, not code ⚠️ HIGH
+
+> **Re-scoped 2026-08-14 (#58), not closed.** Option 3 below was taken: a self-hosted runner
+> now executes `PR Governance`, and its three jobs are required status checks on `main`. The
+> original weakness — "nothing stands between a pull request and `main`" — no longer holds.
+>
+> **What remains, and why this stays open at High.** The restored gate reads the *pull request*:
+> issue linkage, AI-authorship declaration, DoD checklist, self-review artifact, platform
+> integrity. Tests, SAST, secret scanning, SCA and IaC still run in **Concourse, after merge**,
+> because Concourse tracks `main` and cannot see a PR branch. So a change whose code is broken
+> still merges green and is caught minutes later on `main`.
+>
+> That is a materially better position than "no gate", and materially worse than a gate. The
+> honest one-line version: **a green check means the process was followed, not that the code
+> works.** Closing this needs Concourse to build PR branches — a pull-request resource, its own
+> supply-chain review, and a decision about who may trigger it.
+>
+> **Two claims corrected here.** Option 2 below says making the repository public would close
+> POAM-005/006/010 "with it", and on 2026-08-14 I twice told the system owner a self-hosted
+> runner would close 005/006/010/014 together. **That was wrong.** Measured the same day: the
+> `production` environment's only protection rule is a `branch_policy`, not required reviewers,
+> and the repository reports no `security_and_analysis` block at all. A runner changes neither.
+> POAM-005 and POAM-006/010 are untouched by this work.
+>
+> Evidence: run 31828759203 (a job executing on `keel-local` while hosted runners refused),
+> the branch-protection state recorded in `evidence/58/g3/self-review.md`, and this PR blocking
+> on its own gate.
+
+### POAM-014 — original entry, 2026-08-13 (superseded above)
 
 **Weakness.** `main` has **no required status checks**, `required_approving_review_count` is
 **0**, and GitHub Actions cannot run on this repository. Nothing — no lint, no test, no SAST,
@@ -153,7 +183,9 @@ merge gate at all". Recorded here rather than softened.
 2. Make the repository public again. Actions minutes become free and unlimited, and
    POAM-005/006/010 close with it.
 3. Self-hosted runners. Free on private repositories; a runner on the machine already hosting
-   Concourse would serve.
+   Concourse would serve. **← taken, 2026-08-14, #58. See the re-scoping note above; note that
+   option 2's parenthetical about POAM-005/006/010 closing "with it" applies to going public,
+   and does NOT apply to this option.**
 
 **Evidence of closure.** All twelve contexts reporting again on a pull request, and restored
 to `required_status_checks`. Verified by opening a PR and watching them, not by reading
