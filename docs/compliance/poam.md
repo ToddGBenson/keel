@@ -40,9 +40,9 @@ review*; POAM-005 and POAM-006 closed later the same day when the repository was
 
 > **POAM-008's compensating control executes again as of 2026-08-14.** Solo operation is
 > accepted on the basis that `Process compliance` enforces a self-review artifact in place of a
-> second approver. That check is a GitHub Action, and Actions could not start at all. It now
-> runs on a self-hosted runner and is a required status check — verified by watching it block
-> and pass, not by observing that it was configured (#58).
+> second approver. That check is a GitHub Action, and Actions could not start at all. It is now
+> a required status check running on **hosted** runners — verified by watching it block and pass,
+> not by observing that it was configured (#58, #63).
 
 ## Register
 
@@ -142,21 +142,24 @@ configuration-only path.
 
 ### POAM-014 — The merge gate verifies process, not code ⚠️ HIGH
 
-> **Update, later on 2026-08-14 (#61).** The repository was made public, so hosted runners work
-> again — `CI` measured green on `ubuntu-latest`. **This changes the remediation options, not
-> the weakness.** The self-hosted runner is now a bridge that spans nothing: the gate can run on
-> hosted runners with no persistent runner, no logon task, and no Actions process sharing a host
-> with Vault and Concourse.
+> **Update, later on 2026-08-14 (#61, #63).** The repository was made public, so hosted runners
+> work again — `CI` measured green on `ubuntu-latest`. **This changes the remediation options,
+> not the weakness.**
 >
-> Removing it has an order that matters: point `KEEL_RUNNER_LABELS` back to the default, confirm
-> the three checks report from hosted runners, **then** unregister the task and
-> `config.cmd remove`. Reversed, every pull request hangs on checks that can no longer report —
-> and a check that never reports looks like a stuck PR, not a stopped runner.
+> **The self-hosted runner has been retired**, in the order that keeps the gate covered
+> throughout: `KEEL_RUNNER_LABELS` deleted so `runs-on` falls back to `ubuntu-latest` → all
+> three required checks confirmed green on hosted runners → logon task unregistered →
+> `config.cmd remove`. Zero runners are now registered and the three checks remain required.
 >
-> Newly available and not yet acted on: `Dependency review` will now run instead of skipping
-> loudly, and the three Mykronos workflows could be enabled for real — which revises the
-> reasoning recorded on PR #60, where `ubuntu-latest` being unable to start was the deciding
-> argument.
+> It was retired sooner than planned because it **wedged twice in twenty minutes** while #62 was
+> open — `offline` with `busy=true`, a job `in_progress` behind a dead listener, each time
+> needing `POST /actions/runs/{id}/force-cancel` to break the deadlock, because a normal cancel
+> waits for an acknowledgement no surviving runner can give. Failure modes are recorded in
+> `docs/runbooks/self-hosted-runner.md` for forks that have no alternative.
+>
+> Newly available and not yet acted on: `Dependency review` now runs instead of skipping loudly,
+> and the three Mykronos workflows could be enabled for real — which revises the reasoning
+> recorded on PR #60, where `ubuntu-latest` being unable to start was the deciding argument.
 
 > **Re-scoped 2026-08-14 (#58), not closed.** Option 3 below was taken: a self-hosted runner
 > now executes `PR Governance`, and its three jobs are required status checks on `main`. The

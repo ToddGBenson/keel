@@ -1,5 +1,10 @@
 # Runbook — self-hosted Actions runner
 
+> **keel does not run one.** It ran a self-hosted runner for a single day, 2026-08-14, while
+> hosted Actions were billing-blocked, and retired it as soon as the repository went public
+> (#58, #63). This runbook is kept for forks that have no alternative — and the section on
+> **failure modes** below is the part worth reading before you decide.
+
 **Why a fork might need this.** GitHub-hosted runners are billed. When a payment fails or a
 spending limit is reached, every job refuses to start with:
 
@@ -7,8 +12,9 @@ spending limit is reached, every job refuses to start with:
 > needs to be increased.
 
 Self-hosted runners do not consume included minutes, so the PR governance gate keeps working.
-That is the only reason keel uses one. If your hosted runners work, **do not do this** — you
-are taking on host security for no benefit.
+That is the only reason to use one. If your hosted runners work, **do not do this** — you are
+taking on host security and a class of failure that is genuinely hard to diagnose, for no
+benefit.
 
 Related: `docs/06-cicd.md` (what runs where), POAM-014.
 
@@ -176,6 +182,53 @@ gh api repos/<owner>/<repo>/actions/runners --jq '.runners[] | "\(.name) \(.stat
 
 ---
 
+## Failure modes — one symptom, several causes
+
+**Everything that goes wrong with a self-hosted runner looks the same from GitHub: a required
+check that never reports.** The pull request sits at `BLOCKED` and reads as a hung PR rather
+than a stopped runner. That is the safe direction — a missing check blocks a merge instead of
+allowing one — but it tells you nothing about the cause, and the only place the difference is
+visible is `_diag/Runner_*.log` **on the host**.
+
+All three of these were observed on one repository in one day.
+
+| What you see | Cause | Fix |
+|---|---|---|
+| runner `offline`, check never starts | process died with the shell that launched it | run it from a logon scheduled task, not a terminal |
+| runner `online` and **idle**, job stays `queued` forever | job was assigned to a session that then died; **it is never reassigned** | cancel the run, push again to re-dispatch |
+| runner `offline` with **`busy=true`**, job `in_progress`, **no `Runner.Worker` process** | listener wedged mid-job — usually a socket abort followed by a backoff it never returns from | see the deadlock below |
+
+**The deadlock is the one that will cost you time.** When the listener dies mid-job,
+`gh run cancel` **cannot complete**: GitHub waits for the runner to acknowledge the
+cancellation, and there is no runner left to acknowledge it. The run stays `in_progress`
+indefinitely, holding the runner's server-side session, so a freshly started listener cannot
+register either — it loops on:
+
+```
+TaskAgentSessionConflictException: A session for this runner already exists.
+```
+
+Break it with a force cancel, which does not wait for the runner:
+
+```powershell
+gh api -X POST repos/<owner>/<repo>/actions/runs/<run-id>/force-cancel
+```
+
+The session releases within a minute or so and the new listener registers. A normal restart
+also produces a brief session conflict — that one clears itself in seconds and needs nothing.
+
+**Diagnosis always starts on the host**, because none of this is visible from GitHub:
+
+```powershell
+Get-Process Runner.Listener, Runner.Worker          # is anything actually running?
+Get-Content (Get-ChildItem $HOME\actions-runner-keel\_diag\Runner_*.log |
+             Sort-Object LastWriteTime -Desc | Select-Object -First 1).FullName -Tail 20
+```
+
+A log whose last entry is minutes old, with the process still alive, is a wedged listener.
+
+---
+
 ## Three things, or none of it takes effect
 
 1. The `on: pull_request` trigger in `.github/workflows/pr-governance.yml`
@@ -196,5 +249,12 @@ $tok = gh api -X POST repos/<owner>/<repo>/actions/runners/remove-token --jq '.t
 .\config.cmd remove --token $tok
 ```
 
-**Remove the required status checks from branch protection first**, or every PR blocks on a
-check that can no longer report.
+**Order matters.** If the self-hosted runner is the *only* thing serving your required checks,
+remove those checks from branch protection first, or every PR blocks on a check that can no
+longer report.
+
+If you are moving the checks to hosted runners instead of abandoning them — which is what keel
+did — the order is the other way round and nothing is ever unprotected: point `runs-on` back at
+the hosted default, **watch all the required checks report green from hosted runners**, and only
+then remove the runner. keel's `runs-on` reads `KEEL_RUNNER_LABELS` and falls back to
+`ubuntu-latest`, so that first step is deleting one repository variable.
