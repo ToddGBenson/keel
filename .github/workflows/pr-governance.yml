@@ -6,14 +6,18 @@
 
 name: PR Governance
 
-# ── RESTORED 2026-08-14 on a self-hosted runner. Refs: #58 ────────────────────
+# ── RESTORED 2026-08-14. Refs: #58, #63 ───────────────────────────────────────
 # Disabled 2026-08-13 because Actions could not start at all:
 #   "The job was not started because recent account payments have failed or your
 #    spending limit needs to be increased."
-# A self-hosted runner does not consume included minutes. That it would therefore
-# still run was a HYPOTHESIS, and it was tested before anything was built on it:
-# run 31828759203 executed on runner `keel-local` while hosted runners were
-# refusing. Measured, not assumed.
+# Restored the same day on a self-hosted runner, which does not consume included
+# minutes — a HYPOTHESIS that was tested before anything was built on it, run
+# 31828759203 executing on `keel-local` while hosted runners refused.
+#
+# It now runs on HOSTED runners again: the repository was made public later that
+# day, and the self-hosted runner was retired after wedging twice in twenty
+# minutes (#63). Both facts are kept because the sequence is the useful part —
+# the workaround was real, was measured, and stopped being needed.
 #
 # THE DIVISION OF LABOUR, which is the point and not an accident of history:
 # Concourse is the delivery pipeline — it builds, tests, scans and records
@@ -59,10 +63,13 @@ jobs:
     name: Process compliance
     # WHERE THIS RUNS IS CONFIGURATION, NOT A FORK-TIME MERGE CONFLICT.
     # `.github/workflows` is merge_required in platform/MANIFEST.yml, so every
-    # line here is one a fork has to reconcile by hand. A fork with working
-    # hosted runners changes nothing and gets ubuntu-latest; this repository sets
-    # the KEEL_RUNNER_LABELS variable to ["self-hosted","keel"]. A malformed
-    # value fails loudly at fromJSON, which is the correct direction to fail.
+    # line here is one a fork has to reconcile by hand. Leave KEEL_RUNNER_LABELS
+    # unset and you get ubuntu-latest, which is what keel itself now does; set it
+    # to something like ["self-hosted","keel"] only if hosted runners are not an
+    # option. A malformed value fails loudly at fromJSON, the correct direction.
+    #
+    # This indirection earned itself: retiring keel's self-hosted runner was one
+    # variable deletion, with no diff to reconcile in a merge_required file.
     runs-on: ${{ fromJSON(vars.KEEL_RUNNER_LABELS || '["ubuntu-latest"]') }}
     # NEVER RUN FORK CODE ON THE SELF-HOSTED RUNNER. It shares a host with
     # Concourse and Vault, so a workflow step here reaches localhost:8080 and

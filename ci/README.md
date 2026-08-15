@@ -10,28 +10,31 @@ approve anything. Gate approval stays a human act recorded in GitHub (PD-2).
 
 ## What runs where, after the port
 
-> ## ⚠️ READ THIS FIRST — Concourse is the whole pipeline, and nothing gates a merge
+> ## ⚠️ READ THIS FIRST — Concourse is the pipeline; Actions gates the merge
 >
-> As of 2026-08-13: the repository is **private**, GitHub Actions **cannot run** (billing —
-> `job was not started because recent account payments have failed or your spending limit
-> needs to be increased`), **all ten workflows are disabled**, and every required status check
-> has been removed from `main`.
+> **As of 2026-08-14** the repository is **public**, hosted Actions work, and `PR Governance`
+> is three **required status checks** on `main` with `enforce_admins` on.
 >
-> **Nothing verifies a change before it lands.** `required_approving_review_count` is 0 and
-> there are no status checks. Everything below is detection *after* the fact — which is why
-> the deterministic lanes were put back on per-commit triggers.
+> **The division of labour is the point.** Concourse builds, tests, scans and records evidence
+> — everything below. It has no pull-request concept at all, so Actions does the one thing it
+> structurally cannot: read the pull request.
 >
-> **Two capabilities have no Concourse equivalent and are simply gone:**
+> - **Process compliance** — reads the PR *body*: issue linkage, AI-authorship declaration, DoD
+>   checklist, and the self-review artifact that is POAM-008's compensating control.
+> - **Platform integrity** — also a Concourse job. The duplication is deliberate: post-merge is
+>   detection, pre-merge is prevention.
+> - **Dependency review** — a GitHub feature, not a tool, and it needs a public repo or Advanced
+>   Security. It runs again now; grype and osv-scanner still cover the SCA function.
 >
-> - **Process compliance** — it read the pull request *body* (issue linkage, AI-authorship
->   declaration, DoD checklist, and the self-review artifact that is POAM-008's compensating
->   control). Concourse has no pull-request concept. Solo operation was accepted on the basis
->   that this check enforced a self-review in place of a second approver. Nothing enforces it.
-> - **Dependency review** — a GitHub feature, not a tool. grype and osv-scanner cover the SCA
->   function; the new-vulnerabilities-in-this-diff framing is not reproduced.
+> **What still is not gated: the code.** Tests, SAST, secrets, SCA and IaC run in Concourse
+> *after* merge, because Concourse tracks `main` and cannot see a PR branch. **A green check
+> means the process was followed, not that the code works.** That is **POAM-014**, still open at
+> High; closing it needs Concourse to build PR branches.
 >
-> Tracked as **POAM-014 (Critical)**. Closing it: fix Actions billing, go public again, or add
-> a self-hosted runner (free on private repos — the box already running Concourse would do).
+> *History, because the sequence matters:* on 2026-08-13 the repository went private, Actions
+> stopped starting on billing, all ten workflows were disabled and every required check was
+> removed — nothing gated a merge at all. The gate was restored on a self-hosted runner (#58)
+> and that runner was retired the same day the repository went public (#63).
 
 ## keel is a template, not a service
 
