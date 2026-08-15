@@ -1,7 +1,7 @@
 # G2 — Designed & Threat-Modeled
 
-**Approvers:** Architect + Security Engineer (+ AI Risk Officer if AI-relevant), recorded by
-a human · **Command:** `/design` · **Reference:** `docs/04-development.md` Part A
+**Recommends:** Architect + Security Engineer + UX (+ AI Risk Officer if AI-relevant) ·
+**Approves:** Delivery Lead (ADR-0005) · **Command:** `/design` · **Reference:** `docs/04-development.md` Part A
 **Controls:** SA-8, SA-11(2), SA-15, SA-17, PL-8, RA-3, AI RMF MAP 1–5
 
 ## When required
@@ -31,6 +31,8 @@ reason** — a silent skip is what an assessor finds.
 | 15 | Guardrail design specified (if AI-relevant) | AIA doc |
 | 16 | Human oversight point designed — including **what the human is shown** | AIA doc |
 | 17 | Independence held: the design's author is not its sole approver | Approval record |
+| 18 | **UX design exists for every UI surface** — flow, states, and the failure states named: empty, loading, error, offline, permission-denied | `docs/design/wireframes/` |
+| 19 | **Accessibility review recorded** against the G1 criteria, with any conflict between usability and a security control decided explicitly rather than silently | `docs/design/a11y/` |
 
 ## Judgment notes
 

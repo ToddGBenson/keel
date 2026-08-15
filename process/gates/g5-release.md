@@ -1,14 +1,22 @@
 # G5 — Release Authorized
 
-**Approver:** **A human operator.** Prepared by the Release Manager. Technically enforced by
-a GitHub Environment protection rule with required reviewers.
+**Recommends:** Release Manager · **Approves:** Delivery Lead — **unless the release reaches real
+users or real data, which a human authorizes** (ADR-0005, POAM-017). Technically enforced by a
+GitHub Environment protection rule with required reviewers.
 **Command:** `/release` · **Reference:** `docs/07-release-and-change.md`
 **Controls:** CM-3, CM-4, CM-5, CM-9, SA-10, SI-7, SR-4, CP-10, AU-2, AI RMF MANAGE
 
 ## The controlling constraint
 
-**A human being authorizes every production deployment.** Not an agent, not a rule, not a
-schedule. The agents' job is to make that decision *cheap to make well* — not unnecessary.
+**A human being authorizes every deployment that reaches real users or real data.** Not an
+agent, not a rule, not a schedule. The agents' job is to make that decision *cheap to make
+well* — not unnecessary.
+
+`delivery-lead` may approve G5 only for a release that ships nothing to production: a tagged
+template version, an internal artifact, a version bump that no user receives. **The test is not
+"is this low risk" — it is "does anything reach anyone".** If the answer is yes, or if you are
+unsure, it is a human's decision. Judging your own release low-risk is precisely the judgment
+this gate exists to take away from the releasing party.
 
 The approver is accountable for three judgments: the evidence is complete, the residual risk
 is understood and acceptable, and the rollback is real.

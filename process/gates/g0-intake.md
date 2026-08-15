@@ -1,6 +1,6 @@
 # G0 — Intake
 
-**Approver:** Product Owner, confirmed by a human · **Command:** `/idea`
+**Recommends:** Product Owner · **Approves:** Delivery Lead (ADR-0005) · **Command:** `/idea`
 **Reference:** `docs/02-intake-and-discovery.md` · **Controls:** SA-3(1), RA-3, PM-30,
 AI RMF MAP 1
 

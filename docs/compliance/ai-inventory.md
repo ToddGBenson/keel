@@ -36,16 +36,27 @@ detected at review, not prevented at the tool layer. Do not read it as a control
 
 | Agent | Purpose | Model | Tool grant (actual) | Expected write scope | Approval authority | Last eval |
 |---|---|---|---|---|---|---|
-| `product-owner` | Intake, refinement, acceptance | opus | Read/Write/Edit/Bash/Web | Issues, product docs | None | — |
+| `product-owner` | Intake, refinement, acceptance | opus | Read/Write/Edit/Bash/Web | Issues, product docs | Recommends (G0/G1) | — |
 | `architect` | Design, ADRs, control allocation | opus | Read/Write/Edit/Bash/Web | Docs only | Recommends (G2) | — |
-| `developer` | Implementation | opus | Read/Write/Edit/Bash/Web | Source + tests | **None** | — |
+| `ux` | Personas, journeys, wireframes, accessibility | opus | Read/Write/Edit/Web | `docs/design/` only | Recommends (G1/G2) | — |
+| `developer` | Implementation — generalist | opus | Read/Write/Edit/Bash/Web | Source + tests | **None** | — |
+| `frontend-developer` | User-facing surfaces, client a11y | opus | Read/Write/Edit/Bash/Web | Source + tests | **None** | — |
+| `backend-developer` | Services, APIs, data access | opus | Read/Write/Edit/Bash/Web | Source + tests | **None** | — |
+| `infrastructure-developer` | Containers, IaC, pipeline config | opus | Read/Write/Edit/Bash/Web | IaC + pipeline config | **None** | — |
+| `ai-developer` | Retrieval, agent workflows, models | opus | Read/Write/Edit/Bash/Web | Source + tests | **None** | — |
 | `security-engineer` | Threat models, control verification | opus | Read/Write/Edit/Bash/Web | Findings, threat models | Recommends (G2/G4); **blocks** | — |
 | `qa-engineer` | Test strategy, verification | opus | Read/Write/Edit/Bash | Tests only | Recommends (G4) | — |
 | `ai-risk-officer` | AI assessments, evals, red-team | opus | Read/Write/Edit/Bash/Web | Assessments, evals | Recommends (G2/G4); **blocks** | — |
-| `delivery-lead` | Flow, retros, facilitation | opus | Read/Write/Edit/Bash | Process docs | None | — |
-| `release-manager` | Change control, release readiness | opus | Read/Write/Edit/Bash | Release docs | Prepares G5; **human authorizes** | — |
+| `delivery-lead` | Orchestration, flow, retros | opus | Read/Write/Edit/Bash | Process docs, gate decisions | **APPROVES EVERY GATE** (POAM-017) | — |
+| `release-manager` | Change control, release readiness | opus | Read/Write/Edit/Bash | Release docs | Recommends (G5) | — |
 | `compliance-officer` | Control map, assessments, POA&M | opus | Read/Write/Edit/Bash | Compliance docs | Assesses only | — |
 | `tech-writer` | Documentation | opus | Read/Write/Edit/Bash | Docs only | None | — |
+
+> **The approval column is now the most important one in this table.** As of 2026-08-15
+> (ADR-0005) exactly one agent can approve a gate, and it is the only agent whose write scope
+> contains no source, tests, designs, threat models or release artifacts. **That asymmetry is
+> the control.** If `delivery-lead` ever acquires implementing scope, PD-2 is void and every
+> AC-5 claim in the control map goes with it. Treat a change to its row as a security change.
 
 **Governing document:** `docs/11-ai-agent-controls.md` (AIC-1..12).
 

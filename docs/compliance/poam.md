@@ -63,7 +63,51 @@ review*; POAM-005 and POAM-006 closed later the same day when the repository was
 | POAM-013 | Monthly monitoring cadence approximated by a weekly trigger | CA-7 | Low | Todd Benson | 2026-11-11 | Open — accepted, detection is loud |
 | POAM-014 | **The merge gate verifies process, not code.** Tests and scans run in Concourse *after* merge (re-scoped 2026-08-14 from "no merge gate exists") | CM-3, CM-5, AC-5, SA-11 | **High** | Todd Benson | 2026-09-14 | Open — process gate restored and enforced; code verification still post-merge |
 | POAM-015 | Manifest coverage was checked per top-level directory, so six platform docs were never delivered to forks | CM-2, SA-10 | Medium | Todd Benson | 2026-08-14 | **Closed** — check now per file; six docs classified; both directions proven (#58) |
+| POAM-017 | **Separation of duties is now agent-enforced, not human-enforced.** `delivery-lead` approves every gate; the control is a prompt boundary and a tool grant rather than a second person | AC-5, CM-5, SA-3 | **High** | Todd Benson | 2026-11-15 | Open — accepted by the system owner (ADR-0005) |
 | POAM-016 | **Two release paths that disagree.** `release.yml` still has `staging` and `authorize-and-deploy` jobs with a `PRODUCTION_URL`, describing a service deploy ADR-0004 says does not exist; Concourse has `release-preflight` → `authorize-release` | CM-3, CM-4, SA-10 | Medium | Todd Benson | 2026-09-14 | Open — found while closing POAM-005/006 (#61) |
+
+### POAM-017 — Separation of duties is agent-enforced ⚠️ HIGH
+
+**Weakness.** Gate approval moved from a human to the `delivery-lead` agent (ADR-0005, #65). AC-5
+separation of duties is now carried by an **asymmetry between agents** — the approver holds no
+implementing capability, the implementers hold no approval — rather than by a second person.
+
+**Why High.** A prompt boundary is not an independent identity. Three specific gaps:
+
+1. **Nothing detects a bad approval when it happens.** The compensating controls — the
+   tool-grant drift check in `validate-platform.py`, the recorded evidence trail, the quarterly
+   assessment — are all *detective*. A gate approved on evidence that does not support it looks
+   identical to one approved correctly until someone re-reads it.
+2. **Accountability relocated rather than persisted.** An agent cannot be answerable. Whoever
+   configures the orchestrator now answers for every transition it records, without reading any
+   of them.
+3. **The control has a single point of failure with no alarm on it.** If `delivery-lead` ever
+   gains implementing scope, PD-2 is void. `validate-platform.py` would catch the tool-grant
+   change; nothing catches a prompt edit that quietly tells it to write code.
+
+**Accepted by the system owner**, 2026-08-15, having been shown the alternative (an agent
+advancing G0–G3 with a human retained at G4/G5) and choosing full agent authority.
+
+**Compensating controls.**
+
+- The approver builds nothing — enforced at the tool layer and checked every commit against
+  `ai-inventory.md` (AIC-3, AIC-8).
+- A live Critical or High block cannot be approved past; only the blocking role withdraws it.
+- A release reaching real users or real data still goes to a human. keel itself ships nothing to
+  production (ADR-0004), so this carve-out is currently untested here — **a fork that deploys
+  should keep G5 human**, and that advice lives in `delivery-lead`'s own prompt so it travels
+  with the role rather than staying in this document.
+- Every approval names the gate, the date, the evidence and the approving identity (AU-2, AU-12).
+- `delivery-lead`'s **rejection rate is monitored**; zero across a quarter is a finding about
+  this control, not a sign of health.
+
+**Remediation.** Any of: restore a human approver at G4/G5; add a second, independently-spawned
+agent identity that must concur before a transition is recorded; or a scheduled sample audit of
+approvals by `compliance-officer` against the evidence actually cited. None is implemented.
+
+**This is the second control accepted rather than solved** for unattended solo operation, after
+POAM-008. They compound: POAM-008's compensating control is a self-review artifact that
+`delivery-lead` now checks — so one agent-enforced control is verified by another.
 
 ### 2026-08-14 — the repository was made public, and the register was corrected
 

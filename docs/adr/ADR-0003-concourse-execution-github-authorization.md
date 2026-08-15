@@ -9,6 +9,12 @@
 > Two of the four decisions below were reversed by running the thing. They are recorded as
 > reversals rather than rewritten as if they had been obvious.
 
+> **Superseded in part by ADR-0005 (2026-08-15).** The premise below — *"Gate approval is a
+> human act"* — no longer holds: `delivery-lead` approves G0–G5, with a release reaching real
+> users still going to a human. The rest of this ADR stands. Left as written, because an ADR is
+> a record of what was decided and why, and editing the reasoning out of an old one to match a
+> new decision destroys the only thing ADRs are for.
+
 ## Context
 
 All CI/CD ran on GitHub Actions: build and test, five scanners, three Mykronos ingestion

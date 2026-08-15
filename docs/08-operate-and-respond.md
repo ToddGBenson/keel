@@ -116,3 +116,34 @@ something operations later had to catch.
 
 That last one is the sharpest question this process asks of itself: **what reached
 production that a gate should have stopped, and which gate was it?**
+
+## The observability loop closes on the backlog, not on a dashboard
+
+`/retro` and `/learn` are **human-triggered**, which means the loop only closes when somebody
+remembers to close it. Production signal does not wait for a ceremony, and the signals that
+matter least are the ones that arrive loudest.
+
+**`delivery-lead` owns this loop** and runs it on a fixed cadence, not on inspiration. The
+output is a backlog item or an explicit decision not to act — never a note in a dashboard nobody
+opens.
+
+| Signal | Where it comes from | What it becomes |
+|---|---|---|
+| SLO burn / error budget spent | monitoring | A story, prioritised against features, not after them |
+| An alert that fired and needed no action | alert review | A change to the alert, or its deletion |
+| An alert that should have fired and did not | incident timeline | A detection gap — a story, and a POA&M entry if it is a control |
+| Toil performed more than twice | operator log | An automation story, or an explicit decision to keep doing it by hand |
+| A gate that passed something operations caught | postmortem | A gate criterion change via `/learn`, and a lesson if it generalises |
+| Latency, cost or error-rate drift | telemetry trend | An NFR the architecture never stated — back to `architect` |
+| An AI feature's output quality moving | eval baselines | A re-run of the eval suite; `ai-risk-officer` decides if the tier changed |
+
+**The rule that makes this a loop rather than a report:** every item above leaves the review
+with an issue number or a recorded decision not to raise one. A signal reviewed and dropped
+silently is indistinguishable from a signal nobody looked at, and six weeks later nobody can
+tell you which it was.
+
+**What to resist.** The failure mode here is a backlog full of observability noise that crowds
+out product work and trains everyone to ignore the label. Prefer deleting a bad alert to writing
+a story about it. Prefer one story about a class of toil to seven about instances. And when the
+honest answer is *we are choosing to live with this*, record that — it is a decision, and it
+should be re-read at the next quarterly assessment rather than rediscovered as a surprise.

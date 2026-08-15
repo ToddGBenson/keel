@@ -1,7 +1,9 @@
 # G4 — Verified
 
-**Approvers:** QA Engineer + Security Engineer (+ AI Risk Officer if AI-relevant) — each
+**Recommends:** QA Engineer + Security Engineer (+ AI Risk Officer if AI-relevant) — each
 **independently**, each recording pass or fail with evidence
+**Approves:** Delivery Lead (ADR-0005), which **cannot approve past a live block** — only record
+that the blocking role withdrew it, with a reason
 **Commands:** `/qa-gate`, `/security-gate`, `/ai-gate`
 **Reference:** `docs/05-verification.md` · **Controls:** SA-11 (+1, 2, 5, 8), CA-2, CA-7,
 CA-8, RA-5, SI-2, CM-4, CM-8, AU-2, AI RMF MEASURE 2

@@ -84,7 +84,7 @@ stated — overstating scope here is the fastest way to fail a real assessment.
 |---|---|---|---|---|
 | AC-2 | Account management | Repo, registry, and environment access reviews | Access review records | 🟡 |
 | AC-3 | Access enforcement | Allocated at G2; **integration-tested negative cases** at G4 | Tests | ✅ |
-| AC-5 | **Separation of duties** | No self-approval — prompt, tool grant, CODEOWNERS, Environments | Approval records, agent defs | ✅ |
+| AC-5 | **Separation of duties** | **Agent-enforced (ADR-0005):** the approver holds no implementing capability and the implementers hold no approval. Prompt, tool grant, CODEOWNERS, Environments. **Not a second person** | Approval records, agent defs, `ai-inventory.md` | 🟡 **POAM-017** |
 | AC-6 | Least privilege | Workflow `permissions:` scoped per job; agent tool grants | Workflow files, agent defs | ✅ |
 | IA-2 | Identification and authentication | GitHub identity; OIDC federation for cloud | Auth config | ✅ |
 | IA-5 | Authenticator management | No secrets in source; secret scanning; OIDC, no long-lived keys | Scan reports | ✅ |
