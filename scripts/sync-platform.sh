@@ -41,7 +41,23 @@ if [ -n "$(git status --porcelain)" ] && [ "$CHECK_ONLY" = "0" ]; then
 fi
 
 say "Fetching upstream"
-git fetch upstream --quiet
+# GIT_TERMINAL_PROMPT=0 so a credential prompt FAILS instead of hanging.
+#
+# Measured on the first real run of this script (#72): against the default
+# HTTPS upstream it produced seven minutes of complete silence and had to be
+# killed. `--quiet` suppressed progress, and git was waiting on a prompt nobody
+# could answer. To an operator following the documented path, `keel sync` simply
+# appeared dead — and the natural response to a dead sync is to stop syncing,
+# which is how a fork drifts away from the platform permanently.
+#
+# Fail fast and say which remote, rather than hanging politely.
+if ! GIT_TERMINAL_PROMPT=0 git fetch upstream --quiet --no-tags; then
+  echo "" >&2
+  echo "Could not fetch upstream: $(git remote get-url upstream 2>/dev/null || echo '?')" >&2
+  echo "  - no network, or the remote needs credentials this shell cannot supply" >&2
+  echo "  - check with: git fetch upstream" >&2
+  exit 1
+fi
 UPSTREAM_REF="upstream/main"
 git rev-parse --verify "$UPSTREAM_REF" >/dev/null 2>&1 || UPSTREAM_REF="upstream/master"
 info "$(git log -1 --format='%h %s' "$UPSTREAM_REF")"
@@ -147,9 +163,29 @@ fi
 # ── 4. Verify nothing broke ──────────────────────────────────────────────────
 if [ "$CHECK_ONLY" = "0" ] && [ "$changed" != "0" ]; then
   say "Verifying"
-  bash .claude/hooks/selftest.sh >/dev/null 2>&1 \
-    && info "guard self-test: passed" \
-    || warn "guard self-test FAILED after sync — investigate before committing"
+  # Bounded, because a verification step must not be able to hang the thing it
+  # verifies. Measured (#72): this self-test HANGS on Windows/Git Bash — it
+  # completes in the Linux CI containers, which is why every pipeline is green
+  # and an operator running `keel sync` on their own machine sees the script
+  # stop dead after doing all its work. A sync that appears to hang is a sync
+  # people stop running.
+  #
+  # `timeout` is absent on some minimal images, so fall back to running it
+  # unbounded rather than skipping the check.
+  if command -v timeout >/dev/null 2>&1; then
+    timeout 120 bash .claude/hooks/selftest.sh >/dev/null 2>&1
+    rc=$?
+  else
+    bash .claude/hooks/selftest.sh >/dev/null 2>&1
+    rc=$?
+  fi
+  if [ "$rc" = "0" ]; then
+    info "guard self-test: passed"
+  elif [ "$rc" = "124" ]; then
+    warn "guard self-test TIMED OUT after 120s — known on Windows (#72). Sync itself completed."
+  else
+    warn "guard self-test FAILED after sync — investigate before committing"
+  fi
   python scripts/validate-platform.py --quiet >/dev/null 2>&1 \
     && info "platform validation: pass" \
     || warn "platform validation reported issues — run it directly"
