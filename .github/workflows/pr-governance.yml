@@ -336,6 +336,21 @@ jobs:
       - name: Validate platform integrity
         run: python scripts/validate-platform.py
 
+      # Did previously-merged pull requests actually reach `main`? #68 reported
+      # merged, was green, and delivered nothing — it was stacked on #66 and
+      # merged 39 seconds after #66's SQUASH made its base branch obsolete.
+      # Every check here measured whether things were correct. None measured
+      # whether they were there.
+      #
+      # It runs in Actions rather than Concourse because it needs the GitHub API
+      # to ask which commit a merge produced, and it fails open and LOUD when it
+      # cannot look (GP-4) — a merge check that passes because it was blind is
+      # the failure it exists to catch.
+      - name: Did every merged PR actually land? (#69)
+        run: python scripts/validate-merges.py --check
+        env:
+          GH_TOKEN: ${{ github.token }}
+
       # ── TEST SUITES MOVED OUT, 2026-08-13 ────────────────────────────────────
       # The guard self-test, the dashboard generator tests and the self-review
       # check tests used to run here. They are test suites, and they now run in

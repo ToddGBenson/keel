@@ -103,6 +103,9 @@ project_owned:
   # upstream's from its first commit, and shipping ours would hand every fork a
   # ratchet already set to somebody else's position (#67).
   - .control-liveness.json
+  # Your reconciled merge strands. Ours reference our PR numbers, which mean
+  # something entirely different in your repository (#69).
+  - .merge-reconciled.json
   - docs/product/                    # your ideas, epics, product docs
   - README.md                        # rewritten by bootstrap for your project
   - .env.example
