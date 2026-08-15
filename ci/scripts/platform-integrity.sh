@@ -28,6 +28,17 @@ python scripts/validate-manifest.py
 echo "── validate-platform ──────────────────────────────────────────────────────"
 python scripts/validate-platform.py
 
+# ── control liveness (POAM-018) ───────────────────────────────────────────────
+# Existence was already checked; USE was not. Five of six gates had never fired
+# and fourteen controls were marked satisfied on them, and nothing noticed —
+# because nothing was measuring whether a control had ever done anything.
+#
+# --check is a RATCHET, not an alarm. The known zeros are accepted in POAM-018
+# and do not fail the build; a check that is red from birth gets muted (L0007).
+# It fails when the number gets worse.
+echo "── control liveness (POAM-018) ────────────────────────────────────────────"
+python scripts/control-liveness.py --check
+
 # Per the control-assessment skill: TEST beats EXAMINE. Three real defects in
 # these guards were found only by exercising them (POAM-002/003/004), including
 # one that blocked edits REMOVING a secret. Four assertions in there are

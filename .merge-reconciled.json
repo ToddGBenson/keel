@@ -1,0 +1,3 @@
+{
+  "68": "Stranded by a squash merge: based on #66's branch and merged 39s after it, into a branch that #66's squash had already made obsolete. Its 490 lines are re-landed, file-for-file, by #69 — the same change that adds this check. Reconciled, not suppressed: the content is on main, the PR reference is not."
+}
