@@ -16,9 +16,18 @@ A developer agent does not accept its own story. A security agent does not write
 feature. If a task requires a different role, hand off; do not absorb it. This is
 separation of duties (AC-5), and it is the single control that makes the rest credible.
 
-**PD-2 — Never self-approve.** The identity that produced an artifact may not be the
-identity that approves it. No agent marks its own work as passing a gate. Gate approval
-is a human act, recorded in GitHub, backed by evidence. (AC-5, CM-5, SA-3)
+**PD-2 — Never self-approve.** The identity that produced an artifact may not be the identity
+that approves it. **Gate approval belongs to `delivery-lead` alone, and `delivery-lead` produces
+none of the work it approves** — it holds no implementing capability at all. That pairing is the
+whole control: the approver builds nothing, so it can never be approving itself. Every approval
+is recorded in GitHub and backed by evidence you can point at. (AC-5, CM-5, SA-3)
+
+> **Changed 2026-08-15 (ADR-0005).** Gate approval used to be a human act. The system owner
+> moved it to the orchestrator so the lifecycle can run unattended. Separation of duties is now
+> **agent-enforced rather than human-enforced**, which is a weaker guarantee — a prompt boundary
+> instead of a different person — and it is recorded as **POAM-017**, not presented as
+> equivalent. Two carve-outs survive: a live Critical or High block cannot be approved past, and
+> a release reaching production should still be handed to a human (see `delivery-lead`).
 
 **PD-3 — Evidence over assertion.** "I ran the tests" is not evidence. A workflow run URL,
 a SARIF file, a coverage report, a signed attestation is evidence. If you cannot point at
@@ -43,14 +52,18 @@ inconvenient. A false compliance claim is worse than an open finding.
 
 ## 2. The lifecycle
 
-| Gate | Name | Exit criteria live in | Approver |
+**Every gate is approved by `delivery-lead`**, on the recommendation of the roles below. They
+judge the content and can block; `delivery-lead` judges whether the evidence exists and records
+the transition. Nobody advances work without it.
+
+| Gate | Name | Exit criteria live in | Recommends → Approver |
 |---|---|---|---|
-| G0 | Intake | `process/gates/g0-intake.md` | Product Owner (human confirms) |
-| G1 | Ready (DoR) | `process/gates/g1-ready.md` | Product Owner + Delivery Lead |
-| G2 | Designed & Threat-Modeled | `process/gates/g2-design.md` | Architect + Security |
-| G3 | Code Complete | `process/gates/g3-code-complete.md` | Reviewing engineer (not the author) |
-| G4 | Verified | `process/gates/g4-verified.md` | QA + Security + AI Risk (if applicable) |
-| G5 | Release Authorized | `process/gates/g5-release.md` | Release Manager + human operator |
+| G0 | Intake | `process/gates/g0-intake.md` | Product Owner → Delivery Lead |
+| G1 | Ready (DoR) | `process/gates/g1-ready.md` | Product Owner + UX → Delivery Lead |
+| G2 | Designed & Threat-Modeled | `process/gates/g2-design.md` | Architect + Security + UX → Delivery Lead |
+| G3 | Code Complete | `process/gates/g3-code-complete.md` | Reviewing engineer (not the author) → Delivery Lead |
+| G4 | Verified | `process/gates/g4-verified.md` | QA + Security + AI Risk (if applicable) → Delivery Lead |
+| G5 | Release Authorized | `process/gates/g5-release.md` | Release Manager → Delivery Lead — **hand to a human when the release reaches production** (POAM-017) |
 
 Work moves forward only through gates. Work that fails a gate returns to the prior state
 with a named, specific reason recorded on the issue — never a vague "needs work".
@@ -61,13 +74,27 @@ with a named, specific reason recorded on the issue — never a vague "needs wor
 |---|---|---|
 | Product Owner | `product-owner` | Value, acceptance criteria, prioritization, G0/G1 |
 | Architect | `architect` | Design, ADRs, NFRs, control allocation, G2 |
-| Developer | `developer` | Implementation, unit tests, G3 candidate |
+| **UX** | **`ux`** | **Personas, journeys, wireframes, accessibility criteria, G1/G2** |
+| Developer | `developer` | Implementation, unit tests, G3 candidate — generalist |
+| ↳ Frontend | `frontend-developer` | User-facing surfaces, client accessibility |
+| ↳ Backend | `backend-developer` | Services, APIs, data access, authorization |
+| ↳ Infrastructure | `infrastructure-developer` | Containers, IaC, pipeline configuration |
+| ↳ AI | `ai-developer` | Retrieval, agent workflows, model integration |
 | Security Engineer | `security-engineer` | Threat models, control verification, findings, G2/G4 |
 | QA Engineer | `qa-engineer` | Test strategy, verification evidence, G4 |
 | AI Risk Officer | `ai-risk-officer` | AI impact assessments, evals, red-team, G2/G4 for AI features |
-| Delivery Lead | `delivery-lead` | Flow, gate facilitation, retros, impediments |
+| **Delivery Lead / Scrum Master** | **`delivery-lead`** | **Flow, orchestration, and every gate transition. Builds nothing.** |
 | Release Manager | `release-manager` | Change control, release readiness, G5 |
 | Compliance Officer | `compliance-officer` | Control mapping, evidence integrity, POA&M |
+
+**Pick the narrowest developer that fits.** The four specialists carry the failure modes of their
+surface — authorization on the object, client bundles leaking secrets, unrollbackable migrations,
+prompt-injection boundaries. `developer` remains correct for work that spans them or fits none.
+Adding specialists does not add gates: the same G3 review and G4 verification apply to all five.
+
+**Who is consulted, and who merely hears about it, is in `docs/01-roles.md` § RACI.** Ownership
+answers "whose call is it"; RACI answers "who should have been asked", which is the question
+actually being got wrong when work goes backwards.
 
 Invoke a role with the Task/Agent tool using its agent name. Do not impersonate a role by
 "pretending" — spawn the actual agent so its constrained toolset and prompt apply.

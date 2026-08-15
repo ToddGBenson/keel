@@ -204,20 +204,69 @@ Convention is not enforcement. The mechanisms:
 
 ### Where a human is non-negotiable
 
-Agents execute; humans authorize. A human being must personally approve:
+> **Narrowed 2026-08-15 (ADR-0005).** Routine gate transitions are no longer on this list —
+> `delivery-lead` approves G0–G5 on the evidence other roles produce. What remains below is
+> where an agent's approval is least defensible, and it remains human. **POAM-017** records the
+> reduction; it is a weakening, not a refinement.
 
-1. **G5 release authorization** — every production deployment.
+Agents now execute *and* record gate transitions. A human being must still personally approve:
+
+1. **Production release** — a deployment reaching real users or real data. `delivery-lead` may
+   approve G5 for a change that ships nothing to production (a tagged template release, an
+   internal artifact); it hands over when a release leaves the building.
 2. **Risk acceptance** — any decision to ship with a known unmitigated High or Critical
-   finding, security or AI.
+   finding, security or AI. `delivery-lead` cannot approve past a live block.
 3. **Security exceptions** — any time-boxed deviation from a control.
 4. **Process changes** — amendments to this document, the gates, or the control map.
 5. **Scope or criteria changes** on in-flight work that alter what "done" means.
 6. **Anything touching production data, credentials, or customer-facing communication.**
 
 The reasoning is accountability, not distrust: NIST's control model assumes a responsible
-individual. An agent cannot hold accountability, so a human must stand behind the
-decisions that carry real risk. Agents make those decisions *cheap to evaluate* by
-assembling complete evidence — that is the actual value, not removing the human.
+individual. **An agent cannot hold accountability** — it cannot be answerable for an outcome,
+and nothing about giving it approval authority changes that. What moving gate approval to
+`delivery-lead` actually did was relocate the accountability, not discharge it: the human who
+configured the orchestrator now answers for every transition it records, without having read any
+of them. That is a real transfer of risk to a named person, and it is why the list above stops
+where it does.
+
+## RACI
+
+Ownership answers *whose call is it*. RACI answers *who should have been asked* — which is the
+question actually being got wrong whenever work goes backwards through a gate.
+
+**R** = does the work · **A** = accountable, one per row, and it is the approver ·
+**C** = consulted before, and their input changes the outcome · **I** = informed after.
+
+| Activity | PO | Delivery Lead | Architect | UX | Security | Devs | QA | Release | AI Risk | Compliance |
+|---|---|---|---|---|---|---|---|---|---|---|
+| Idea intake (G0) | **R** | **A** | I | I | I | I | I | I | I | I |
+| Requirements & criteria (G1) | **R** | **A** | C | C | C | I | C | I | C | I |
+| Sprint planning | C | **A/R** | I | I | I | C | C | I | I | I |
+| Architecture & ADRs (G2) | C | **A** | **R** | C | C | C | I | I | C | I |
+| UX design & accessibility (G2) | C | **A** | C | **R** | I | C | C | I | I | I |
+| Threat model (G2) | I | **A** | C | I | **R** | C | C | I | C | I |
+| AI impact assessment (G2) | C | **A** | C | I | C | C | I | I | **R** | I |
+| Implementation (G3) | I | **A** | C | C | C | **R** | I | I | C | I |
+| Code review (G3) | I | **A** | C | I | C | **R** | C | I | I | I |
+| Test creation & execution (G4) | I | **A** | I | C | C | C | **R** | I | C | I |
+| Security verification (G4) | I | **A** | C | I | **R** | C | C | I | C | C |
+| Eval & red-team (G4, AI) | I | **A** | I | I | C | C | C | I | **R** | I |
+| Build & package | I | **A** | I | I | C | **R** | C | C | I | I |
+| Release readiness (G5) | C | **A** | I | I | C | I | C | **R** | C | C |
+| Production deployment | I | C | I | I | C | I | C | **R** | I | I |
+| Monitoring & observability | I | C | C | C | C | C | C | **R** | C | I |
+| Incident response | C | C | C | I | **R** | **R** | C | C | C | I |
+| Control assessment & POA&M | I | C | C | I | C | I | C | I | C | **A/R** |
+| Continuous improvement | C | **A/R** | C | C | C | C | C | C | C | C |
+
+**Read the A column first.** `delivery-lead` is accountable for every gated row and does the work
+in none of them — that is PD-2 expressed as a table. The two rows where it is only *consulted*
+are the ones that reach production, where accountability sits with `release-manager` and, above
+them, a human.
+
+**A row with no C is a warning sign.** It means one role can complete that activity without
+anyone's input, and every gate rejection worth studying in this repository traces back to a
+consultation that should have happened and did not.
 
 ## Role assignment in a small team
 

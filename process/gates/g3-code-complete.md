@@ -1,6 +1,6 @@
 # G3 — Code Complete
 
-**Approver:** A reviewing engineer who is **not the author** · **Command:** `/review`
+**Recommends:** A reviewing engineer who is **not the author** · **Approves:** Delivery Lead (ADR-0005) · **Command:** `/review`
 **Reference:** `docs/04-development.md` Part B · **Controls:** SA-3, SA-10, SA-11(1),
 SA-15, CM-3, CM-5, AC-5, SI-7, SR-3/4/11, AIC-2, AIC-6, AIC-7, AIC-9
 

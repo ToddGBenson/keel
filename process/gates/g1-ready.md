@@ -1,6 +1,6 @@
 # G1 — Ready (Definition of Ready)
 
-**Approvers:** Product Owner (content) + Delivery Lead (process), confirmed by a human
+**Recommends:** Product Owner (content) + UX (usability & accessibility criteria) · **Approves:** Delivery Lead (ADR-0005)
 **Command:** `/ready` · **Reference:** `docs/03-refinement.md`
 **Controls:** SA-3, SA-4(3), SA-8, SA-15, PL-8, AI RMF MAP 2.3
 
@@ -29,6 +29,8 @@ answer would change the design.
 | 16 | Estimated by the team | Estimate |
 | 17 | Test approach agreed with QA | Test approach line |
 | 18 | **No open question exists whose answer would change the design** | Open questions section |
+| 19 | **UI surface?** If yes: UX acceptance criteria on the story, and the journey it belongs to named. If no: one line saying so | Story · `docs/design/journeys/` |
+| 20 | **Accessibility stated as criteria, not as an aspiration** — keyboard path, screen-reader behaviour, contrast, error identification (WCAG 2.2 AA) | Story criteria |
 
 ## Judgment notes
 
