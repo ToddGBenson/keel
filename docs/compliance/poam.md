@@ -63,8 +63,63 @@ review*; POAM-005 and POAM-006 closed later the same day when the repository was
 | POAM-013 | Monthly monitoring cadence approximated by a weekly trigger | CA-7 | Low | Todd Benson | 2026-11-11 | Open — accepted, detection is loud |
 | POAM-014 | **The merge gate verifies process, not code.** Tests and scans run in Concourse *after* merge (re-scoped 2026-08-14 from "no merge gate exists") | CM-3, CM-5, AC-5, SA-11 | **High** | Todd Benson | 2026-09-14 | Open — process gate restored and enforced; code verification still post-merge |
 | POAM-015 | Manifest coverage was checked per top-level directory, so six platform docs were never delivered to forks | CM-2, SA-10 | Medium | Todd Benson | 2026-08-14 | **Closed** — check now per file; six docs classified; both directions proven (#58) |
+| POAM-018 | **14 controls were marked satisfied on gates that have never run.** Five of six gates have produced zero evidence records; keel runs a one-gate lifecycle while documenting a six-gate one | SA-3, CA-2, CM-3, AC-3, AU-2, CP-10 +8 | **High** | Todd Benson | 2026-11-15 | Open — claims downgraded and measured; the gates remain unexercised |
 | POAM-017 | **Separation of duties is now agent-enforced, not human-enforced.** `delivery-lead` approves every gate; the control is a prompt boundary and a tool grant rather than a second person | AC-5, CM-5, SA-3 | **High** | Todd Benson | 2026-11-15 | Open — accepted by the system owner (ADR-0005) |
 | POAM-016 | **Two release paths that disagree.** `release.yml` still has `staging` and `authorize-and-deploy` jobs with a `PRODUCTION_URL`, describing a service deploy ADR-0004 says does not exist; Concourse has `release-preflight` → `authorize-release` | CM-3, CM-4, SA-10 | Medium | Todd Benson | 2026-09-14 | Open — found while closing POAM-005/006 (#61) |
+
+### POAM-018 — Controls marked satisfied on gates that have never run ⚠️ HIGH
+
+**Weakness.** Measured 2026-08-15, from `evidence/`:
+
+| Gate | Evidence records |
+|---|---|
+| G0 Intake · G1 Ready · G2 Design · G4 Verified · G5 Release | **0** |
+| G3 Code Complete | 12 |
+
+**keel runs a one-gate lifecycle while documenting a six-gate one.** Every change in this
+repository has gone idea → code → self-review → merge. Design review, threat modelling,
+verification and release authorisation have never happened here — not once.
+
+**14 controls in the map were marked ✅ on the strength of those gates**: SA-3, SA-3(1), SA-8,
+SA-11, SA-11(2), SA-15(5), CM-3, CM-3(2), RA-3, SI-10, AC-3, AU-2, CP-10, PL-8. Two cited
+evidence paths that do not exist — SA-11 pointed at `evidence/<issue>/g4/` (zero such
+directories) and CP-10 at G5 rollback rehearsal records. All 14 are now 🟡.
+
+Also never executed: `container-scan`, `release-preflight`, `authorize-release`.
+
+**Root cause, and it is structural.** keel has no product. Its only workload is changes to
+itself, which are process and documentation changes — so there is no design to review, no
+system to verify, no release to authorise. The gates have no natural trigger, so they
+accumulate *detail* instead of *use*.
+
+The same absence explains a pattern recorded separately in POAM-017, whose compensating controls
+are all detective: **detective controls can be written without a workload; preventive ones need
+something to prevent.** A framework with no work drifts toward detection every time.
+
+**Why this is worse than an unimplemented control.** An unimplemented control leaves a known
+hole. A control marked satisfied on a gate that has never run *ends the inquiry* — it is
+documented false assurance, sitting inside the document whose purpose is to prevent exactly
+that (PD-7, and the same shape as L0016).
+
+**Compensating control — `scripts/control-liveness.py`.** Reports, for every gate, how many
+records it has produced and whether it has **ever** fired; runs in `platform-integrity` on every
+commit. It deliberately does **not** fail on the existing zeros — a check that is red from birth
+gets muted (L0007). It fails on **regression**: a gate that had evidence and now has none, a
+*new* control claim resting on a dead gate, or a baseline nobody has touched in four months.
+A ratchet, not an alarm. Both failure directions were exercised before it was committed.
+
+**Remediation — only one of these actually fixes it.**
+
+1. **Give keel a real workload.** Run one genuine story through G0→G5 on real software. The
+   obvious candidate shares a host with it: PDSO2/mykronos has containers, deployments and
+   users, so `container-scan` gets a container and G5 meets a real production release — which
+   is precisely where POAM-017 says agent approval is least defensible.
+2. Reduce the claim: state in the SSP that only G3 is operative and scope the control map to it.
+   Honest, and it gives up most of what the framework is for.
+3. Leave it, and accept that five gates are documentation.
+
+**Nothing below option 1 makes a dead gate live.** Everything else in this entry, including the
+liveness check, is bookkeeping about an absence.
 
 ### POAM-017 — Separation of duties is agent-enforced ⚠️ HIGH
 
