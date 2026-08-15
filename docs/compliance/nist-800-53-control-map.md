@@ -10,6 +10,18 @@ authorization also requires operational, physical, and personnel control familie
 outside this repository. Where a control is only **partially** satisfied by the SDLC, that is
 stated — overstating scope here is the fastest way to fail a real assessment.
 
+**Provided here, demonstrated downstream (POAM-018).** keel is a template (ADR-0004). It has no
+product, so several controls below are **provided by the platform and demonstrated in the
+adopting project**, not in this repository — the same property that makes `container-scan` inert
+here and live in a fork that ships an image. Rows marked 🟡 **POAM-018** are exactly those: the
+mechanism exists and is shipped, and **keel's own evidence for it does not, because keel has
+nothing to design, verify or release.**
+
+Read that as a scoping statement, not an excuse. A fork inherits a working gate; **it also
+inherits the obligation to produce the evidence**, and its assessment — not this one — is where
+these controls are demonstrated. If you are assessing a *project* built on keel, these rows
+should be green in *its* map, backed by its `evidence/<issue>/g2|g4/` bundles.
+
 **Status key:** ✅ Implemented · 🟡 Partial · ⬜ Planned · ➖ Out of SDLC scope
 
 ---
@@ -18,21 +30,21 @@ stated — overstating scope here is the fastest way to fail a real assessment.
 
 | Control | Requirement | Implementation | Evidence | Status |
 |---|---|---|---|---|
-| SA-3 | SDLC with security integrated | This entire process; six gates with security at G2 and G4 | `docs/00-overview.md`, gate evidence bundles | ✅ |
-| SA-3(1) | Integrate security into the SDLC | Relevance triage at G0/G1 forces G2; security co-approves G2 and G4 | Triage flags, approval records | ✅ |
+| SA-3 | SDLC with security integrated | This entire process; six gates with security at G2 and G4 | `docs/00-overview.md`, gate evidence bundles | 🟡 **POAM-018** — gate never run |
+| SA-3(1) | Integrate security into the SDLC | Relevance triage at G0/G1 forces G2; security co-approves G2 and G4 | Triage flags, approval records | 🟡 **POAM-018** — gate never run |
 | SA-4 | Acquisition process | Dependency justification, license check, maintenance signal check | PR bodies, license scan | ✅ |
 | SA-4(3) | Development methods, techniques, practices | Documented process, test-first, code review, threat modeling | `docs/03`–`docs/06` | ✅ |
-| SA-8 | Security and privacy engineering principles | Applied and stated at G2, item 9 | Design notes | ✅ |
+| SA-8 | Security and privacy engineering principles | Applied and stated at G2, item 9 | Design notes | 🟡 **POAM-018** — gate never run |
 | SA-10 | Developer configuration management | Git, signed commits, branch protection, change records | Git history, CM records | ✅ |
 | SA-10(1) | Software/firmware integrity verification | Cosign signing, SLSA provenance, verify-on-deploy | Attestations | ✅ |
-| SA-11 | Developer testing and evaluation | G4 verification, three independent verdicts | `evidence/<issue>/g4/` | ✅ |
+| SA-11 | Developer testing and evaluation | G4 verification, three independent verdicts | `evidence/<issue>/g4/` | 🟡 **POAM-018** — gate never run |
 | SA-11(1) | Static code analysis | CodeQL + language linters, every PR, gated on new findings | SARIF | ✅ |
-| SA-11(2) | Threat modeling and vulnerability analysis | STRIDE at G2, mandatory for flagged stories | Threat models | ✅ |
+| SA-11(2) | Threat modeling and vulnerability analysis | STRIDE at G2, mandatory for flagged stories | Threat models | 🟡 **POAM-018** — gate never run |
 | SA-11(5) | Penetration testing | Quarterly + pre-major-release | Pentest reports | 🟡 schedule-dependent |
 | SA-11(8) | Dynamic code analysis | DAST on staging, per release | DAST reports | ✅ |
 | SA-15 | Development process, standards, tools | This process; tools pinned and version-controlled | Repo | ✅ |
 | SA-15(3) | Criticality analysis | RICE + risk tiering at G0; AI risk tiering at G2 | Idea records, AIAs | 🟡 |
-| SA-15(5) | Attack surface reduction | G2 item 10 — surface change identified and justified | Design notes | ✅ |
+| SA-15(5) | Attack surface reduction | G2 item 10 — surface change identified and justified | Design notes | 🟡 **POAM-018** — gate never run |
 | SA-17 | Developer security architecture and design | Architect role, ADRs, control allocation matrix | ADRs, allocation matrices | ✅ |
 | SA-22 | Unsupported system components | EOL notices enter intake as scheduled chores | Dependency inventory | 🟡 |
 
@@ -41,8 +53,8 @@ stated — overstating scope here is the fastest way to fail a real assessment.
 | Control | Requirement | Implementation | Evidence | Status |
 |---|---|---|---|---|
 | CM-2 | Baseline configuration | IaC in version control; one artifact promoted across environments | Git, artifact registry | ✅ |
-| CM-3 | Configuration change control | G5 change records; PR + review + human authorization | Change records, approvals | ✅ |
-| CM-3(2) | Test, validate, document changes | G3 + G4 before any G5 | Gate evidence | ✅ |
+| CM-3 | Configuration change control | G5 change records; PR + review + human authorization | Change records, approvals | 🟡 **POAM-018** — gate never run |
+| CM-3(2) | Test, validate, document changes | G3 + G4 before any G5 | Gate evidence | 🟡 **POAM-018** — gate never run |
 | CM-4 | Impact analyses | Change record item 4; AI impact at item 5 | Change records | ✅ |
 | CM-4(1) | Separate test environments | Local / CI / staging / production separation | Environment config | ✅ |
 | CM-5 | Access restrictions for change | Branch protection, CODEOWNERS, no admin bypass, signed commits | GitHub settings, git log | ✅ |
@@ -56,7 +68,7 @@ stated — overstating scope here is the fastest way to fail a real assessment.
 
 | Control | Requirement | Implementation | Evidence | Status |
 |---|---|---|---|---|
-| RA-3 | Risk assessment | Threat models at G2; risk tiering at intake | Threat models | ✅ |
+| RA-3 | Risk assessment | Threat models at G2; risk tiering at intake | Threat models | 🟡 **POAM-018** — gate never run |
 | RA-5 | Vulnerability monitoring and scanning | SCA + container scan every PR; **daily rescan of deployed artifacts** | Scan history | ✅ |
 | RA-5(2) | Update vulnerabilities to be scanned | Scanner feeds auto-updated | Tool config | ✅ |
 | RA-7 | Risk response | Finding disposition: mitigate / transfer / accept / eliminate | Findings, POA&M | ✅ |
@@ -64,7 +76,7 @@ stated — overstating scope here is the fastest way to fail a real assessment.
 | SI-3 | Malicious code protection | Container scanning, dependency integrity verification | Scan reports | 🟡 |
 | SI-4 | System monitoring | `docs/08-operate-and-respond.md` monitoring table | Alert config | 🟡 |
 | SI-7 | Software/firmware/information integrity | Signed commits, signed artifacts, provenance, verify-on-deploy | Signatures, attestations | ✅ |
-| SI-10 | Information input validation | Allocated at G2; negative-case tested at G4 | Tests, SAST | ✅ |
+| SI-10 | Information input validation | Allocated at G2; negative-case tested at G4 | Tests, SAST | 🟡 **POAM-018** — gate never run |
 | SI-12 | Information management and retention | `docs/10-definitions.md` § Retention | Retention config | 🟡 |
 
 ## SR — Supply Chain Risk Management
@@ -83,7 +95,7 @@ stated — overstating scope here is the fastest way to fail a real assessment.
 | Control | Requirement | Implementation | Evidence | Status |
 |---|---|---|---|---|
 | AC-2 | Account management | Repo, registry, and environment access reviews | Access review records | 🟡 |
-| AC-3 | Access enforcement | Allocated at G2; **integration-tested negative cases** at G4 | Tests | ✅ |
+| AC-3 | Access enforcement | Allocated at G2; **integration-tested negative cases** at G4 | Tests | 🟡 **POAM-018** — gate never run |
 | AC-5 | **Separation of duties** | **Agent-enforced (ADR-0005):** the approver holds no implementing capability and the implementers hold no approval. Prompt, tool grant, CODEOWNERS, Environments. **Not a second person** | Approval records, agent defs, `ai-inventory.md` | 🟡 **POAM-017** |
 | AC-6 | Least privilege | Workflow `permissions:` scoped per job; agent tool grants | Workflow files, agent defs | ✅ |
 | IA-2 | Identification and authentication | GitHub identity; OIDC federation for cloud | Auth config | ✅ |
@@ -93,7 +105,7 @@ stated — overstating scope here is the fastest way to fail a real assessment.
 
 | Control | Requirement | Implementation | Evidence | Status |
 |---|---|---|---|---|
-| AU-2 | Event logging | Audit events specified as story criteria; verified at G4 item 21 | Tests, log samples | ✅ |
+| AU-2 | Event logging | Audit events specified as story criteria; verified at G4 item 21 | Tests, log samples | 🟡 **POAM-018** — gate never run |
 | AU-3 | Content of audit records | Logging standards; no secrets or personal data in logs | Code review | 🟡 |
 | AU-6 | Audit record review, analysis, reporting | Monitoring table; pipeline anomaly alerting | Alert config | 🟡 |
 | AU-9 | Protection of audit information | Immutable CI logs; protected evidence store | Storage config | 🟡 |
@@ -114,7 +126,7 @@ stated — overstating scope here is the fastest way to fail a real assessment.
 | Control | Requirement | Implementation | Evidence | Status |
 |---|---|---|---|---|
 | CP-9 | System backup | Automated, encrypted, **restore-tested on a schedule** | Restore test records | 🟡 |
-| CP-10 | System recovery and reconstitution | Rollback rehearsed and verified at G5 item 13 | Rehearsal records | ✅ |
+| CP-10 | System recovery and reconstitution | Rollback rehearsed and verified at G5 item 13 | Rehearsal records | 🟡 **POAM-018** — gate never run |
 | IR-4 | Incident handling | `docs/08-operate-and-respond.md` | Incident records | ✅ |
 | IR-5 | Incident monitoring | Incident register, postmortems | Records | ✅ |
 | IR-6 | Incident reporting | Notification assessment in the security incident path | Records | 🟡 |
@@ -125,7 +137,7 @@ stated — overstating scope here is the fastest way to fail a real assessment.
 | Control | Requirement | Implementation | Evidence | Status |
 |---|---|---|---|---|
 | PL-2 | System security and privacy plans | `ssp-outline.md` | SSP | 🟡 |
-| PL-8 | Security and privacy architectures | Architect role; control allocation at G2 | ADRs, allocation matrices | ✅ |
+| PL-8 | Security and privacy architectures | Architect role; control allocation at G2 | ADRs, allocation matrices | 🟡 **POAM-018** — gate never run |
 | PT-2/PT-3 | Authority and purpose for processing PII | Privacy triage at G1; data governance in the AIA | Story flags, AIAs | 🟡 |
 | PT-5 | Privacy notice | Transparency requirements at G4 item 32 | UI review | 🟡 |
 | MP-6 | Media sanitization | Synthetic/de-identified data in non-production; disposal policy | Environment config | 🟡 |

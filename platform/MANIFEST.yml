@@ -99,6 +99,10 @@ project_owned:
   - docs/adr/                        # your architecture decisions, not the platform's
   - docs/compliance/poam.md          # your open findings
   - docs/compliance/ai-inventory.md  # your AI systems
+  # Your gate-liveness numbers, not the platform's. A fork's counts differ from
+  # upstream's from its first commit, and shipping ours would hand every fork a
+  # ratchet already set to somebody else's position (#67).
+  - .control-liveness.json
   - docs/product/                    # your ideas, epics, product docs
   - README.md                        # rewritten by bootstrap for your project
   - .env.example
