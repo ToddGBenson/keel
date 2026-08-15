@@ -10,6 +10,18 @@ authorization also requires operational, physical, and personnel control familie
 outside this repository. Where a control is only **partially** satisfied by the SDLC, that is
 stated — overstating scope here is the fastest way to fail a real assessment.
 
+**Provided here, demonstrated downstream (POAM-018).** keel is a template (ADR-0004). It has no
+product, so several controls below are **provided by the platform and demonstrated in the
+adopting project**, not in this repository — the same property that makes `container-scan` inert
+here and live in a fork that ships an image. Rows marked 🟡 **POAM-018** are exactly those: the
+mechanism exists and is shipped, and **keel's own evidence for it does not, because keel has
+nothing to design, verify or release.**
+
+Read that as a scoping statement, not an excuse. A fork inherits a working gate; **it also
+inherits the obligation to produce the evidence**, and its assessment — not this one — is where
+these controls are demonstrated. If you are assessing a *project* built on keel, these rows
+should be green in *its* map, backed by its `evidence/<issue>/g2|g4/` bundles.
+
 **Status key:** ✅ Implemented · 🟡 Partial · ⬜ Planned · ➖ Out of SDLC scope
 
 ---

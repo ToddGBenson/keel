@@ -15,6 +15,20 @@ existence.
     python scripts/control-liveness.py           # report
     python scripts/control-liveness.py --check    # regression gate (CI)
 
+WHAT THE ZEROS MEAN IN A TEMPLATE (read this before "fixing" them)
+------------------------------------------------------------------
+keel ships no product, so G2 and G4 have nothing to design or verify. Those
+zeros are structural, not neglect — the same property that makes container-scan
+inert here and live in a fork that ships an image (ADR-0004 §D3, L0017).
+
+**Do not make this number go up by adding product code to the platform.** That
+does not exercise the gates; it ends the template. If a metric can only be
+improved by destroying the thing it measures, it is measuring the wrong subject.
+
+The zeros close when a reference fork's gate evidence exists and the control map
+is scoped to say "provided here, demonstrated downstream". Until then this check
+has one job: stop the pile growing.
+
 WHY THIS DOES NOT FAIL ON THE EXISTING ZEROS
 --------------------------------------------
 A check that is red from the day it is introduced gets muted, and then the

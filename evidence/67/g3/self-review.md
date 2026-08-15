@@ -70,6 +70,23 @@ could reasonably draw the line differently.
 - **The honest framing of this whole PR:** it makes an absence visible and stops it growing. It
   does not reduce it. A reader should not come away thinking the problem is addressed.
 
+## Correction made before merge
+
+The system owner read the remediation and asked: *if this repository becomes a project, what is
+the baseline for the next project?* There would not be one. **POAM-018's first remediation —
+"give keel a real workload" — would have destroyed the template**, and I had already written the
+principle that forbids it: ADR-0004 §D3, "inert lanes are inherited, not dead", one day earlier.
+I applied it to pipeline lanes and not to gates.
+
+Corrected in this PR: the remediation is now scope-the-claim plus prove-it-in-a-reference-fork,
+the control map carries a provided-here/demonstrated-downstream scope note, and L0017 records the
+class. The 14 downgrades are unchanged — a claim citing a directory that does not exist is false
+whoever's gates ought to fire.
+
+**Recording the sequence rather than the conclusion**, because the conclusion looks like
+foresight and it was not: I wrote a fix that would have cost more than the finding, and it was
+caught by a question, not by any check in this repository.
+
 ## Residual risk accepted
 
 - 14 control claims downgraded; the underlying gates remain unexercised.

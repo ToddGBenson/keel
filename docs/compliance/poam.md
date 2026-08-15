@@ -108,18 +108,41 @@ gets muted (L0007). It fails on **regression**: a gate that had evidence and now
 *new* control claim resting on a dead gate, or a baseline nobody has touched in four months.
 A ratchet, not an alarm. Both failure directions were exercised before it was committed.
 
-**Remediation — only one of these actually fixes it.**
+**Remediation — corrected 2026-08-15, the same day, before this entry was merged.**
 
-1. **Give keel a real workload.** Run one genuine story through G0→G5 on real software. The
-   obvious candidate shares a host with it: PDSO2/mykronos has containers, deployments and
-   users, so `container-scan` gets a container and G5 meets a real production release — which
-   is precisely where POAM-017 says agent approval is least defensible.
-2. Reduce the claim: state in the SSP that only G3 is operative and scope the control map to it.
-   Honest, and it gives up most of what the framework is for.
-3. Leave it, and accept that five gates are documentation.
+> **The first version of this section said "give keel a real workload."** The system owner asked
+> the obvious follow-up: *if this repository becomes a project, what is the baseline for the next
+> project?* The answer is that there would not be one. **Product code in keel destroys the
+> template**, and the remediation would have cost more than the finding.
+>
+> Worse, the correct principle was already written down here. ADR-0004 §D3, one day earlier:
+> *"Inert lanes are inherited, not dead. A lane that does nothing here is what a fork gets on the
+> day it first ships an image."* `container-scan` is inert in keel because keel has no image, and
+> that was called **the point**. G2 and G4 never firing is the same fact about the same absence.
+> The reasoning was applied to pipeline lanes and not to gates twenty-four hours later — L0014,
+> fixing the instance rather than the class, by the author of L0014.
 
-**Nothing below option 1 makes a dead gate live.** Everything else in this entry, including the
-liveness check, is bookkeeping about an absence.
+**What survives the correction.** The 14 downgrades stand. The map claimed SA-11 satisfied with
+evidence at `evidence/<issue>/g4/`, and that directory does not exist here. A false claim is
+false regardless of whose gates ought to fire.
+
+**What the fix actually is.**
+
+1. **Scope the control map** — these are controls the platform *provides*, demonstrated in the
+   adopting project. keel's own posture is necessarily limited, and stating that is accurate
+   rather than embarrassing. Done in this change.
+2. **Prove them in a reference fork.** A real project that adopts keel, whose gate evidence
+   demonstrates the gates work. This is the only remediation that produces evidence, and it
+   produces it **outside this repository**, which is the whole point. It exercises
+   `sync-platform.sh` at the same time — the other mechanism here that has never run.
+3. `/promote` carries what that project learns back, so the next fork inherits it.
+
+**The rule that follows, and it governs this repository permanently:** *product code never goes
+in keel.* A platform is proven by being used, not by being filled.
+
+**What this entry can and cannot become.** It cannot close on keel's own evidence. It closes when
+a reference fork's gate records exist and the map is scoped to say so — and until then the
+liveness check keeps the number from growing.
 
 ### POAM-017 — Separation of duties is agent-enforced ⚠️ HIGH
 
