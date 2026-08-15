@@ -106,6 +106,13 @@ project_owned:
   # Your reconciled merge strands. Ours reference our PR numbers, which mean
   # something entirely different in your repository (#69).
   - .merge-reconciled.json
+  # Created by scripts/bootstrap.sh in YOUR repository and absent from upstream.
+  # Unclassified, these made every fork fail its own manifest validator on day
+  # one — and that validator runs in platform-integrity, a required check, so a
+  # fork's first pull request was red before it contained anything (#70). Found
+  # by running bootstrap for the first time rather than by reading it.
+  - .bootstrapped                    # marker: bootstrap has been run
+  - docs/PLATFORM.md                 # the platform README, moved aside for yours
   - docs/product/                    # your ideas, epics, product docs
   - README.md                        # rewritten by bootstrap for your project
   - .env.example

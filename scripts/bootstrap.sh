@@ -245,6 +245,58 @@ say "Resetting project ledgers"
 mkdir -p docs/product evidence
 mv README.md docs/PLATFORM.md 2>/dev/null || true
 
+# ── Evidence: the platform's gate records are NOT yours ───────────────────────
+# This block used to be missing, and the omission was invisible because the
+# header of this script claimed it had happened. Measured on the first real run
+# (#70): a freshly bootstrapped project inherited FOURTEEN evidence directories
+# of the platform's self-reviews, and its own control-liveness check duly
+# reported "G3 Code Complete: 13 records, ever fired: yes" for a repository that
+# had done nothing at all.
+#
+# That is the exact false assurance the liveness check exists to detect,
+# manufactured by the bootstrap of the tool that detects it. An empty ledger is
+# the whole point of starting a project: you have no evidence yet, and saying so
+# is the only honest first state.
+evidence_inherited=$(find evidence -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l | tr -d ' ')
+if [ "${evidence_inherited}" != "0" ]; then
+  find evidence -mindepth 1 -maxdepth 1 -type d -exec rm -rf {} + 2>/dev/null || true
+  info "cleared ${evidence_inherited} inherited evidence bundle(s) — you start with none"
+fi
+
+# Per-repo ledgers whose contents mean something else in your repository: the
+# liveness baseline is a ratchet, and inheriting one already set to the
+# platform's position hides your own first regressions. The merge-reconciliation
+# file references the PLATFORM's pull-request numbers, which are different pull
+# requests in your repository.
+rm -f .merge-reconciled.json
+rm -f .control-liveness.json   # regenerated from your (empty) evidence below
+
+# ── ADRs: theirs are decisions ABOUT the platform ─────────────────────────────
+# Kept, not deleted — they explain the process you have just inherited, and
+# throwing them away means the first person to ask "why does the orchestrator
+# approve gates?" has nowhere to look. But they are not YOUR decisions, and one
+# of them (ADR-0004, "keel is a template, not a service") is actively false
+# about your project. Moved aside so `docs/adr/` is empty for your first real
+# architectural decision.
+if compgen -G "docs/adr/ADR-*.md" >/dev/null 2>&1; then
+  mkdir -p docs/adr/platform
+  mv docs/adr/ADR-*.md docs/adr/platform/ 2>/dev/null || true
+  cat > docs/adr/platform/README.md <<'ADREOF'
+# Inherited platform decisions
+
+These ADRs were written by the **platform**, about the platform. They are kept because they
+explain the process this project inherited — why gates work the way they do, why CI is split
+the way it is, who approves what.
+
+**They are not this project's decisions.** Your ADRs go in `docs/adr/`, numbered from 0001.
+
+At least one of these is *false about your project* by design: the platform records that it is
+a template with no product and no production environment. Yours has both. Read them as history
+you were handed, not as statements about your system.
+ADREOF
+  info "inherited ADRs moved to docs/adr/platform/ — docs/adr/ is yours"
+fi
+
 cat > README.md <<EOF
 # $PNAME
 
@@ -321,6 +373,13 @@ bash .claude/hooks/selftest.sh >/dev/null 2>&1 && info "guard self-test: passed"
   || info "guard self-test FAILED — investigate before proceeding"
 python scripts/validate-platform.py --quiet >/dev/null 2>&1 && info "platform validation: pass" \
   || info "platform validation reported issues — run: python scripts/validate-platform.py"
+
+# Your liveness baseline, generated from YOUR evidence — which is now none. The
+# ratchet has to start at your zero, not the platform's, or your first regression
+# is measured against somebody else's position and passes.
+python scripts/control-liveness.py --update-baseline >/dev/null 2>&1 \
+  && info "control-liveness baseline set to your (empty) starting position" \
+  || info "could not write .control-liveness.json — run: python scripts/control-liveness.py --update-baseline"
 
 # Validate what we just generated. Bootstrap previously emitted invalid YAML and still
 # printed its success banner — a generator that does not check its own output is a
