@@ -34,7 +34,9 @@ assurance that everything else relies on.
 > that forks sync. See each entry.
 
 **Last reviewed:** 2026-08-14 — every row measured against the live system, not carried
-forward. Record: `evidence/assessments/2026-08-14-poam-review.md`. Nothing was closed.
+forward. Record: `evidence/assessments/2026-08-14-poam-review.md`. Nothing was closed *at that
+review*; POAM-005 and POAM-006 closed later the same day when the repository was made public
+(#61), on fresh measurements rather than on that review's findings.
 
 > **POAM-008's compensating control executes again as of 2026-08-14.** Solo operation is
 > accepted on the basis that `Process compliance` enforces a self-review artifact in place of a
@@ -50,17 +52,57 @@ forward. Record: `evidence/assessments/2026-08-14-poam-review.md`. Nothing was c
 | POAM-002 | Secret guard used keyword matching; blocked all security tooling | AIC-5, IA-5 | Medium | *unassigned* | 2026-08-07 | **Closed** — fixed + regression test |
 | POAM-003 | Secret guard matched its own patterns; blocked its own repair | AIC-5 | Medium | *unassigned* | 2026-08-07 | **Closed** — fixed + regression test |
 | POAM-004 | Without `jq`, guard scanned `old_string`; blocked removing a secret | AIC-5, IA-5 | **High** | *unassigned* | 2026-08-07 | **Closed** — fixed |
-| POAM-005 | GitHub secret scanning + push protection unavailable (private repo, Free plan) | IA-5, SI-7 | Medium | Todd Benson | 2026-11-12 | **REOPENED 2026-08-13** — repo made private; measured `unavailable` |
-| POAM-006 | `production` environment has no required reviewers — **G5 is not technically enforced** | CM-3, AC-5 | **High** | Todd Benson | 2026-09-12 | **REOPENED 2026-08-13** — private repo dropped the rule; measured |
+| POAM-005 | GitHub secret scanning + push protection unavailable (private repo, Free plan) | IA-5, SI-7 | Medium | Todd Benson | 2026-08-14 | **Closed 2026-08-14** — repo made public; `secret_scanning` and `secret_scanning_push_protection` both measured `enabled` |
+| POAM-006 | `production` environment has no required reviewers — **G5 is not technically enforced** | CM-3, AC-5 | **High** | Todd Benson | 2026-08-14 | **Closed 2026-08-14** — repo made public; `required_reviewers` restored *automatically*, reviewer `ToddGBenson`; `release.yml` authorize job references it |
 | POAM-007 | Verification routine in `configure-github.sh` reported 5 false failures | CA-2 | Medium | *unassigned* | 2026-08-07 | **Closed** — fixed + re-verified |
 | POAM-008 | **Solo operation — AC-5 separation of duties cannot be satisfied** | AC-5, CM-5 | **High** | Todd Benson | on 2nd team member | Open — accepted with compensating controls |
 | POAM-009 | Commit signing not registered with GitHub — SI-7/CM-14 unsatisfied | SI-7, CM-14 | Medium | Todd Benson | 2026-08-08 | **Closed** — key registered; GitHub verifies commits; required_signatures enabled |
-| POAM-010 | **G5 release authorization weakened by the move to Concourse** — reopens POAM-006 | CM-3, AC-5 | **High** | Todd Benson | 2026-09-12 | **REOPENED 2026-08-13** — its fix depended on POAM-006, which the private switch undid |
+| POAM-010 | **G5 release authorization weakened by the move to Concourse** — the GitHub-side dependency is restored, but the release path in use is Concourse, whose `authorize-release` **has never executed** | CM-3, AC-5 | **High** | Todd Benson | 2026-09-12 | Open — **not closed by POAM-006's closure**; see the 2026-08-14 note |
 | POAM-011 | No provenance for what forks receive — cosign sign/attest are stubs (re-scoped 2026-08-14: the subject is the platform release, not an artifact) | SR-4(3), CM-14 | Medium | Todd Benson | 2026-11-11 | Open |
 | POAM-012 | CodeQL SARIF from Concourse does not reach GitHub code scanning | SA-11(1) | Low | Todd Benson | 2026-08-13 | **Closed** — the lane that discarded SARIF was deleted; SAST on main now ingests both languages to Mykronos |
 | POAM-013 | Monthly monitoring cadence approximated by a weekly trigger | CA-7 | Low | Todd Benson | 2026-11-11 | Open — accepted, detection is loud |
 | POAM-014 | **The merge gate verifies process, not code.** Tests and scans run in Concourse *after* merge (re-scoped 2026-08-14 from "no merge gate exists") | CM-3, CM-5, AC-5, SA-11 | **High** | Todd Benson | 2026-09-14 | Open — process gate restored and enforced; code verification still post-merge |
 | POAM-015 | Manifest coverage was checked per top-level directory, so six platform docs were never delivered to forks | CM-2, SA-10 | Medium | Todd Benson | 2026-08-14 | **Closed** — check now per file; six docs classified; both directions proven (#58) |
+| POAM-016 | **Two release paths that disagree.** `release.yml` still has `staging` and `authorize-and-deploy` jobs with a `PRODUCTION_URL`, describing a service deploy ADR-0004 says does not exist; Concourse has `release-preflight` → `authorize-release` | CM-3, CM-4, SA-10 | Medium | Todd Benson | 2026-09-14 | Open — found while closing POAM-005/006 (#61) |
+
+### 2026-08-14 — the repository was made public, and the register was corrected
+
+**Decision.** The system owner directed that the repository be made public, having been shown
+that the self-hosted runner was a bridge rather than a destination. Measured immediately after,
+against the live system:
+
+| | Before (private) | After (public) |
+|---|---|---|
+| Secret scanning | `unavailable` | **`enabled`** |
+| Push protection | `unavailable` | **`enabled`** |
+| `production` protection rules | `branch_policy` only | **`required_reviewers` + `branch_policy`** (`ToddGBenson`) |
+| Hosted Actions | refused in ~3s on billing | **`CI` green on `ubuntu-latest`** |
+
+**Before publishing**, the nine commits made while private — which had never been public — were
+scanned along with the whole tracked tree for private keys, GitHub tokens, Vault tokens, AWS
+keys and Slack tokens. Clean; every `webhook_token` reference is a Vault placeholder. That check
+is the one step in the change that could not have been undone if it had been skipped and wrong.
+
+**POAM-005 and POAM-006 close.** The second is worth reading twice: going private had
+**deleted** the `required_reviewers` rule rather than suspending it, and POAM-006's remediation
+plan described re-adding it by hand. **It restored itself on publication.** The entry closes
+without the work its own plan called for, which means the plan was wrong about the cost — a
+remediation plan is an estimate, and this one is now evidence that they should be re-checked at
+closure rather than assumed.
+
+**POAM-010 does not close, and the temptation to close it is the point.** Its stated dependency
+— POAM-006 — is satisfied. But per ADR-0004 the release path in use is Concourse, and
+`release-preflight` and `authorize-release` have **no builds at all**. Closing it on the
+strength of a GitHub environment reviewer would claim a control operates via a path the release
+does not take. That is precisely the false-compliance failure PD-7 prohibits, arriving in its
+most persuasive form: a green fact that answers a question nobody asked.
+
+**POAM-014 stays High.** Hosted runners working changes its *remediation options*, not the
+weakness: the merge gate still verifies process, not code.
+
+**POAM-016 opens.** Chasing POAM-010 surfaced that `release.yml` still describes a staging and
+production deploy for a repository ADR-0004 established ships no artifact. Two release paths now
+disagree about what a release is.
 
 ### 2026-08-13 — the repository was made private, and three entries reopened
 
@@ -99,6 +141,22 @@ configuration-only path.
 ---
 
 ### POAM-014 — The merge gate verifies process, not code ⚠️ HIGH
+
+> **Update, later on 2026-08-14 (#61).** The repository was made public, so hosted runners work
+> again — `CI` measured green on `ubuntu-latest`. **This changes the remediation options, not
+> the weakness.** The self-hosted runner is now a bridge that spans nothing: the gate can run on
+> hosted runners with no persistent runner, no logon task, and no Actions process sharing a host
+> with Vault and Concourse.
+>
+> Removing it has an order that matters: point `KEEL_RUNNER_LABELS` back to the default, confirm
+> the three checks report from hosted runners, **then** unregister the task and
+> `config.cmd remove`. Reversed, every pull request hangs on checks that can no longer report —
+> and a check that never reports looks like a stuck PR, not a stopped runner.
+>
+> Newly available and not yet acted on: `Dependency review` will now run instead of skipping
+> loudly, and the three Mykronos workflows could be enabled for real — which revises the
+> reasoning recorded on PR #60, where `ubuntu-latest` being unable to start was the deciding
+> argument.
 
 > **Re-scoped 2026-08-14 (#58), not closed.** Option 3 below was taken: a self-hosted runner
 > now executes `PR Governance`, and its three jobs are required status checks on `main`. The
@@ -474,6 +532,10 @@ does GitHub mark a real signed commit as verified. Needs only `repo`.
 
 ### POAM-005 — Server-side secret scanning unavailable ✅ CLOSED 2026-08-08
 
+> **This entry has closed twice.** Reopened 2026-08-13 when the repository went private, closed
+> again 2026-08-14 when it went public. Same weakness, same fix, same evidence — see the
+> 2026-08-14 note above. A control that depends on repository visibility follows visibility.
+
 **Weakness.** GitHub secret scanning and push protection require GitHub Advanced Security,
 which is free only on **public** repositories. This repo is private on a Free plan, so
 `security_and_analysis` is null.
@@ -489,6 +551,12 @@ server-side push block — the last line of defence if a contributor skips local
 exists. **Evidence of closure:** `configure-github.sh` CIS check 1.5.1 reports ok.
 
 ### POAM-006 — G5 human authorization is not technically enforced ✅ CLOSED 2026-08-08
+
+> **Closed twice, and the second time cost nothing.** Reopened 2026-08-13 when going private
+> **deleted** the `required_reviewers` rule; closed again 2026-08-14 when going public
+> **restored it automatically**. The remediation plan below describes re-adding the reviewer by
+> hand, and that work was never needed. Re-check a remediation plan at closure rather than
+> assuming it still describes the fix.
 
 **Weakness.** Required reviewers on a deployment environment need a paid plan for private
 repositories. The `production` environment could not be created with a reviewer gate, so the
