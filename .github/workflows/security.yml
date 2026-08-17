@@ -105,14 +105,14 @@ jobs:
             } >> "$GITHUB_STEP_SUMMARY"
           fi
 
-      - uses: github/codeql-action/init@c4dd10e44af883a891fe31ced449bcb4a6728b9b # v3.37.6
+      - uses: github/codeql-action/init@f3712979fa5f215279b101dd0a2e3bdfb4353324 # v3.37.7
         if: steps.src.outputs.present == 'true'
         with:
           language: ${{ matrix.language }}
           queries: security-extended,security-and-quality
-      - uses: github/codeql-action/autobuild@c4dd10e44af883a891fe31ced449bcb4a6728b9b # v3.37.6
+      - uses: github/codeql-action/autobuild@f3712979fa5f215279b101dd0a2e3bdfb4353324 # v3.37.7
         if: steps.src.outputs.present == 'true'
-      - uses: github/codeql-action/analyze@c4dd10e44af883a891fe31ced449bcb4a6728b9b # v3.37.6
+      - uses: github/codeql-action/analyze@f3712979fa5f215279b101dd0a2e3bdfb4353324 # v3.37.7
         if: steps.src.outputs.present == 'true'
         with:
           category: "/language:${{ matrix.language }}"
@@ -184,7 +184,7 @@ jobs:
 
       - name: Upload SARIF
         if: always() && steps.grype.outputs.sarif != '' && hashFiles(steps.grype.outputs.sarif) != ''
-        uses: github/codeql-action/upload-sarif@c4dd10e44af883a891fe31ced449bcb4a6728b9b # v3.37.6
+        uses: github/codeql-action/upload-sarif@f3712979fa5f215279b101dd0a2e3bdfb4353324 # v3.37.7
         with:
           sarif_file: ${{ steps.grype.outputs.sarif }}
           category: dependency-scan
@@ -221,7 +221,7 @@ jobs:
       - name: Checkov
         if: steps.iac.outputs.present == 'true'
         id: checkov
-        uses: bridgecrewio/checkov-action@9b70310bcd306d11740313070b940167d6b23085 # v12.3115.0
+        uses: bridgecrewio/checkov-action@1246d92f57abae29d5db5f9aeeed2a9813e52d7d # v12.3117.0
         with:
           quiet: true
           soft_fail: true           # gate on the findings below, not on the action's exit
@@ -234,7 +234,7 @@ jobs:
       # to ignore it — L0007. Upload only when the file exists.
       - name: Upload SARIF
         if: steps.iac.outputs.present == 'true' && hashFiles('checkov.sarif') != ''
-        uses: github/codeql-action/upload-sarif@c4dd10e44af883a891fe31ced449bcb4a6728b9b # v3.37.6
+        uses: github/codeql-action/upload-sarif@f3712979fa5f215279b101dd0a2e3bdfb4353324 # v3.37.7
         with:
           sarif_file: checkov.sarif
           category: iac-scan
@@ -270,7 +270,7 @@ jobs:
           output: trivy.sarif
           severity: HIGH,CRITICAL
           ignore-unfixed: true      # gate on what you can actually act on
-      - uses: github/codeql-action/upload-sarif@c4dd10e44af883a891fe31ced449bcb4a6728b9b # v3.37.6
+      - uses: github/codeql-action/upload-sarif@f3712979fa5f215279b101dd0a2e3bdfb4353324 # v3.37.7
         if: always()
         with:
           sarif_file: trivy.sarif
