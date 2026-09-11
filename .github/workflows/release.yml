@@ -62,8 +62,17 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Verify the change record exists and is complete
+        # Through `env:`, never `${{ }}` inside `run:`. GitHub substitutes an
+        # expression into the script BEFORE bash parses it, so a free-text
+        # workflow_dispatch input becomes part of the program this job runs.
+        # This job is `preflight`: it has no `environment:`, so it executes the
+        # moment the workflow is dispatched -- ahead of the G5 human gate -- and
+        # it holds `id-token: write`. An env var is passed as data and is never
+        # parsed as a program.
+        env:
+          CHANGE_RECORD: ${{ inputs.change_record }}
         run: |
-          echo "ADAPT: assert the change record at ${{ inputs.change_record }} exists and"
+          echo "ADAPT: assert the change record at $CHANGE_RECORD exists and"
           echo "contains all 13 required sections (docs/07-release-and-change.md)."
 
       - name: Verify every included item cleared G4
@@ -147,14 +156,20 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Record the authorization
+        # Same rule as preflight: inputs reach the shell as data, not as
+        # program text. `github.actor` is left interpolated deliberately --
+        # GitHub constrains it to a login, so it cannot carry a quote.
+        env:
+          VERSION: ${{ inputs.version }}
+          CHANGE_RECORD: ${{ inputs.change_record }}
         run: |
           {
             echo "### G5 authorization"
             echo ""
             echo "| | |"
             echo "|---|---|"
-            echo "| Version | ${{ inputs.version }} |"
-            echo "| Change record | ${{ inputs.change_record }} |"
+            echo "| Version | $VERSION |"
+            echo "| Change record | $CHANGE_RECORD |"
             echo "| Authorized by | ${{ github.actor }} (environment approval) |"
             echo "| Run | ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }} |"
           } >> "$GITHUB_STEP_SUMMARY"
@@ -178,8 +193,10 @@ jobs:
           echo "ADAPT: smoke tests, health checks, error rate vs. pre-deploy baseline"
 
       - name: Write the deployment record
+        env:
+          VERSION: ${{ inputs.version }}
         run: |
-          echo "ADAPT: write evidence/releases/${{ inputs.version }}/deployment-record.md"
+          echo "ADAPT: write evidence/releases/$VERSION/deployment-record.md"
           echo "Then schedule the 24-hour check: did the success metric from the ORIGINAL"
           echo "idea record actually move? That step closes the loop nearly everyone skips,"
           echo "and it is why backlogs fill with features nobody uses."
