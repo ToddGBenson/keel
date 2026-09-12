@@ -25,7 +25,12 @@
 # around greps, CR-tolerant, quoted paths.
 
 set -uo pipefail
-cd "$(dirname "$0")"
+# `|| exit 1` is load-bearing: there is deliberately no `set -e` here (see the
+# note above), so a failed cd would carry on with ROOT pointing at whatever
+# directory the caller happened to be in, and every check below would run
+# against the wrong tree and pass. That is the one thing this script promises
+# not to do.
+cd "$(dirname "$0")" || exit 1
 ROOT="$PWD"
 
 # ── presentation ─────────────────────────────────────────────────────────────
