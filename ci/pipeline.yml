@@ -184,9 +184,19 @@ groups:
   - name: ai
     jobs: [ai-evals, ai-guardrails, agent-assurance]
 
-  # Ingestion to the system of record. PAUSED — no ingestion token; see
-  # ci/README.md. Grouped separately so a paused lane is obvious rather than a
-  # grey box in the middle of something else.
+  # Ingestion to the system of record. RUNNING since 2026-09-08. Grouped
+  # separately so the lane is obvious rather than a grey box in the middle of
+  # something else.
+  #
+  # This said "PAUSED — no ingestion token" until 2026-09-12. All three jobs
+  # were running the whole time: a token was issued 2026-09-01, the lanes
+  # failed with HTTP 401 "Ingestion token is unknown, revoked, or expired"
+  # until 00:53 on 2026-09-08, and have succeeded since 20:07 that evening.
+  # Concourse reports none of them paused.
+  #
+  # A comment that says a security lane is off when it is on is the inverse of
+  # the usual hazard and costs the same: somebody debugging missing keel
+  # coverage reads "no token", stops, and never looks at the 401.
   - name: mykronos
     jobs: [mykronos-sast, mykronos-secrets, mykronos-atlas]
 
