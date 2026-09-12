@@ -25,7 +25,13 @@
 # around greps, CR-tolerant, quoted paths.
 
 set -uo pipefail
-cd "$(dirname "$0")"
+# `|| exit 1` is load-bearing: there is deliberately no `set -e` here (see the
+# note above), so a failed cd would carry straight on. Everything below is
+# relative — `scripts/validate-platform.py`, `scripts/test-gitleaks-allowlist.sh`
+# — and the git commands take no `-C`, so they would run against whatever
+# repository the caller happened to be standing in, and report on it as though
+# it were this one. That is the one thing this script promises not to do.
+cd "$(dirname "$0")" || exit 1
 ROOT="$PWD"
 
 # ── presentation ─────────────────────────────────────────────────────────────
