@@ -68,7 +68,7 @@ Everything is in `ci/pipeline.yml`. There is no second system.
 | Secrets, SCA, IaC, suppressions | `secrets` `sca` `iac` `suppression-audit` | per commit + daily |
 | Container scan | `container-scan` | manual (inert until an image exists) |
 | Platform / control integrity | `platform-integrity` | per commit + daily |
-| Mykronos ingestion | `mykronos-*` | per commit + weekly — **PAUSED, no token** |
+| Mykronos ingestion | `mykronos-*` | per commit + weekly — running since 2026-09-08 |
 | AI evals, guardrails, agent assurance | `ai-*` `agent-assurance` | per commit / weekly |
 | Compliance monitoring, metrics | `compliance-*` `metrics-snapshot` | daily / weekly |
 | SBOM, sign, verify | `build-and-attest` `verify-artifact` | per commit |
