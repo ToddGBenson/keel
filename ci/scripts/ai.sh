@@ -80,7 +80,8 @@ EOF
     # Not a stub: diffs actual agent tool grants against ai-inventory.md §B.
     # Drift is a genuine control failure and is easy to introduce accidentally —
     # an agent definition edited to "unblock" a task is the usual cause.
-    ( cd repo && python -m pip install --quiet --disable-pip-version-check pyyaml \
+    ( cd repo && python -m pip install --quiet --disable-pip-version-check \
+        --require-hashes -r ci/requirements.txt \
         && python scripts/validate-platform.py )
 
     echo

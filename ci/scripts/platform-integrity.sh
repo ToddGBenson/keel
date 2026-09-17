@@ -9,7 +9,8 @@ set -euo pipefail
 
 cd repo
 
-python -m pip install --quiet --disable-pip-version-check pyyaml
+python -m pip install --quiet --disable-pip-version-check \
+  --require-hashes -r ci/requirements.txt
 
 # Verifies agent tool grants match docs/compliance/ai-inventory.md, skills are
 # registered, actions are SHA-pinned, workflows declare least-privilege

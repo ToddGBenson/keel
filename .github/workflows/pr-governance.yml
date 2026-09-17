@@ -327,7 +327,7 @@ jobs:
           python-version: '3.12'
 
       - name: Install parser
-        run: pip install pyyaml
+        run: pip install --require-hashes -r ci/requirements.txt
 
       # Replaces the ADAPT stub that previously stood in for this check. Verifies agent
       # tool grants match docs/compliance/ai-inventory.md, skills are registered, actions

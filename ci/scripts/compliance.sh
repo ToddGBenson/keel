@@ -94,7 +94,8 @@ case "${PERIOD}" in
     echo
 
     echo "── Agent tool-grant audit (AIC-3, AIC-8) ────────────────────────────"
-    ( cd repo && python -m pip install --quiet --disable-pip-version-check pyyaml \
+    ( cd repo && python -m pip install --quiet --disable-pip-version-check \
+        --require-hashes -r ci/requirements.txt \
         && python scripts/validate-platform.py )
 
     echo "── Guard hook self-test (CA-2) ──────────────────────────────────────"

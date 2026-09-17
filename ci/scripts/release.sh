@@ -20,7 +20,8 @@ case "${STAGE}" in
     # A template's preflight is not "does the artifact verify". It is "will a
     # fork receive what we think we are sending".
     echo "── the delivery contract ─────────────────────────────────────────────"
-    python -m pip install --quiet --disable-pip-version-check pyyaml
+    python -m pip install --quiet --disable-pip-version-check \
+      --require-hashes -r ci/requirements.txt
     python scripts/validate-manifest.py
 
     echo "── the platform's own integrity ──────────────────────────────────────"
