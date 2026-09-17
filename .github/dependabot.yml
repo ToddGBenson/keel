@@ -8,6 +8,31 @@
 # Grouping is deliberate. Twenty individual PRs a week produce rubber-stamping; one grouped
 # PR gets read. Security updates stay ungrouped so they are visible and can move on their own
 # SLA (Critical 7d / High 30d).
+#
+# Every entry carries a `cooldown` (mykronos#270). Without one, Dependabot proposes a version
+# the hour it is published — and the first hours after a release are exactly the window in
+# which a hijacked maintainer account or a compromised publish pipeline is still live and the
+# bad version has not yet been yanked. A cooldown does not make a package safe; it puts the
+# rest of the ecosystem between us and the release, so that a malicious publish is usually
+# pulled before we ever see a PR for it.
+#
+# That lands hardest on `github-actions`, the only active ecosystem here. Actions are pinned to
+# SHAs, so Dependabot is the *sole* path by which a new action SHA enters this repository, and
+# the reviewer is looking at a 40-character hash. Human review is a real control for "do we want
+# this version" and no control at all against "is this version malicious" — nobody catches a
+# backdoor by eyeballing a SHA. The one ecosystem with no other way in is the one where review
+# is least able to do the job a cooldown does.
+#
+# It costs nothing on the axis this file exists for. GitHub documents cooldown as applying to
+# *version* updates only, not *security* updates, so a Dependabot security update carrying a
+# known CVE is still proposed immediately and the Critical 7d / High 30d SLA above is unaffected.
+# The delay applies to routine version churn.
+#
+# Key names are `default-days`, `semver-major-days`, `semver-minor-days`, `semver-patch-days`.
+# The `semver-*-days` variants are per-ecosystem: npm and pip support them, github-actions and
+# docker do not, so those entries carry `default-days` alone. An unknown key is silently
+# ignored, which would leave this looking fixed and doing nothing.
+# https://docs.github.com/en/code-security/dependabot/working-with-dependabot/dependabot-options-reference#cooldown-
 
 version: 2
 updates:
@@ -20,6 +45,9 @@ updates:
     schedule:
       interval: "weekly"
       day: "monday"
+    cooldown:
+      # github-actions supports `default-days` only.
+      default-days: 7
     open-pull-requests-limit: 5
     commit-message:
       prefix: "chore"
@@ -47,6 +75,11 @@ updates:
   #   schedule:
   #     interval: "weekly"
   #     day: "monday"
+  #   cooldown:
+  #     default-days: 7
+  #     semver-major-days: 30
+  #     semver-minor-days: 14
+  #     semver-patch-days: 3
   #   open-pull-requests-limit: 10
   #   versioning-strategy: increase       # keeps the lockfile authoritative
   #   commit-message:
@@ -69,9 +102,17 @@ updates:
   # - package-ecosystem: "pip"
   #   directory: "/"
   #   schedule: { interval: "weekly", day: "monday" }
+  #   cooldown:
+  #     default-days: 7
+  #     semver-major-days: 30
+  #     semver-minor-days: 14
+  #     semver-patch-days: 3
   #   labels: ["dependencies"]
 
   # - package-ecosystem: "docker"
   #   directory: "/"
   #   schedule: { interval: "weekly", day: "monday" }
+  #   cooldown:
+  #     # docker supports `default-days` only.
+  #     default-days: 7
   #   labels: ["dependencies", "container"]
