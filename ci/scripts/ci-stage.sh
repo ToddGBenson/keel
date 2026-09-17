@@ -69,7 +69,8 @@ EOF
     python -m compileall -q scripts test
 
     echo "── yaml parses ────────────────────────────────────────────────────────"
-    python -m pip install --quiet --disable-pip-version-check pyyaml
+    python -m pip install --quiet --disable-pip-version-check \
+      --require-hashes -r ci/requirements.txt
     python - <<'PY'
 import glob, sys, yaml
 bad = 0

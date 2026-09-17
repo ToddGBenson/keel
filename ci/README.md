@@ -326,6 +326,16 @@ This is not ceremony: `pip install osv-scanner` silently installed a reserved
 PyPI placeholder with no CLI, and every Atlas run reported zero findings for the
 life of that lane (#38).
 
+**So is the one Python package.** The pipeline needs exactly one third-party
+Python library — PyYAML, for the validators that parse the manifest, the agent
+inventory and the workflows. It is declared in `ci/requirements.txt`, pinned to an
+exact version and carrying the SHA-256 of every distribution PyPI publishes for
+that release, and every install site uses
+`pip install --require-hashes -r ci/requirements.txt`. A fetched package is code on
+the same terms as a fetched binary, and it runs in a container with the repository
+checked out. The file doubles as the dependency manifest the Atlas lane previously
+had nothing to scan (mykronos#323).
+
 **Scanners do not decide build outcomes on the Mykronos lanes.** The scan tasks
 exit 0 regardless; threshold and blocking policy belong to the uploader, which
 applies this repository's configured policy. A scanner deciding CI outcomes on
