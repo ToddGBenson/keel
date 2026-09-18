@@ -54,6 +54,25 @@ check "create a release"          block "$(payload 'gh release create v1.0.0')" 
 check "credential handling"       block "$(payload 'gh secret set TOKEN')"                guard-bash.sh
 check "production mutation"       block "$(payload 'terraform apply -auto-approve')"      guard-bash.sh
 
+# gh api reaches the same REST endpoints as the subcommands above, and it is on the
+# permission ALLOW-list. Before this, the four controls were enforced against one
+# spelling of an action: `gh pr merge` blocked, `gh api --method PUT .../merge` allowed.
+# The one gh api rule that did exist matched `-X DELETE` and missed both `--method
+# DELETE` and `-XDELETE`, so the control protecting separation of duties had two
+# equivalent ways past it. Every flag spelling is exercised deliberately.
+check "self-merge via gh api"     block "$(payload 'gh api --method PUT repos/O/R/pulls/12/merge')"      guard-bash.sh
+check "self-merge, -X form"       block "$(payload 'gh api -X PUT repos/O/R/pulls/12/merge')"            guard-bash.sh
+check "self-merge, packed flag"   block "$(payload 'gh api -XPUT repos/O/R/pulls/12/merge')"             guard-bash.sh
+check "self-merge, --method="     block "$(payload 'gh api --method=PUT repos/O/R/pulls/12/merge')"      guard-bash.sh
+check "self-approve via gh api"   block "$(payload 'gh api --method POST repos/O/R/pulls/12/reviews')"   guard-bash.sh
+check "release via gh api"        block "$(payload 'gh api --method POST repos/O/R/releases')"           guard-bash.sh
+check "unprotect, --method form"  block "$(payload 'gh api --method DELETE repos/O/R/branches/main/protection')" guard-bash.sh
+check "unprotect, packed flag"    block "$(payload 'gh api -XDELETE repos/O/R/branches/main/protection')" guard-bash.sh
+check "ruleset via gh api"        block "$(payload 'gh api --method POST repos/O/R/rulesets')"           guard-bash.sh
+check "secret write via gh api"   block "$(payload 'gh api --method PUT repos/O/R/actions/secrets/TOKEN')" guard-bash.sh
+check "environment via gh api"    block "$(payload 'gh api --method PUT repos/O/R/environments/production')" guard-bash.sh
+check "full URL, not a path"      block "$(payload 'gh api --method PUT https://api.github.com/repos/O/R/pulls/12/merge')" guard-bash.sh
+
 echo ""
 echo "guard-bash.sh — credential file reads must BLOCK (AIC-5)"
 check "cat a .env file"           block "$(payload 'cat .env')"                           guard-bash.sh
@@ -76,6 +95,16 @@ check "grepping for the word"     allow "$(payload 'grep -r credentials docs/')"
 # anywhere, so a shell syntax check chained before a commit was refused as a bypass.
 check "bash -n then commit"       allow "$(payload 'bash -n script.sh && git commit -m x')" guard-bash.sh
 check "sort -n in a pipeline"     allow "$(payload 'sort -n f.txt && git commit -m x')"   guard-bash.sh
+# The gh api allow-list entry exists so agents can READ. Every one of these must stay
+# allowed, or the rule above is a denial of the tool rather than of the action -- and a
+# control people route around teaches nothing (L0007). Note `gh api graphql`: an ordinary
+# GraphQL READ is a POST, which is why the rules deny by endpoint and not by method alone.
+check "read a PR via gh api"      allow "$(payload 'gh api repos/O/R/pulls/12/merge')"       guard-bash.sh
+check "read releases via gh api"  allow "$(payload 'gh api repos/O/R/releases')"             guard-bash.sh
+check "read protection via api"   allow "$(payload 'gh api repos/O/R/branches/main/protection')" guard-bash.sh
+check "graphql read is a POST"    allow "$(payload 'gh api graphql -f query=@q.graphql')"    guard-bash.sh
+check "file an issue via gh api"  allow "$(payload 'gh api --method POST repos/O/R/issues -f title=x')" guard-bash.sh
+check "comment via gh api"        allow "$(payload 'gh api --method POST repos/O/R/issues/12/comments -f body=x')" guard-bash.sh
 check "real --no-verify"          block "$(payload 'git commit --no-verify -m x')"        guard-bash.sh
 check "real push --no-verify"     block "$(payload 'git push --no-verify')"               guard-bash.sh
 # L0008 third recurrence — *push*origin*main* matched a READ-ONLY ls-remote because the

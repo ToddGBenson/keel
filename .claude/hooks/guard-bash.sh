@@ -85,8 +85,51 @@ g '(^|[|;&[:space:]])gh[[:space:]]+release[[:space:]]+(create|edit|delete)\b' \
 # Weakening a security control
 g 'continue-on-error:[[:space:]]*true' \
   && block "setting continue-on-error on a check. Relaxing a gate is a visible process change." "CM-5, AIC-3"
-g '(^|[|;&[:space:]])gh[[:space:]]+api[[:space:]]+[^|;&]*-X[[:space:]]+DELETE[^|;&]*branches/[^|;&]*/protection' \
-  && block "removing branch protection. This enforces separation of duties." "AC-5, CM-5"
+# -- gh api reaches every endpoint the named subcommands do -------------------
+# The rules above block `gh pr merge`, `gh pr review --approve` and
+# `gh release create` by name. `gh api` reaches the same REST endpoints and is
+# on the permission ALLOW-list, so those controls were enforced against one
+# spelling of an action rather than against the action.
+#
+# This file already knew that -- it defended exactly one endpoint, branch
+# protection. That makes the rest an oversight of scope rather than of
+# awareness, and it means the pattern to follow was already here. Two things
+# had to change together:
+#
+#   1. The method was matched as `-X DELETE` only, so `--method DELETE` (the
+#      documented long form) and `-XDELETE` (ordinary short-flag packing) both
+#      walked past the one control protecting separation of duties.
+#   2. Merge, self-approve, release and secrets had no REST-side rule at all.
+#
+# Matched on endpoint and effect, never on flag spelling. GP-5: every rule
+# below has a must-block AND a must-allow case in selftest.sh.
+#
+# GET is deliberately untouched, and a blanket deny on write methods would be
+# wrong in both directions. It would block filing an issue -- work an agent is
+# supposed to do -- and it would block `gh api graphql`, where an ordinary READ
+# is a POST. Denying by endpoint keeps the read path whole and still closes the
+# four actions a human is meant to perform.
+gh_api_write() { # true if this is a gh api call carrying a write method
+  g '(^|[|;&[:space:]])gh[[:space:]]+api\b' || return 1
+  printf '%s' "$cmd" | grep -qE '(-X[[:space:]]*|--method[[:space:]]*=?[[:space:]]*)(POST|PUT|PATCH|DELETE)\b'
+}
+
+if gh_api_write; then
+  g '(^|[|;&[:space:]])gh[[:space:]]+api[^|;&]*/pulls/[^|;&/]+/merge([^A-Za-z0-9_-]|$)' \
+    && block "merging a PR through gh api. Merge happens after independent review, via GitHub." "AC-5, CM-5, AIC-2"
+  g '(^|[|;&[:space:]])gh[[:space:]]+api[^|;&]*/pulls/[^|;&/]+/reviews([^A-Za-z0-9_-]|$)' \
+    && block "reviewing a PR through gh api. Agents recommend; a human or a separate identity approves. Use gh pr comment to say something." "AC-5, AIC-2"
+  g '(^|[|;&[:space:]])gh[[:space:]]+api[^|;&]*/releases([^A-Za-z0-9_-]|$)' \
+    && block "creating or changing a release through gh api. G5 requires human authorization via the Environment." "CM-3, AIC-1"
+  g '(^|[|;&[:space:]])gh[[:space:]]+api[^|;&]*/branches/[^|;&]*/protection' \
+    && block "removing branch protection. This enforces separation of duties." "AC-5, CM-5"
+  g '(^|[|;&[:space:]])gh[[:space:]]+api[^|;&]*/rulesets([^A-Za-z0-9_-]|$)' \
+    && block "changing a ruleset. Rulesets are branch protection under a newer name, and the same separation of duties rests on them." "AC-5, CM-5"
+  g '(^|[|;&[:space:]])gh[[:space:]]+api[^|;&]*/(actions|codespaces|dependabot)/secrets' \
+    && block "writing a secret through gh api. Agents never touch secrets; escalate to a human." "AIC-5, IA-5"
+  g '(^|[|;&[:space:]])gh[[:space:]]+api[^|;&]*/environments([^A-Za-z0-9_-]|$)' \
+    && block "changing a deployment environment. Its reviewers ARE the G5 authorization gate." "CM-3, AC-5, AIC-1"
+fi
 
 # ── Secrets (AIC-5) ─────────────────────────────────────────────────────────
 # Reading credential material into a context is disclosure. If it happens, the correct
