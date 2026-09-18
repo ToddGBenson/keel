@@ -36,13 +36,25 @@ name: Release
 # work at all, because nothing here was built by Actions (POAM-011). Adapt the
 # verify steps below before the first real release: a verification that passes
 # against the wrong identity is worse than none.
+#
+# ── DISPATCH AGAINST THE TAG YOU ARE RELEASING ───────────────────────────────
+# `version` used to be a free-text input. It is now `github.ref_name`, the ref
+# this workflow was dispatched against.
+#
+# checkov CKV_GHA_7 (#79) asks that the build output not be affected by user
+# parameters "other than the build entry point and the top-level source
+# location". The ref IS the top-level source location, so taking the version
+# from it is what the rule asks for rather than an exemption from it -- and
+# a version that cannot disagree with the code it names is worth more than
+# the rule anyway. `v1.4.0` typed into a box while dispatching from `main`
+# produced a deployment record for a release that was never cut.
+#
+# `change_record` stays an input. It is a pointer to a document a human wrote
+# and there is nothing in the ref to derive it from. It is still handled as
+# data, never as program text -- see the note on the preflight step below.
 on:
   workflow_dispatch:
     inputs:
-      version:
-        description: 'Version to release (e.g. v1.4.0)'
-        required: true
-        type: string
       change_record:
         description: 'Path or URL to the G5 change record'
         required: true
@@ -60,6 +72,17 @@ jobs:
       id-token: write
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: The ref must be a tag
+        # Now that the version comes from the ref, dispatching from a branch
+        # would write `evidence/releases/main/deployment-record.md` and call it
+        # a release. First step in preflight, before anything else is checked.
+        if: github.ref_type != 'tag'
+        run: |
+          echo "::error::Dispatched against ${{ github.ref_type }} '${{ github.ref_name }}'."
+          echo "::error::Release runs against the TAG being released. Re-dispatch with"
+          echo "::error::the tag selected as the ref."
+          exit 1
 
       - name: Verify the change record exists and is complete
         # Through `env:`, never `${{ }}` inside `run:`. GitHub substitutes an
@@ -160,7 +183,7 @@ jobs:
         # program text. `github.actor` is left interpolated deliberately --
         # GitHub constrains it to a login, so it cannot carry a quote.
         env:
-          VERSION: ${{ inputs.version }}
+          VERSION: ${{ github.ref_name }}
           CHANGE_RECORD: ${{ inputs.change_record }}
         run: |
           {
@@ -194,7 +217,7 @@ jobs:
 
       - name: Write the deployment record
         env:
-          VERSION: ${{ inputs.version }}
+          VERSION: ${{ github.ref_name }}
         run: |
           echo "ADAPT: write evidence/releases/$VERSION/deployment-record.md"
           echo "Then schedule the 24-hour check: did the success metric from the ORIGINAL"
