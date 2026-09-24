@@ -27,6 +27,48 @@ Terraform module.
 ================================================================================
 
 EOF
+
+  # …and now SAY it somewhere other than this log. [#59989/#60071]
+  #
+  # The paragraph above has been correct and unread since this script was
+  # written. Exiting 0 with no output made "nothing to scan" indistinguishable
+  # from "scanned and found nothing" everywhere downstream: the job goes green,
+  # and the platform records either a clean scan or — if the lane uploads with
+  # no file at all — a FAILED one, because `normalize_results` treats a missing
+  # results directory as a broken scanner rather than an absent subject. Both
+  # readings are wrong, in opposite directions.
+  #
+  # So write a real SARIF carrying the marker the platform now understands. The
+  # property bag is SARIF 2.1.0 §3.8, which exists for exactly this, so a tool
+  # or viewer that does not know the key ignores it and sees an empty run.
+  #
+  # `reason` is the tool's own words on purpose: the platform cannot know which
+  # file types were looked for, and a status with no reason is what gets argued
+  # about six months later.
+  mkdir -p iac-results
+  cat > iac-results/results.sarif <<'EOF'
+{
+  "version": "2.1.0",
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "checkov",
+          "informationUri": "https://www.checkov.io/"
+        }
+      },
+      "results": [],
+      "properties": {
+        "mykronos": {
+          "scanStatus": "no_applicable_targets",
+          "reason": "No IaC to scan: no *.tf, *.tf.json, Dockerfile*, docker-compose*.yml, *.template.yml, k8s manifest or helm chart anywhere in the repository. The control is not applicable, not satisfied."
+        }
+      }
+    }
+  ]
+}
+EOF
   exit 0
 fi
 
