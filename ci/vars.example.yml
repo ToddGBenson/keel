@@ -44,18 +44,23 @@ concourse_external_url: http://localhost:8080
 # ── Mykronos ──────────────────────────────────────────────────────────────────
 mykronos_ingestion_url: https://mykronos.toddbenson.net
 
-# The `mykronos` package ref. Pinned to the same commit the Actions workflows
-# used, so the uploader, the adapters and the FindingSubmission schema are
-# byte-identical to what was ingesting before the port. Never a branch.
+# The `mykronos` package ref — the uploader, the adapters and the
+# FindingSubmission schema all ship from here. Never a branch.
 #
-# [#59989/#60071] BUMP THIS after the `no_applicable_targets` SARIF marker lands
-# in mykronos. `checkov.sh` now writes that marker and the `iac` lane uploads it,
-# but the adapter that READS it ships in this package at this pin. Until the ref
-# moves, the marker is ingested by an adapter that does not know the property
-# bag, which sees an empty run and records a clean scan — today's behaviour, so
-# shipping the two out of order costs nothing and gains nothing. The gain
-# arrives with the bump.
-mykronos_ref: 8b329fc5c1f739eab8ad40b8a7628da7cd1ee935
+# It sat at 8b329fc from the Actions port until 2026-09-24, chosen so the
+# uploader was byte-identical to what had been ingesting before. Moved to
+# f8d8cfd because the two halves of [#59989/#60071] live on either side of it:
+# `checkov.sh` writes a `no_applicable_targets` marker into its SARIF, and the
+# adapter that READS that marker is in this package. At the old pin the marker
+# was ingested by an adapter that did not know the property bag, saw an empty
+# run, and recorded a clean scan — which is exactly the thing the marker exists
+# to stop. Nothing was broken by shipping them out of order; nothing was gained
+# either, until this line moved.
+#
+# BUMPING THIS IS A REAL CHANGE. It moves every adapter for every lane at once,
+# so it belongs in its own commit with its own reason, never folded into an
+# unrelated one.
+mykronos_ref: f8d8cfd46bea39fe4fc38242c5b7e710edfb4d9c
 
 # ── CodeQL ────────────────────────────────────────────────────────────────────
 # The bundle is what actually performs the SAST analysis, so it is verified
