@@ -1,0 +1,4 @@
+3.3.10
+Passed checks: 715, Failed checks: 1, Skipped checks: 0
+Check: CKV_GHA_7: "The build output cannot be affected by user parameters other than the build entry point and the top-level source location. GitHub Actions workflow_dispatch inputs MUST be empty. "
+	FAILED for resource: on(Release)
