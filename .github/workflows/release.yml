@@ -55,6 +55,12 @@ name: Release
 on:
   workflow_dispatch:
     inputs:
+      # checkov:skip=CKV_GHA_7: accepted risk (Mykronos e3d09b6c, expires 2027-03-27, #99) - change_record is evidence metadata handled as data, and this workflow builds nothing
+      #
+      # The skip is scoped to this one input and carries its own expiry. The
+      # platform stops seeing the finding once checkov skips it, so the
+      # acceptance's end date will NOT reopen it on its own: whoever touches
+      # this after 2027-03-27 re-decides it, or deletes this line.
       change_record:
         description: 'Path or URL to the G5 change record'
         required: true
