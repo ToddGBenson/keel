@@ -21,6 +21,10 @@ inputs:
 
 outputs:
   - name: shellcheck-report
+  # json1 for MyKronos (#105, B-051). Its own output, because the uploader takes
+  # an entire directory as its results and the report above also holds the
+  # file list and the gate's gcc-format text, which it must not try to parse.
+  - name: mykronos-results
 
 run:
   path: sh

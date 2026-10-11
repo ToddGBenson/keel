@@ -387,6 +387,34 @@ jobs:
       # silently.
       - task: shellcheck
         file: repo/ci/tasks/shellcheck.yml
+        # ── ITS RESULTS REACH MYKRONOS (#105, B-051) ──────────────────────────
+        # Shell is most of this repository and CodeQL reads none of it, so
+        # MyKronos measured keel ~70% unread by any analyser while this task ran
+        # on every push and uploaded nothing. Same uploader, same pin, as every
+        # other lane; `sast` because this is a second analyser on that
+        # capability, not a capability of its own.
+        #
+        # `ensure:`, not a following step: the gate fails this task on a
+        # warning, and a sibling upload would be skipped exactly when there was
+        # most to report.
+        #
+        # No `*mykronos_preflight` here, deliberately. Preflight exists so a
+        # twenty-minute scan does not discover at the end that its results have
+        # nowhere to go; ShellCheck takes seconds, and a preflight first would
+        # make an unreachable MyKronos stop the lint gate from running at all.
+        # An unreachable MyKronos still turns this job red, at the upload.
+        #
+        # TRIGGERED_BY is unset for the reason given on `iac`: this job fires on
+        # both `repo` and `daily-0300`.
+        ensure:
+          task: upload-shellcheck
+          file: repo/ci/tasks/mykronos-upload.yml
+          params:
+            <<: *mykronos_upload_params
+            CAPABILITY: sast
+            TOOL: shellcheck
+            # The tag ci/tasks/shellcheck.yml pins. Two places, one value.
+            TOOL_VERSION: "0.10.0"
       - task: lint
         file: repo/ci/tasks/ci-stage.yml
         params: { STAGE: lint }
