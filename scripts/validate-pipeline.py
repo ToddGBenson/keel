@@ -222,6 +222,12 @@ def main() -> int:
 
         for step in job.get("plan", []):
             walk_steps(step, check)
+        # Job-level hooks are steps too, and a param they pass is ignored as
+        # silently as one in the plan. Nothing here had a hook until the
+        # `Concourse / keel` failure reports (#107), so nothing checked them.
+        for key in ("on_failure", "on_error", "on_success", "on_abort", "ensure"):
+            if key in job:
+                walk_steps(job[key], check)
 
         # ── Can every task actually GET its required inputs? ─────────────────
         # Concourse fails a job with `missing inputs: <name>` before a single
