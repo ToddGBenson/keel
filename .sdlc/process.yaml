@@ -1,0 +1,111 @@
+# keel's process, declared for MyKronos's Product Owner tab
+# (mykronos specs/35-product-owner-tab.md, schema v1). This DESCRIBES the process;
+# the gates themselves are process/gates/*.md and stay authoritative. Change this
+# file in the same PR as any gate change.
+version: 1
+name: keel (G0-G5, Delivery Lead approves every gate)
+
+spine_map:
+  G0: idea
+  G1: ready
+  G2: ready
+  G3: building
+  G4: verifying
+  G5: shipping
+
+gates:
+  - id: G0
+    name: Intake
+    recommends: Product Owner
+    approves: Delivery Lead (ADR-0005)
+    doc: process/gates/g0-intake.md
+    checklist:
+      - id: problem
+        text: Problem statement with evidence, success measure with a baseline, two or more options including do-nothing, RICE
+  - id: G1
+    name: Ready (Definition of Ready)
+    recommends: Product Owner + UX
+    approves: Delivery Lead (ADR-0005)
+    doc: process/gates/g1-ready.md
+    checklist:
+      - id: ac-binary
+        text: Acceptance criteria in Given/When/Then, binary and observable
+        evidence: acceptance_criteria
+      - id: sized
+        text: Estimated, at most about 3 developer-days
+        evidence: sized
+      - id: flags
+        text: Security, AI and privacy relevance triaged and flagged
+      - id: no-open-question
+        text: No open question whose answer would change the design
+  - id: G2
+    name: Designed & Threat-Modeled
+    recommends: Architect + Security Engineer + UX (+ AI Risk Officer if AI-relevant)
+    approves: Delivery Lead (ADR-0005)
+    doc: process/gates/g2-design.md
+    checklist:
+      - id: threat-model
+        text: Threat model present; mandatory when any relevance flag is set
+        evidence: threat_model
+  - id: G3
+    name: Code Complete
+    recommends: A reviewing engineer who is not the author
+    approves: Delivery Lead (ADR-0005)
+    doc: process/gates/g3-code-complete.md
+    checklist:
+      - id: dod
+        text: PR Definition of Done complete, AI authorship declared (pr-governance.yml)
+  - id: G4
+    name: Verified
+    recommends: QA Engineer + Security Engineer (+ AI Risk Officer if AI-relevant)
+    approves: Delivery Lead (ADR-0005)
+    doc: process/gates/g4-verified.md
+    checklist:
+      - id: concourse
+        text: Concourse evidence lanes green after merge
+  - id: G5
+    name: Release Authorized
+    recommends: Release Manager
+    approves: Delivery Lead, or a human when the release reaches real users
+    doc: process/gates/g5-release.md
+    checklist:
+      - id: authorize
+        text: authorize-release run by a human (the job has no trigger)
+
+backlog:
+  source: thehub
+  tag: repo:keel
+  include_untagged: false
+
+delivery:
+  summary: >-
+    Issue -> branch <type>/<issue>-<slug> -> PR to main with the required
+    pr-governance check -> human merge. Concourse ci/pipeline.yml runs after merge
+    (it cannot see PR branches, POAM-014); authorize-release is started by a human.
+  steps: [issue, branch, pr, pr-governance, human-merge, concourse, authorize-release]
+
+automation_policy:
+  - id: P1
+    text: Credential is the local claude CLI login; an API key is prohibited
+    met: true
+  - id: P2
+    text: Only issues labelled ready with G1 evidence are eligible
+    met: true
+  - id: P3
+    text: A non-prod environment to deploy and exercise the change (blank in automation-policy.yml)
+    met: false
+  - id: P4
+    text: A human approves after non-prod (approval_mode human_after_nonprod)
+    met: true
+  - id: P5
+    text: Unit, functional and security test commands declared (blank in automation-policy.yml)
+    met: false
+
+docs:
+  - {label: Prime directives, path: CLAUDE.md}
+  - {label: Roles and RACI, path: docs/01-roles.md}
+  - {label: Intake and discovery, path: docs/02-intake-and-discovery.md}
+  - {label: Refinement, path: docs/03-refinement.md}
+  - {label: Definitions, path: docs/10-definitions.md}
+  - {label: Sprint automation, path: docs/16-sprint-automation.md}
+  - {label: Automation policy, path: automation-policy.yml}
