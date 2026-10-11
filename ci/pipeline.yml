@@ -55,6 +55,39 @@ mykronos_upload_params: &mykronos_upload_params
   SEVERITY_THRESHOLD: low
   BLOCKING: "false"
 
+# `Concourse / keel`: this commit's verdict, on GitHub. Refs: #107
+#
+# A job reports its start or end to MyKronos, and MyKronos posts one GitHub check
+# run per commit through its own GitHub App (MyKronos D-136, TheHub #60580). This
+# pipeline holds no GitHub credential for it; the ingestion token is the one the
+# MyKronos lanes already use.
+#
+# The commit chain is what it reports on, because it is the one path in this file
+# whose end means "every step before it passed on this commit":
+#
+#   build ┐
+#   lint  ├→ full-suite → build-and-attest → verify-artifact
+#   test  ┘
+#
+# `build` reports the start. `verify-artifact` reports success as its LAST step.
+# Every job in the chain reports failure from `on_failure:` and `on_error:`, so a
+# red lane is a red check and not a check left in progress.
+#
+# NOT in the verdict: `sast`, `secrets`, `sca`, `iac` and `suppression-audit` run
+# on the same commit but nothing in the chain waits on them. Wiring their failure
+# hooks would make the check's colour depend on which job finished last.
+#
+# MAIN COMMITS ONLY. `repo` tracks main, and verification runs after the merge
+# (POAM-014), so a pull request never carries this check. Requiring it on `main`
+# would block every pull request. See ci/README.md, "Concourse / keel".
+#
+# No `attempts:`: this can fail, and a retried step cannot tell "could not ask"
+# from "asked and was refused". The retry is inside curl.
+check_run_params: &check_run_params
+  MYKRONOS_INGESTION_URL: ((mykronos_ingestion_url))
+  MYKRONOS_INGESTION_TOKEN: ((mykronos_ingestion_token))
+  REPO_SLUG: ((github_owner))/((github_repo))
+
 # ══════════════════════════════════════════════════════════════════════════════
 # Resource types — none. See the header.
 # ══════════════════════════════════════════════════════════════════════════════
@@ -365,17 +398,48 @@ jobs:
 
   - name: build
     public: true
+    on_failure:
+      task: check-run
+      file: repo/ci/tasks/check-run.yml
+      # Three attempts of 45s plus two 5s delays is 145s; 5m is twice that.
+      timeout: 5m
+      params: { <<: *check_run_params, JOB: build, PHASE: end, CONCLUSION: failure }
+    on_error:
+      task: check-run
+      file: repo/ci/tasks/check-run.yml
+      # Three attempts of 45s plus two 5s delays is 145s; 5m is twice that.
+      timeout: 5m
+      params: { <<: *check_run_params, JOB: build, PHASE: end, CONCLUSION: failure }
     plan:
       - get: repo
         trigger: true
       - get: daily-0300
         trigger: true
+      # `Concourse / keel` goes in_progress on this commit. On the daily re-run
+      # of a commit that already has a verdict, MyKronos leaves the verdict
+      # alone (a start never reopens one).
+      - task: check-run
+        file: repo/ci/tasks/check-run.yml
+        timeout: 5m
+        params: { <<: *check_run_params, JOB: build, PHASE: start }
       - task: build
         file: repo/ci/tasks/ci-stage.yml
         params: { STAGE: build }
 
   - name: lint
     public: true
+    on_failure:
+      task: check-run
+      file: repo/ci/tasks/check-run.yml
+      # Three attempts of 45s plus two 5s delays is 145s; 5m is twice that.
+      timeout: 5m
+      params: { <<: *check_run_params, JOB: lint, PHASE: end, CONCLUSION: failure }
+    on_error:
+      task: check-run
+      file: repo/ci/tasks/check-run.yml
+      # Three attempts of 45s plus two 5s delays is 145s; 5m is twice that.
+      timeout: 5m
+      params: { <<: *check_run_params, JOB: lint, PHASE: end, CONCLUSION: failure }
     plan:
       - get: repo
         trigger: true
@@ -421,6 +485,18 @@ jobs:
 
   - name: test
     public: true
+    on_failure:
+      task: check-run
+      file: repo/ci/tasks/check-run.yml
+      # Three attempts of 45s plus two 5s delays is 145s; 5m is twice that.
+      timeout: 5m
+      params: { <<: *check_run_params, JOB: test, PHASE: end, CONCLUSION: failure }
+    on_error:
+      task: check-run
+      file: repo/ci/tasks/check-run.yml
+      # Three attempts of 45s plus two 5s delays is 145s; 5m is twice that.
+      timeout: 5m
+      params: { <<: *check_run_params, JOB: test, PHASE: end, CONCLUSION: failure }
     plan:
       - get: repo
         trigger: true
@@ -439,6 +515,18 @@ jobs:
   # this a post-merge suite rather than a parallel one.
   - name: full-suite
     public: true
+    on_failure:
+      task: check-run
+      file: repo/ci/tasks/check-run.yml
+      # Three attempts of 45s plus two 5s delays is 145s; 5m is twice that.
+      timeout: 5m
+      params: { <<: *check_run_params, JOB: full-suite, PHASE: end, CONCLUSION: failure }
+    on_error:
+      task: check-run
+      file: repo/ci/tasks/check-run.yml
+      # Three attempts of 45s plus two 5s delays is 145s; 5m is twice that.
+      timeout: 5m
+      params: { <<: *check_run_params, JOB: full-suite, PHASE: end, CONCLUSION: failure }
     plan:
       - get: repo
         passed: [build, lint, test]
@@ -872,6 +960,18 @@ jobs:
   - name: build-and-attest
     public: true
     serial: true
+    on_failure:
+      task: check-run
+      file: repo/ci/tasks/check-run.yml
+      # Three attempts of 45s plus two 5s delays is 145s; 5m is twice that.
+      timeout: 5m
+      params: { <<: *check_run_params, JOB: build-and-attest, PHASE: end, CONCLUSION: failure }
+    on_error:
+      task: check-run
+      file: repo/ci/tasks/check-run.yml
+      # Three attempts of 45s plus two 5s delays is 145s; 5m is twice that.
+      timeout: 5m
+      params: { <<: *check_run_params, JOB: build-and-attest, PHASE: end, CONCLUSION: failure }
     plan:
       - get: repo
         trigger: true
@@ -900,6 +1000,18 @@ jobs:
   # before use.
   - name: verify-artifact
     public: true
+    on_failure:
+      task: check-run
+      file: repo/ci/tasks/check-run.yml
+      # Three attempts of 45s plus two 5s delays is 145s; 5m is twice that.
+      timeout: 5m
+      params: { <<: *check_run_params, JOB: verify-artifact, PHASE: end, CONCLUSION: failure }
+    on_error:
+      task: check-run
+      file: repo/ci/tasks/check-run.yml
+      # Three attempts of 45s plus two 5s delays is 145s; 5m is twice that.
+      timeout: 5m
+      params: { <<: *check_run_params, JOB: verify-artifact, PHASE: end, CONCLUSION: failure }
     plan:
       - get: repo
         passed: [build-and-attest]
@@ -911,6 +1023,12 @@ jobs:
           COSIGN_VERSION: ((cosign_version))
           COSIGN_SHA256: ((cosign_sha256))
           REGISTRY: ((registry))
+      # Last, so it runs only once the whole chain has passed on this commit:
+      # this is the step that turns `Concourse / keel` green.
+      - task: check-run
+        file: repo/ci/tasks/check-run.yml
+        timeout: 5m
+        params: { <<: *check_run_params, JOB: verify-artifact, PHASE: end, CONCLUSION: success }
 
   # ── Release (G5) — A TEMPLATE RELEASE, NOT A DEPLOY ─────────────────────────
   #

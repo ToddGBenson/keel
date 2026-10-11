@@ -94,6 +94,11 @@ PY
     # no-third-party-resource-types rule this pipeline claims for itself.
     python scripts/validate-pipeline.py
 
+    echo "── Concourse / keel check-run wiring (#107) ───────────────────────────"
+    # Here rather than under `test` because it needs PyYAML, which this stage
+    # has just installed from ci/requirements.txt.
+    python test/check-run.test.py
+
     # ADAPT: your formatter and type checker.
     echo "ADAPT: formatter --check, type checker"
     ;;

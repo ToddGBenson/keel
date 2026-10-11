@@ -207,6 +207,86 @@ same gap, closed five days earlier — to save a split pipeline. See ADR-0003 §
 `gh attestation verify` will not work at all (POAM-011). Adapt those steps before
 the first real release.
 
+### `Concourse / keel`: the commit chain's verdict, on GitHub (#107)
+
+Concourse's verdict on a `main` commit now shows on that commit in GitHub, as one
+check run named **`Concourse / keel`**. `build` reports it in progress before it
+builds. `verify-artifact` reports success as its last step, because it is the end
+of the only chain in this pipeline (`build`/`lint`/`test` → `full-suite` →
+`build-and-attest` → `verify-artifact`). Every job in that chain reports failure
+from `on_failure:` and `on_error:`.
+
+Concourse does not call GitHub for this. `ci/scripts/check-run.sh` posts the job's
+start or end to MyKronos (`POST /api/ingest/check-runs`) with
+`((mykronos_ingestion_token))`, the token the MyKronos lanes already use. MyKronos
+posts the check run through its own GitHub App (app id 4551328) and keeps one
+check run per commit. That is the pattern MyKronos D-136 built for TheHub, reused
+here under TheHub #60580. It does not reopen the archived-resource-type question
+above: there is no new resource type, and no GitHub credential in the pipeline.
+
+The scanning lanes (`sast`, `secrets`, `sca`, `iac`, `suppression-audit`) are not
+part of this verdict. Nothing in the chain waits on them, so wiring their
+failures in would make the check's colour depend on which job finished last.
+
+**The trade, stated plainly: this check lands on `main` commits only, and that is
+why it is not required.** Verification runs after the merge (POAM-014). `repo`
+tracks `main`, and Concourse never sees a pull request's head. So:
+
+- **A pull request never carries `Concourse / keel`.** Requiring it on `main`
+  would make every pull request wait for a check that cannot arrive. With
+  `enforce_admins` off, the owner's merges would bypass it. Anyone else, and
+  Dependabot, could never merge at all.
+- **It does not prevent anything.** It turns a red `main` from "visible in
+  Concourse, if you look" into "visible on the commit in GitHub". That is
+  detection, not prevention, and POAM-014 stays open.
+- **A daily re-run does not reopen a verdict.** `build` also fires on
+  `daily-0300`. MyKronos leaves an existing verdict alone on a start, and the
+  re-run's own failure, if any, replaces it.
+- **MyKronos is now on the commit path.** If MyKronos is unreachable, `build`
+  goes red at the start report, and a failed chain job's report fails as well.
+  That is the visible failure this asked for. It also means an outage there
+  stops keel's chain until it is fixed.
+- **A commit Concourse skips stays in progress.** When two commits land close
+  together, the chain takes the newer one, and the older commit's check stays
+  `in_progress`.
+
+**Requiring it: not done, and the command is here for the owner's decision.**
+`required_status_checks` is off on `main` today, so the sub-resource `PATCH`
+returns `404 Required status checks not enabled`. Enabling it means a `PUT` of
+the whole protection, which restates every other setting exactly as read on
+2026-10-11. Re-read with `gh api repos/ToddGBenson/keel/branches/main/protection`
+first, and change the body if anything has moved. Pinning `app_id` means a status
+of the same name from anything else cannot satisfy it.
+
+```sh
+gh api -X PUT repos/ToddGBenson/keel/branches/main/protection --input - <<'JSON'
+{
+  "required_status_checks": {
+    "strict": false,
+    "checks": [{"context": "Concourse / keel", "app_id": 4551328}]
+  },
+  "enforce_admins": false,
+  "required_pull_request_reviews": {
+    "dismiss_stale_reviews": true,
+    "require_code_owner_reviews": false,
+    "require_last_push_approval": false,
+    "required_approving_review_count": 1
+  },
+  "restrictions": null,
+  "required_linear_history": true,
+  "allow_force_pushes": false,
+  "allow_deletions": false,
+  "block_creations": false,
+  "required_conversation_resolution": true,
+  "lock_branch": false,
+  "allow_fork_syncing": false
+}
+JSON
+```
+
+Undo it with
+`gh api -X DELETE repos/ToddGBenson/keel/branches/main/protection/required_status_checks`.
+
 ---
 
 ## Setting it up
@@ -261,31 +341,20 @@ GitHub webhook pointing at:
 <concourse_external_url>/api/v1/teams/<team>/pipelines/keel/resources/repo/check/webhook?webhook_token=<webhook_token>
 ```
 
-### 5. Branch protection — no change needed, but verify
+### 5. Branch protection — read it, do not assume it
 
-All eleven required status checks on `main` still report, because `ci.yml`,
-`security.yml` and `pr-governance.yml` all keep their `pull_request:` trigger.
-**Do not remove any of them.**
-
-This is worth stating because the first cut of this port did disable `ci.yml` and
-`security.yml`, which would have made eight of those eleven unable to ever report
-— blocking every PR forever on checks that no longer exist, and inviting exactly
-the wrong fix: deleting the requirement instead of restoring the trigger.
-
-Confirm they are intact:
+This section used to say eleven required status checks protect `main`. **Read on
+2026-10-11, none do:** `required_status_checks` is off, because Actions cannot run
+here and every required check was removed so that anything could merge
+(POAM-014). Reviews (one approval, `enforce_admins` off), linear history and
+conversation resolution are on.
 
 ```sh
-gh api repos/ToddGBenson/keel/branches/main/protection \
-  --jq '.required_status_checks.contexts'
+gh api repos/ToddGBenson/keel/branches/main/protection   --jq '{checks: .required_status_checks, admins: .enforce_admins.enabled}'
 ```
 
-Expect eleven, including `Build`, `Lint & static typing`, `Test & coverage`,
-`Secret scanning (IA-5)`, `SCA — dependency vulnerabilities (RA-5, SR-3)`,
-`IaC & configuration (CM-6, CM-7)`, `Suppression audit` and
-`SAST — CodeQL (SA-11(1)) (javascript-typescript)`.
-
-If any of those stop reporting, the fault is a missing `pull_request:` trigger,
-not an over-strict branch protection rule.
+`Concourse / keel` is the check that could be required next, and the section
+above says why it is not, and gives the command.
 
 ---
 

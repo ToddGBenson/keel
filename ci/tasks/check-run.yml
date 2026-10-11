@@ -1,0 +1,32 @@
+# Report a commit-chain job's start or end as the `Concourse / keel` check run.
+# Refs: #107
+#
+# MyKronos posts the check run on GitHub; this task only tells it what happened.
+# See ci/scripts/check-run.sh, and the "Concourse / keel" section of ci/README.md
+# for why the check lands on main commits only.
+platform: linux
+
+# The image the MyKronos estate's other pipelines already use for this exact
+# report. It needs no checkout tooling, pip or apt.
+image_resource:
+  type: registry-image
+  source:
+    repository: curlimages/curl
+    tag: "8.11.1"
+
+inputs:
+  - name: repo
+
+params:
+  MYKRONOS_INGESTION_URL: ""
+  MYKRONOS_INGESTION_TOKEN: ""
+  REPO_SLUG: ""
+  JOB: ""
+  # start | end
+  PHASE: ""
+  # success | failure, only with PHASE=end
+  CONCLUSION: ""
+
+run:
+  path: sh
+  args: [repo/ci/scripts/check-run.sh]
