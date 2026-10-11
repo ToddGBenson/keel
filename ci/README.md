@@ -66,13 +66,13 @@ Everything is in `ci/pipeline.yml`. There is no second system.
 | Build, lint, test, full suite | `build` `lint` `test` `full-suite` | per commit + daily |
 | **SAST — CodeQL, python + js, GATES on findings** | `sast` | per commit + daily |
 | Secrets, SCA, IaC, suppressions | `secrets` `sca` `iac` `suppression-audit` | per commit + daily |
-| Container scan | `container-scan` | manual (inert until an image exists) |
+| Container scan | `container-scan` | manual (inert until an image exists; zero builds as of 2026-10-11, see `lane-audit-2026-10-11.md`) |
 | Platform / control integrity | `platform-integrity` | per commit + daily |
 | Mykronos ingestion | `mykronos-*` | per commit + weekly — running since 2026-09-08 |
 | AI evals, guardrails, agent assurance | `ai-*` `agent-assurance` | per commit / weekly |
 | Compliance monitoring, metrics | `compliance-*` `metrics-snapshot` | daily / weekly |
 | SBOM, sign, verify | `build-and-attest` `verify-artifact` | per commit |
-| **Release G5** | `release-preflight` → `deploy-staging` → `authorize-production` | **manual only** |
+| **Release G5** | `release-preflight` → `authorize-release` (`passed:` edge) | **manual only** |
 
 `sast` **gates** — it is the only thing in the system that blocks anything, and it blocks a
 build rather than a merge. It fails on CodeQL security findings at severity ≥ medium; quality
