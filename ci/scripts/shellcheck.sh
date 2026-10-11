@@ -19,7 +19,16 @@ set -eu
 
 REPO="${REPO_DIR:-repo}"
 OUT="${OUT_DIR:-shellcheck-report}"
-mkdir -p "$OUT"
+RESULTS="${RESULTS_DIR:-mykronos-results}"
+mkdir -p "$OUT" "$RESULTS"
+# Absolute, because both shellcheck runs below `cd "$WORK"` first and read the
+# file list from inside it. Relative, `$OUT/files.txt` did not exist from there:
+# `cat` failed, shellcheck was called with no files, printed its usage and
+# exited 3, and `| tee` reported tee's 0 instead. So until #105 this task printed
+# "clean (30 files)" having read none of them. Measured 2026-10-11 by running
+# this script in its own image.
+OUT="$(cd "$OUT" && pwd)"
+RESULTS="$(cd "$RESULTS" && pwd)"
 
 shellcheck --version | head -2
 
@@ -52,11 +61,40 @@ if [ "$n" -eq 0 ]; then
   exit 1
 fi
 
+# ── The MyKronos copy (#105, B-051) ──────────────────────────────────────────
+# CodeQL implements no shell, so without this upload MyKronos reads keel as ~70%
+# unread by any analyser. json1 because that is what its `sast_shellcheck`
+# adapter parses; ShellCheck emits no SARIF. `-S style`, not the gate's
+# `warning`: the platform filters against its own threshold, and dropping
+# findings here would make "none" ambiguous between a clean scan and a narrow
+# one. Written BEFORE the gate below so a gate failure still has results for the
+# `ensure:` upload in the lint job to report.
+#
+# Exit 1 means ShellCheck had something to say, which is a result. Anything
+# higher is the scanner failing, and an empty file would parse as zero findings
+# - a clean scan for a scan that did not happen. Either way the file is removed,
+# so the uploader sees an empty results directory and records a run that broke.
+jrc=0
+# shellcheck disable=SC2046  # deliberate word splitting over the file list;
+# refs #105, expires: 2026-11-11
+(cd "$WORK" && shellcheck -S style -f json1 $(cat "$OUT/files.txt")) \
+  > "$RESULTS/shellcheck.json" || jrc=$?
+if [ "$jrc" -gt 1 ] || [ ! -s "$RESULTS/shellcheck.json" ]; then
+  rm -f "$RESULTS/shellcheck.json"
+  echo "ERROR: shellcheck (json1) exited $jrc with no usable report." >&2
+  echo "The scan did not complete; nothing is uploaded as if it had." >&2
+  exit 1
+fi
+echo "MyKronos report: $(grep -o '"code":' "$RESULTS/shellcheck.json" | wc -l | tr -d ' ') comment(s), severity>=style"
+
 rc=0
+# Redirect, then print: `| tee` returned tee's status, not shellcheck's, so this
+# gate could not fail (#105). The file is printed afterwards for the log.
 # shellcheck disable=SC2046  # deliberate word splitting over the file list;
 # refs #44, expires: 2026-11-11
 (cd "$WORK" && shellcheck -S warning -f gcc $(cat "$OUT/files.txt")) \
-  | tee "$OUT/findings.txt" || rc=$?
+  > "$OUT/findings.txt" || rc=$?
+cat "$OUT/findings.txt"
 
 if [ "$rc" -ne 0 ]; then
   echo "shellcheck: FAILED ($n files)" > "$OUT/status"
