@@ -123,14 +123,37 @@ fi
 
 echo "checkov performed ${resources} check(s)"
 
-n="$(python3 - "${sarif}" <<'PY'
+# Findings that STAND, by the same rule the platform's ingest applies
+# (mykronos/adapters/sarif.py `_is_suppressed`, SARIF 2.1.0 section 3.27.23): a
+# result carrying `suppressions` was silenced at the source -- here a
+# `# checkov:skip=` comment naming an accepted risk -- and only a suppression
+# whose status is `rejected` leaves it standing.
+#
+# DEFECT FIXED 2026-10-11 (#59989): this used to count EVERY result. With
+# --soft-fail checkov still emits a skipped check into the SARIF, carrying a
+# suppression, so the accepted CKV_GHA_7 risk (#99, .github/workflows/
+# release.yml:58) failed this gate every day from 2026-10-08 while the platform
+# correctly ingested nothing -- "1 IaC misconfiguration" on the lane, "1 result
+# suppressed ... not ingested" in the upload, for the same finding.
+read -r n suppressed < <(python3 - "${sarif}" <<'PY'
 import json, sys
 doc = json.load(open(sys.argv[1]))
-print(sum(len(r.get("results", [])) for r in doc.get("runs", [])))
-PY
-)"
 
-echo "checkov findings: ${n}"
+def is_suppressed(result):
+    sups = result.get("suppressions")
+    if not isinstance(sups, list) or not sups:
+        return False
+    return any(str((s or {}).get("status") or "accepted").strip() != "rejected"
+               for s in sups if isinstance(s, dict))
+
+results = [r for run in doc.get("runs", []) for r in run.get("results", [])]
+standing = sum(1 for r in results if not is_suppressed(r))
+print(standing, len(results) - standing)
+PY
+)
+suppressed="${suppressed%$'\r'}"  # a CRLF-printing python must not leak a CR into the count
+
+echo "checkov findings: ${n} standing, ${suppressed} suppressed at the source"
 
 # ── NOTHING TO SCAN ───────────────────────────────────────────────────────────
 # checkov itself performed no check, in any framework it supports. That
@@ -183,11 +206,18 @@ checkov understands, which is a longer list than Terraform and Dockerfiles: it
 includes GitHub Actions workflows, GitLab CI, Azure Pipelines, Ansible,
 Serverless and OpenAPI.
 
-Recorded as `no_applicable_targets` in the SARIF, not only here.
+Recorded as `no_applicable_targets` in the SARIF, not only here -- and this
+lane FAILS, by operator decision (2026-09-23, #59989 / #60071): a lane that
+cannot find the thing it exists to scan is broken, not clean.
 ================================================================================
 
 EOF
-  exit 0
+  # [#60071] NOT `exit 0`. Concourse has no third success-like state, and a
+  # green build here was a vacuous pass for CM-6/CM-7 that every surface
+  # counting green lanes credited as coverage. The upload still runs (it is in
+  # the job's `ensure:`), so the lake gets NO_APPLICABLE_TARGETS; the build
+  # status now says the same thing instead of contradicting it.
+  exit 1
 fi
 
 # The actual gate: fail on findings, not on tooling noise.

@@ -102,6 +102,9 @@ PY
     echo "── dashboard generator tests ──────────────────────────────────────────"
     python test/dashboard.test.py
 
+    echo "── IaC lane gate tests (#59989 / #60071) ───────────────────────────────"
+    python test/checkov-gate.test.py
+
     echo "── guard hook self-test ───────────────────────────────────────────────"
     # TEST beats EXAMINE. Three real defects in these guards were found only by
     # exercising them (POAM-002/003/004).

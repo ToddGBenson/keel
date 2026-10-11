@@ -900,6 +900,10 @@ jobs:
   # So G5 still means a named human authorises, and `authorize-release` still
   # refuses to run without one.
 
+  # MANUAL BY DESIGN, like authorize-release below (#60013). It has no trigger on
+  # purpose: G5 is a human act, and the `passed: [release-preflight]` edge on
+  # authorize-release is what forces preflight to run first. A job with zero builds
+  # here means nobody has released yet, not that the job is dead.
   - name: release-preflight
     public: true
     plan:
