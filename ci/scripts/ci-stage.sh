@@ -103,6 +103,9 @@ PY
     # Same reason as above: needs PyYAML.
     python test/validate-pipeline.test.py
 
+    echo "── manifest validator refuses a vacuous pass (#111) ───────────────────"
+    python test/validate-manifest.test.py
+
     # ADAPT: your formatter and type checker.
     echo "ADAPT: formatter --check, type checker"
     ;;

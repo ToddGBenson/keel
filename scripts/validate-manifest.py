@@ -74,6 +74,17 @@ def main() -> int:
 
     files = tracked_files()
 
+    # Zero tracked files is never a clean repository; it is git seeing none (no
+    # .git, an unreadable worktree pointer, a tarball). Every check below then
+    # examines nothing and the run used to print "[ok]" -- it did exactly that in
+    # a container that could not read a worktree's .git (#111).
+    if not files:
+        print("Platform manifest validation")
+        print(f"  [ERROR] no tracked files: `git ls-files` in {ROOT} returned nothing, "
+              f"so there is nothing to validate. Run this inside a git checkout "
+              f"git can read.")
+        return 1
+
     claimed: dict[str, list[str]] = {}
     for bucket, entries in buckets.items():
         for entry in entries:
