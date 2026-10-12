@@ -150,6 +150,12 @@ merge_required:
   # Platform ships the schema and its meanings; the fork supplies its own environment and
   # test commands. Both sides legitimately change it, so a human merges the diff.
   - automation-policy.yml
+  # The declared process MyKronos reads (#103). The platform ships it describing
+  # the gates in process/gates/; a fork that tunes its gates or its automation
+  # policy changes it too. Unclassified, it failed validate-manifest -- and so
+  # platform-integrity and release-preflight -- from the commit that added it
+  # (#111).
+  - .sdlc/process.yaml
 
 # ── BOOTSTRAP-ONLY ───────────────────────────────────────────────────────────
 # Consumed by scripts/bootstrap.sh and removed from the fork afterwards. These describe
