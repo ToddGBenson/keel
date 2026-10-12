@@ -19,6 +19,12 @@ case "${STAGE}" in
     echo "── G5 preflight — is this template fit to release? ───────────────────"
     # A template's preflight is not "does the artifact verify". It is "will a
     # fork receive what we think we are sending".
+    #
+    # A task starts in the build root; the repository is the `repo/` input. Every
+    # path below is repo-relative, and without this the job failed on its first
+    # run opening ci/requirements.txt that was on main all along (#111). Here,
+    # not at the top: the release arm addresses the repo as `repo/`.
+    cd repo
     echo "── the delivery contract ─────────────────────────────────────────────"
     python -m pip install --quiet --disable-pip-version-check \
       --require-hashes -r ci/requirements.txt

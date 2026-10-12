@@ -99,6 +99,10 @@ PY
     # has just installed from ci/requirements.txt.
     python test/check-run.test.py
 
+    echo "── pipeline validator: script references resolve (#111) ───────────────"
+    # Same reason as above: needs PyYAML.
+    python test/validate-pipeline.test.py
+
     # ADAPT: your formatter and type checker.
     echo "ADAPT: formatter --check, type checker"
     ;;

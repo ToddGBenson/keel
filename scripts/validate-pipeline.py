@@ -9,6 +9,8 @@ actually hold. Those are the failures that have actually happened here:
   - a `SBOM_FORMAT` param passed to a task that never declared it
   - a `sbom` input declared optional that no job in that plan could produce
   - image tags and resource types asserted in a comment and enforced by nothing
+  - a script naming `ci/requirements.txt` from the build root, where the repo is
+    `repo/` -- release-preflight's first-ever run died on it (#111)
 
 None of that needs a Concourse to detect, so it runs on every pull request rather
 than being discovered when a job fails at 3am.
@@ -20,6 +22,7 @@ Exit 0 clean, 1 on any error. Warnings do not fail the run.
 
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 
@@ -71,6 +74,84 @@ def walk_steps(step, fn):
     for key in ("ensure", "on_failure", "on_success", "on_abort", "on_error", "try"):
         if key in step:
             walk_steps(step[key], fn)
+
+
+# ── What a task's script names, and whether it is there ──────────────────────
+# A Concourse task starts in the BUILD ROOT. The repository is the `repo/` input
+# beneath it, so `-r ci/requirements.txt` resolves only after `cd repo`. Checking
+# that the path exists in the repo is not enough on its own: `ci/requirements.txt`
+# was on main the whole time release-preflight failed to open it (#111). So each
+# reference is resolved from the directory the script is actually in.
+#
+# Deliberately a line scanner, not a shell parser. It follows a top-level
+# `cd repo` (for every later line, case arms included) and a `cd repo` earlier on
+# the same logical line (`( cd repo && ... )`, which must not leak). Paths with
+# `$`, braces or quotes are skipped rather than guessed at.
+_HEREDOC = re.compile(r"<<-?\s*['\"]?(\w+)['\"]?")
+_REQ = re.compile(r"(?:^|\s)-r\s+([^\s;&|)]+)")
+_RUN = re.compile(r"(?:^|[\s(;&|])(?:python3?|bash|sh)\s+((?:-[A-Za-z]\s+)*)([^\s;&|)]+\.(?:py|sh))(?=[\s;&|)]|$)")
+_CD_REPO = re.compile(r"(?:^|[\s(;&|])cd\s+repo(?=[\s;&|)]|$)")
+
+
+def _logical_lines(text: str):
+    """(first line number, joined line), with comments and heredoc bodies dropped."""
+    out, buf, start, terminator = [], "", 0, None
+    for n, line in enumerate(text.splitlines(), 1):
+        if terminator is not None:
+            if line.strip() == terminator:
+                terminator = None
+            continue
+        if not buf:
+            if line.lstrip().startswith("#"):
+                continue
+            start = n
+        if line.endswith("\\"):
+            buf += line[:-1] + " "
+            continue
+        buf += line
+        out.append((start, buf))
+        m = _HEREDOC.search(buf)
+        if m:
+            terminator = m.group(1)
+        buf = ""
+    return out
+
+
+def check_script_refs(script: Path, root: Path, inputs: set[str]) -> list[str]:
+    """Errors for every requirements / .py / .sh path `script` names that is not
+    in the repository from where the script runs."""
+    problems: list[str] = []
+    rel = script.relative_to(root).as_posix()
+    in_repo = False
+    for n, line in _logical_lines(script.read_text(encoding="utf-8")):
+        stripped = line.strip()
+        if re.fullmatch(r"cd\s+repo(\s*(;|&&).*)?", stripped):
+            in_repo = True
+        found = [(m.start(1), m.group(1)) for m in _REQ.finditer(line) if "pip" in line]
+        found += [(m.start(2), m.group(2)) for m in _RUN.finditer(line)
+                  if not (m.group(1) or "").strip().endswith("-m")]
+        for pos, ref in sorted(found):
+            if any(c in ref for c in "$'\"{}"):
+                continue
+            cd = _CD_REPO.search(line[:pos])
+            here = in_repo or cd is not None
+            if here:
+                target = root / ref
+            else:
+                first, _, rest = ref.partition("/")
+                if first != "repo":
+                    if first in inputs:
+                        continue        # another input: not ours to judge
+                    problems.append(
+                        f"{rel}:{n}: '{ref}' resolves against the build root, where "
+                        f"the repository is repo/ -- `cd repo` first, or name "
+                        f"repo/{ref}")
+                    continue
+                target = root / rest
+            if not target.exists():
+                problems.append(f"{rel}:{n}: references '{ref}', which is not in the "
+                                f"repository")
+    return problems
 
 
 def main() -> int:
@@ -142,6 +223,7 @@ def main() -> int:
 
     referenced_tasks: set[Path] = set()
     referenced_scripts: set[Path] = set()
+    checked_scripts: set[Path] = set()
 
     # ── Per-job structure ────────────────────────────────────────────────────
     for job in pipeline.get("jobs", []):
@@ -219,6 +301,11 @@ def main() -> int:
                     referenced_scripts.add(sp)
                     if not sp.exists():
                         err(f"{rel}: run references missing script -> {arg}")
+                    elif sp not in checked_scripts:
+                        checked_scripts.add(sp)
+                        inputs = {i["name"] for i in (task.get("inputs") or [])}
+                        for problem in check_script_refs(sp, ROOT, inputs):
+                            err(problem)
 
         for step in job.get("plan", []):
             walk_steps(step, check)
