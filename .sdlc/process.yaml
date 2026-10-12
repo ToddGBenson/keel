@@ -73,9 +73,13 @@ gates:
         text: authorize-release run by a human (the job has no trigger)
 
 backlog:
-  source: thehub
-  tag: repo:keel
-  include_untagged: false
+  # keel's work items are GitHub issues (docs/15-tracking.md), read by MyKronos
+  # read-only (MyKronos spec 35 section 9, D-156). No `project`: the MyKronos
+  # GitHub App cannot read a user-owned Projects board, so gates come from
+  # gate:G<n> labels. ready = the unattended runner's work list; sprint = the
+  # issue the supervised runner opens (docs/16-sprint-automation.md).
+  source: github_issues
+  sprint_labels: [ready, sprint]
 
 delivery:
   summary: >-
