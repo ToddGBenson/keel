@@ -6,7 +6,7 @@ Runs the REAL script under bash with `checkov` (and `python -m pip`) stubbed on
 PATH, so what is tested is the gate's own decisions, not a re-implementation:
 
   * a result that stands fails the lane;
-  * a result silenced at the source (`# checkov:skip=`, carried as a SARIF
+  * a result silenced at the source (a Checkov skip comment, carried as a SARIF
     suppression) does NOT -- the platform's ingest drops it, and the lane went red
     on exactly that from 2026-10-08 (CKV_GHA_7, accepted risk #99);
   * a REJECTED suppression still stands;
