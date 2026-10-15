@@ -29,6 +29,9 @@ platform_owned:
   # outcome #44 exists to prevent, shipped to every consumer at once.
   - test/selfreview-check.test.js
   - test/dashboard.test.py
+  # scripts/junit-suite.py's guarantee that a suite which never ran cannot
+  # report as passing. .github/workflows/unit-results.yml depends on it.
+  - test/junit-suite.test.py
   - docs/00-overview.md
   - docs/01-roles.md
   - docs/02-intake-and-discovery.md
