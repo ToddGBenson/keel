@@ -24,7 +24,13 @@ pass=0; fail=0
 AKIA_FAKE="AKI""A""ABCDEFGHIJKLMNOP"
 ASSIGN_FAKE="api""_key = abcdefghij0123456789"
 
-payload() { printf '{"tool_input":{"command":"%s"}}' "$1"; }
+payload() {
+  # Escape \ and " so a command containing quotes is still valid JSON. Without this, a
+  # quoted case was malformed JSON: jq extracted nothing and the hook allowed it, so a
+  # must-allow case with quotes passed without the hook ever seeing the command (#117).
+  esc=$(printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g')
+  printf '{"tool_input":{"command":"%s"}}' "$esc"
+}
 wpayload() {
   # $1 = path, $2 = content. Escape the JSON-significant characters we use.
   esc=$(printf '%s' "$2" | sed 's/\\/\\\\/g; s/"/\\"/g')
@@ -86,6 +92,31 @@ check "release, --field="           block "$(payload 'gh api repos/O/R/releases 
 check "release, attached -fVALUE"   block "$(payload 'gh api repos/O/R/releases -ftag_name=v9')"             guard-bash.sh
 check "release, packed -if"         block "$(payload 'gh api repos/O/R/releases -if tag_name=v9')"           guard-bash.sh
 check "GET earlier in the chain"    block "$(payload 'gh api -X GET repos/O/R/issues && gh api repos/O/R/releases -f tag_name=v9')" guard-bash.sh
+# #117 -- every rule was anchored on (^|[|;&[:space:]]) before the command name. Neither
+# ( nor a backtick nor a quote is in that set, so the same call inside $(...), `...`,
+# <(...) or bash -c "..." matched no rule at all. Each wrapper is exercised, and the git
+# and credential-read rules share the anchor, so they are exercised too.
+check 'merge in $(...)'             block "$(payload 'x=$(gh api --method PUT repos/O/R/pulls/12/merge)')"  guard-bash.sh
+check 'pr merge in backticks'       block "$(payload 'x=`gh pr merge 12`')"                                guard-bash.sh
+check 'pr merge in $( ... ) spaced' block "$(payload 'x=$( gh pr merge 12 )')"                             guard-bash.sh
+check '$(...) after && in a chain'  block "$(payload 'git status && y=$(gh pr merge 12)')"                 guard-bash.sh
+check 'approve in <(...)'           block "$(payload 'cat <(gh pr review 12 --approve)')"                  guard-bash.sh
+check 'pr merge in bash -c "..."'   block "$(payload 'bash -c "gh pr merge 12"')"                          guard-bash.sh
+check "pr merge in sh -c '...'"     block "$(payload "sh -c 'gh pr merge 12'")"                            guard-bash.sh
+check 'implicit POST in $(...)'     block "$(payload 'x=$(gh api repos/O/R/releases -f tag_name=v9)')"     guard-bash.sh
+check 'release create in $(...)'    block "$(payload 'x=$(gh release create v1.0.0)')"                     guard-bash.sh
+# The flag goes last on purpose: with --force as the FIRST argument the force-push rule
+# misses even a bare `git push --force origin feat` -- a separate defect, not #117's.
+check 'force push in $(...)'        block "$(payload 'x=$(git push origin feat --force)')"                 guard-bash.sh
+check 'reset --hard in backticks'   block "$(payload 'x=`git reset --hard HEAD~1`')"                       guard-bash.sh
+check '--no-verify in $(...)'       block "$(payload 'x=$(git commit --no-verify -m y)')"                  guard-bash.sh
+check 'cat .env in $(...)'          block "$(payload 'x=$(cat .env)')"                                     guard-bash.sh
+# The far end of a wrapper matters too: inside $(...) the branch name or flag a rule
+# ends on is followed by ) or a backtick, not by a space or end of line.
+check 'push to main in $(...)'      block "$(payload 'x=$(git push origin main)')"                         guard-bash.sh
+check 'push HEAD:main in backticks' block "$(payload 'x=`git push origin HEAD:main`')"                    guard-bash.sh
+check "push to main in sh -c '...'" block "$(payload "sh -c 'git push origin main'")"                      guard-bash.sh
+check 'commit -n last in $(...)'    block "$(payload 'x=$(git commit -m y -n)')"                           guard-bash.sh
 
 echo ""
 echo "guard-bash.sh — credential file reads must BLOCK (AIC-5)"
@@ -127,6 +158,15 @@ check "--method=GET with --field"   allow "$(payload 'gh api --method=GET repos/
 check "list PRs via gh api"         allow "$(payload 'gh api repos/O/R/pulls')"                              guard-bash.sh
 check "list reviews via gh api"     allow "$(payload 'gh api repos/O/R/pulls/12/reviews --paginate')"        guard-bash.sh
 check "issue via implicit POST"     allow "$(payload 'gh api repos/O/R/issues -f title=x')"                  guard-bash.sh
+# #117 -- reads inside a substitution stay allowed, and the anchor still needs a word
+# boundary: a command that merely ends in "gh" is not gh.
+check 'pr view in $(...)'           allow "$(payload 'x=$(gh pr view 12 --json state)')"                  guard-bash.sh
+check 'gh api read in $(...)'       allow "$(payload 'x=$(gh api repos/O/R/pulls/12/merge)')"              guard-bash.sh
+check 'issue view in backticks'     allow "$(payload 'x=`gh issue view 42`')"                              guard-bash.sh
+check 'git log in $(...)'           allow "$(payload 'x=$(git log origin/main --oneline)')"                guard-bash.sh
+check 'word ending in gh, in $(...)' allow "$(payload 'x=$(sigh pr merge 12)')"                            guard-bash.sh
+check 'echo high, then git log'     allow "$(payload 'echo high && git log')"                              guard-bash.sh
+check 'cat a .pub in $(...)'        allow "$(payload 'x=$(cat ~/.ssh/id_ed25519.pub)')"                    guard-bash.sh
 check "real --no-verify"          block "$(payload 'git commit --no-verify -m x')"        guard-bash.sh
 check "real push --no-verify"     block "$(payload 'git push --no-verify')"               guard-bash.sh
 # L0008 third recurrence — *push*origin*main* matched a READ-ONLY ls-remote because the

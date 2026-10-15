@@ -33,6 +33,23 @@ block() {
   exit 2
 }
 
+# What may stand immediately before a command name for a rule to count it as invoked.
+# Every rule below starts with "$B"; change the boundary here, never per rule.
+#
+# #117: this was (^|[|;&[:space:]]), written out in every rule. A command inside
+# $(...), <(...) or backticks is preceded by ( or a backtick, and one inside
+# bash -c "..." or sh -c '...' by a quote. None of those was in the set, so the
+# same call that was blocked bare -- x=$(gh api --method PUT .../merge) -- matched
+# no rule at all, git and credential-read rules included. A quote counts as a
+# boundary for the same reason, at the cost of also matching a quoted mention
+# that starts with the command name ("gh pr merge ..."); an unquoted mention
+# was already matched, so that adds no new kind of false positive.
+B='(^|[|;&[:space:](`"'"'"'])'
+# And what may END an argument a rule anchors on (a branch name, a flag, a path):
+# the same substitution and quote wrappers close with ), a backtick or a quote, so
+# `x=$(git push origin main)` ends in "main)" and is still a push to main.
+E='([[:space:])`"'"'"']|$)'
+
 # ── Hook bypass ─────────────────────────────────────────────────────────────
 # If a hook blocks you, the hook is working correctly. Bypassing it defeats the
 # pre-commit secret scan, which is the last cheap chance to stop a credential leak.
@@ -45,8 +62,8 @@ block() {
 # siblings in the same file, which is the definition of L0008.
 #
 # Now anchored: the flag must belong to a git commit/push invocation.
-if printf '%s' "$cmd" | grep -qE '(^|[|;&[:space:]])git[[:space:]]+[^|;&]*(commit|push|merge)[^|;&]*[[:space:]]--no-verify\b' \
-   || printf '%s' "$cmd" | grep -qE '(^|[|;&[:space:]])git[[:space:]]+(commit|push)[[:space:]]+[^|;&]*[[:space:]]-[a-zA-Z]*n([[:space:]]|$)'; then
+if printf '%s' "$cmd" | grep -qE "$B"'git[[:space:]]+[^|;&]*(commit|push|merge)[^|;&]*[[:space:]]--no-verify\b' \
+   || printf '%s' "$cmd" | grep -qE "$B"'git[[:space:]]+(commit|push)[[:space:]]+[^|;&]*[[:space:]]-[a-zA-Z]*n'"$E"; then
   block "hook bypass (--no-verify / -n on a git commit). Fix the cause the hook found." "AIC-3, IA-5"
 fi
 
@@ -65,21 +82,21 @@ g() { # g <extended-regex> -> true if the command actually invokes this
 }
 
 # Destructive git
-g '(^|[|;&[:space:]])git[[:space:]]+([^|;&]*[[:space:]])?push([[:space:]]|$)[^|;&]*[[:space:]]--?(force|f)(-with-lease)?\b' \
+g "$B"'git[[:space:]]+([^|;&]*[[:space:]])?push([[:space:]]|$)[^|;&]*[[:space:]]--?(force|f)(-with-lease)?\b' \
   && block "force push. Published history is immutable — it is the AU-12 audit trail." "AIC-3, AU-12, SI-7"
-g '(^|[|;&[:space:]])git[[:space:]]+([^|;&]*[[:space:]])?reset([[:space:]]|$)[^|;&]*--hard\b' \
+g "$B"'git[[:space:]]+([^|;&]*[[:space:]])?reset([[:space:]]|$)[^|;&]*--hard\b' \
   && block "git reset --hard. Discards work irrecoverably; use git revert or a branch." "AIC-3"
-g '(^|[|;&[:space:]])git[[:space:]]+(filter-branch|filter-repo)\b' \
+g "$B"'git[[:space:]]+(filter-branch|filter-repo)\b' \
   && block "history rewrite. Destroys the attributable, signed commit record." "AU-12, SI-7"
-g '(^|[|;&[:space:]])git[[:space:]]+([^|;&]*[[:space:]])?push([[:space:]]+[^|;&]*)?[[:space:]](origin[[:space:]]+)?(HEAD:)?(main|master)([[:space:]]|$)' \
+g "$B"'git[[:space:]]+([^|;&]*[[:space:]])?push([[:space:]]+[^|;&]*)?[[:space:]](origin[[:space:]]+)?(HEAD:)?(main|master)'"$E" \
   && block "direct push to main. All change goes through a reviewed PR." "AC-5, CM-5"
 
 # Self-approval and self-merge — the control that makes every gate meaningful
-g '(^|[|;&[:space:]])gh[[:space:]]+pr[[:space:]]+review\b[^|;&]*--approve\b' \
+g "$B"'gh[[:space:]]+pr[[:space:]]+review\b[^|;&]*--approve\b' \
   && block "approving a PR. Agents recommend; a human or a separate identity approves." "AC-5, AIC-2"
-g '(^|[|;&[:space:]])gh[[:space:]]+pr[[:space:]]+merge\b' \
+g "$B"'gh[[:space:]]+pr[[:space:]]+merge\b' \
   && block "merging a PR. Merge happens after independent review, via GitHub." "AC-5, CM-5, AIC-2"
-g '(^|[|;&[:space:]])gh[[:space:]]+release[[:space:]]+(create|edit|delete)\b' \
+g "$B"'gh[[:space:]]+release[[:space:]]+(create|edit|delete)\b' \
   && block "creating a release. G5 requires human authorization via the Environment." "CM-3, AIC-1"
 
 # Weakening a security control
@@ -116,28 +133,28 @@ g 'continue-on-error:[[:space:]]*true' \
 # body flag and no method is a write. Judged per invocation, not per command
 # line: a `-X GET` earlier in a && chain must not exempt a later POST.
 gh_api_write() { # true if this is a gh api call carrying a write method
-  g '(^|[|;&[:space:]])gh[[:space:]]+api\b' || return 1
+  g "$B"'gh[[:space:]]+api\b' || return 1
   printf '%s' "$cmd" | grep -qE '(-X[[:space:]]*|--method[[:space:]]*=?[[:space:]]*)(POST|PUT|PATCH|DELETE)\b' && return 0
   printf '%s' "$cmd" | tr '|;&' '\n' \
-    | grep -E '(^|[[:space:]])gh[[:space:]]+api\b' \
+    | grep -E "$B"'gh[[:space:]]+api\b' \
     | grep -E '[[:space:]](-i*[fF]|--(raw-)?field([=[:space:]]|$)|--input([=[:space:]]|$))' \
     | grep -qvE '(-X[[:space:]]*|--method[[:space:]]*=?[[:space:]]*)[A-Za-z]'
 }
 
 if gh_api_write; then
-  g '(^|[|;&[:space:]])gh[[:space:]]+api[^|;&]*/pulls/[^|;&/]+/merge([^A-Za-z0-9_-]|$)' \
+  g "$B"'gh[[:space:]]+api[^|;&]*/pulls/[^|;&/]+/merge([^A-Za-z0-9_-]|$)' \
     && block "merging a PR through gh api. Merge happens after independent review, via GitHub." "AC-5, CM-5, AIC-2"
-  g '(^|[|;&[:space:]])gh[[:space:]]+api[^|;&]*/pulls/[^|;&/]+/reviews([^A-Za-z0-9_-]|$)' \
+  g "$B"'gh[[:space:]]+api[^|;&]*/pulls/[^|;&/]+/reviews([^A-Za-z0-9_-]|$)' \
     && block "reviewing a PR through gh api. Agents recommend; a human or a separate identity approves. Use gh pr comment to say something." "AC-5, AIC-2"
-  g '(^|[|;&[:space:]])gh[[:space:]]+api[^|;&]*/releases([^A-Za-z0-9_-]|$)' \
+  g "$B"'gh[[:space:]]+api[^|;&]*/releases([^A-Za-z0-9_-]|$)' \
     && block "creating or changing a release through gh api. G5 requires human authorization via the Environment." "CM-3, AIC-1"
-  g '(^|[|;&[:space:]])gh[[:space:]]+api[^|;&]*/branches/[^|;&]*/protection' \
+  g "$B"'gh[[:space:]]+api[^|;&]*/branches/[^|;&]*/protection' \
     && block "removing branch protection. This enforces separation of duties." "AC-5, CM-5"
-  g '(^|[|;&[:space:]])gh[[:space:]]+api[^|;&]*/rulesets([^A-Za-z0-9_-]|$)' \
+  g "$B"'gh[[:space:]]+api[^|;&]*/rulesets([^A-Za-z0-9_-]|$)' \
     && block "changing a ruleset. Rulesets are branch protection under a newer name, and the same separation of duties rests on them." "AC-5, CM-5"
-  g '(^|[|;&[:space:]])gh[[:space:]]+api[^|;&]*/(actions|codespaces|dependabot)/secrets' \
+  g "$B"'gh[[:space:]]+api[^|;&]*/(actions|codespaces|dependabot)/secrets' \
     && block "writing a secret through gh api. Agents never touch secrets; escalate to a human." "AIC-5, IA-5"
-  g '(^|[|;&[:space:]])gh[[:space:]]+api[^|;&]*/environments([^A-Za-z0-9_-]|$)' \
+  g "$B"'gh[[:space:]]+api[^|;&]*/environments([^A-Za-z0-9_-]|$)' \
     && block "changing a deployment environment. Its reviewers ARE the G5 authorization gate." "CM-3, AC-5, AIC-1"
 fi
 
@@ -160,8 +177,10 @@ fi
 # signing key so they could register it) and taught nothing, since the private half is a
 # different file and still blocked. Over-blocking a control teaches people to work around
 # it (L0007), so the exemption is explicit and narrow: the path must END in .pub.
-if printf '%s' "$cmd" | grep -qE '(^|[|;&[:space:]])(cat|less|more|head|tail|bat|type)[[:space:]]+[^|;&]*([.]env([.][A-Za-z0-9_-]+)?|[.]pem|[.]p12|[.]pfx|[.]key|/[.]ssh/|/[.]aws/|id_rsa|id_ed25519)([[:space:]]|$|"|'"'"')' \
-   && ! printf '%s' "$cmd" | grep -qE '[.]pub([[:space:]]|$|"|'"'"')'; then
+#
+# #117: the path ends at "$E", so `x=$(cat .env)` is a read too.
+if printf '%s' "$cmd" | grep -qE "$B"'(cat|less|more|head|tail|bat|type)[[:space:]]+[^|;&]*([.]env([.][A-Za-z0-9_-]+)?|[.]pem|[.]p12|[.]pfx|[.]key|/[.]ssh/|/[.]aws/|id_rsa|id_ed25519)'"$E" \
+   && ! printf '%s' "$cmd" | grep -qE '[.]pub'"$E"; then
   block "reading credential material into the context. Rotate rather than inspect." "AIC-5, IA-5, SC-28"
 fi
 case "$cmd" in
