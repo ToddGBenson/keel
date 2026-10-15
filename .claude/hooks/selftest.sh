@@ -203,6 +203,7 @@ check "graphql commit to main"      block "$(payload "gh api graphql -f query='m
 # A ref id or branch id is opaque -- it could be main -- so those spellings are refused.
 check "graphql updateRef"           block "$(payload "gh api graphql -f query='mutation { updateRef(input: {refId: \"X\", oid: \"Y\"}) { clientMutationId } }'")" guard-bash.sh
 check "graphql commit by branch id" block "$(payload "gh api graphql -f query='mutation { createCommitOnBranch(input: {branch: {id: \"X\"}, expectedHeadOid: \"X\", message: {headline: \"m\"}}) { commit { oid } } }'")" guard-bash.sh
+check "graphql commit, main as a var" block "$(payload "gh api graphql -f query='mutation(\$b: String!) { createCommitOnBranch(input: {branch: {repositoryNameWithOwner: \"O/R\", branchName: \$b}, expectedHeadOid: \"X\", message: {headline: \"m\"}}) { commit { oid } } }' -f b=main")" guard-bash.sh
 check "graphql commit to a feature" allow "$(payload "gh api graphql -f query='mutation { createCommitOnBranch(input: {branch: {repositoryNameWithOwner: \"O/R\", branchName: \"feat/x\"}, expectedHeadOid: \"X\", message: {headline: \"m\"}}) { commit { oid } } }'")" guard-bash.sh
 check "PATCH refs/heads/main"       block "$(payload 'gh api -X PATCH repos/O/R/git/refs/heads/main -f sha=abc')"             guard-bash.sh
 check "implicit POST to master"   block "$(payload 'gh api repos/O/R/git/refs/heads/master -f sha=abc -F force=true')"   guard-bash.sh
