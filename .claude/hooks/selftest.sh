@@ -105,9 +105,18 @@ check 'pr merge in bash -c "..."'   block "$(payload 'bash -c "gh pr merge 12"')
 check "pr merge in sh -c '...'"     block "$(payload "sh -c 'gh pr merge 12'")"                            guard-bash.sh
 check 'implicit POST in $(...)'     block "$(payload 'x=$(gh api repos/O/R/releases -f tag_name=v9)')"     guard-bash.sh
 check 'release create in $(...)'    block "$(payload 'x=$(gh release create v1.0.0)')"                     guard-bash.sh
-# The flag goes last on purpose: with --force as the FIRST argument the force-push rule
-# misses even a bare `git push --force origin feat` -- a separate defect, not #117's.
 check 'force push in $(...)'        block "$(payload 'x=$(git push origin feat --force)')"                 guard-bash.sh
+# #120 -- `push([[:space:]]|$)` ate the one space the flag needed in front of it, so a
+# force flag straight after `push` (the usual spelling) passed. The old "force push"
+# case only blocked because it pushed to main, which the push-to-main rule catches.
+check 'push --force first, feat'    block "$(payload 'git push --force origin feat')"                      guard-bash.sh
+check 'push -f first, feat'         block "$(payload 'git push -f origin feat')"                           guard-bash.sh
+check 'push --force-with-lease first' block "$(payload 'git push --force-with-lease origin feat')"         guard-bash.sh
+check 'push --force first in $(...)' block "$(payload 'x=$(git push --force origin feat)')"                guard-bash.sh
+check 'push -f first in sh -c'      block "$(payload "sh -c 'git push -f origin feat'")"                   guard-bash.sh
+check 'plain push to feat'          allow "$(payload 'git push origin feat')"                              guard-bash.sh
+check 'push -u to feat'             allow "$(payload 'git push -u origin feat')"                           guard-bash.sh
+check 'push --follow-tags to feat'  allow "$(payload 'git push --follow-tags origin feat')"                guard-bash.sh
 check 'reset --hard in backticks'   block "$(payload 'x=`git reset --hard HEAD~1`')"                       guard-bash.sh
 check '--no-verify in $(...)'       block "$(payload 'x=$(git commit --no-verify -m y)')"                  guard-bash.sh
 check 'cat .env in $(...)'          block "$(payload 'x=$(cat .env)')"                                     guard-bash.sh
