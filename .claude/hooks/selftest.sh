@@ -200,10 +200,12 @@ rm -f "$GQL_FILE" "$GQL_READ"
 # three other ways: a GraphQL commit or ref move, a ref PATCH, and a contents write
 # (which lands on the default branch when it names none).
 check "graphql commit to main"      block "$(payload "gh api graphql -f query='mutation { createCommitOnBranch(input: {branch: {repositoryNameWithOwner: \"O/R\", branchName: \"main\"}, expectedHeadOid: \"X\", message: {headline: \"m\"}}) { commit { oid } } }'")" guard-bash.sh
-check "graphql updateRef to master" block "$(payload "gh api graphql -f query='mutation { updateRef(input: {refId: \"X\", oid: \"Y\"}) { clientMutationId } } # refs/heads/master'")" guard-bash.sh
+# A ref id or branch id is opaque -- it could be main -- so those spellings are refused.
+check "graphql updateRef"           block "$(payload "gh api graphql -f query='mutation { updateRef(input: {refId: \"X\", oid: \"Y\"}) { clientMutationId } }'")" guard-bash.sh
+check "graphql commit by branch id" block "$(payload "gh api graphql -f query='mutation { createCommitOnBranch(input: {branch: {id: \"X\"}, expectedHeadOid: \"X\", message: {headline: \"m\"}}) { commit { oid } } }'")" guard-bash.sh
 check "graphql commit to a feature" allow "$(payload "gh api graphql -f query='mutation { createCommitOnBranch(input: {branch: {repositoryNameWithOwner: \"O/R\", branchName: \"feat/x\"}, expectedHeadOid: \"X\", message: {headline: \"m\"}}) { commit { oid } } }'")" guard-bash.sh
 check "PATCH refs/heads/main"       block "$(payload 'gh api -X PATCH repos/O/R/git/refs/heads/main -f sha=abc')"             guard-bash.sh
-check "implicit PATCH-less ref"     block "$(payload 'gh api repos/O/R/git/refs/heads/master -f sha=abc -F force=true')"   guard-bash.sh
+check "implicit POST to master"   block "$(payload 'gh api repos/O/R/git/refs/heads/master -f sha=abc -F force=true')"   guard-bash.sh
 check "PATCH a feature ref"         allow "$(payload 'gh api -X PATCH repos/O/R/git/refs/heads/feat-x -f sha=abc')"       guard-bash.sh
 check "read refs/heads/main"        allow "$(payload 'gh api repos/O/R/git/refs/heads/main')"                            guard-bash.sh
 check "contents write, no branch"   block "$(payload 'gh api -X PUT repos/O/R/contents/a.txt -f message=m -f content=eA==')" guard-bash.sh
