@@ -167,6 +167,33 @@ check "--method=GET with --field"   allow "$(payload 'gh api --method=GET repos/
 check "list PRs via gh api"         allow "$(payload 'gh api repos/O/R/pulls')"                              guard-bash.sh
 check "list reviews via gh api"     allow "$(payload 'gh api repos/O/R/pulls/12/reviews --paginate')"        guard-bash.sh
 check "issue via implicit POST"     allow "$(payload 'gh api repos/O/R/issues -f title=x')"                  guard-bash.sh
+# #118 -- every GraphQL call is a POST, so the REST rules above let mutations through:
+# an agent could merge, approve, or loosen a ruleset with `gh api graphql`. Mutations
+# that do what a REST rule forbids are blocked by name; reads and other mutations pass.
+GQL_M='mutation { mergePullRequest(input: {pullRequestId: "X"}) { clientMutationId } }'
+GQL_R='mutation { addPullRequestReview(input: {pullRequestId: "X", event: APPROVE}) { clientMutationId } }'
+check "graphql mergePullRequest"    block "$(payload "gh api graphql -f query='$GQL_M'")"                   guard-bash.sh
+check "graphql addPullRequestReview" block "$(payload "gh api graphql -f query='$GQL_R'")"                  guard-bash.sh
+check "graphql submit review"       block "$(payload "gh api graphql -f query='mutation { submitPullRequestReview(input: {pullRequestReviewId: \"X\", event: APPROVE}) { clientMutationId } }'")" guard-bash.sh
+check "graphql dismiss review"      block "$(payload "gh api graphql -f query='mutation { dismissPullRequestReview(input: {pullRequestReviewId: \"X\", message: \"m\"}) { clientMutationId } }'")" guard-bash.sh
+check "graphql auto-merge"          block "$(payload "gh api graphql -f query='mutation { enablePullRequestAutoMerge(input: {pullRequestId: \"X\"}) { clientMutationId } }'")" guard-bash.sh
+check "graphql mergeBranch"         block "$(payload "gh api graphql -f query='mutation { mergeBranch(input: {repositoryId: \"X\", base: \"main\", head: \"f\"}) { clientMutationId } }'")" guard-bash.sh
+check "graphql protection rule"     block "$(payload "gh api graphql -f query='mutation { deleteBranchProtectionRule(input: {branchProtectionRuleId: \"X\"}) { clientMutationId } }'")" guard-bash.sh
+check "graphql ruleset"             block "$(payload "gh api graphql -f query='mutation { updateRepositoryRuleset(input: {repositoryRulesetId: \"X\"}) { clientMutationId } }'")" guard-bash.sh
+check "graphql environment"         block "$(payload "gh api graphql -f query='mutation { deleteEnvironment(input: {id: \"X\"}) { clientMutationId } }'")" guard-bash.sh
+check "graphql merge in \$(...)"    block "$(payload "x=\$(gh api graphql -f query='$GQL_M')")"             guard-bash.sh
+check "graphql merge, named op"     block "$(payload "gh api graphql -f query='mutation M { mergePullRequest(input: {pullRequestId: \"X\"}) { clientMutationId } }'")" guard-bash.sh
+# A document read from a file is inspected too; one that cannot be read (stdin) is refused.
+GQL_FILE=$(mktemp); printf '%s\n' "$GQL_R" > "$GQL_FILE"
+GQL_READ=$(mktemp); printf '%s\n' 'query { viewer { login } }' > "$GQL_READ"
+check "graphql review from -F @file" block "$(payload "gh api graphql -F query=@$GQL_FILE")"               guard-bash.sh
+check "graphql review from --input" block "$(payload "gh api graphql --input $GQL_FILE")"                  guard-bash.sh
+check "graphql query from stdin"    block "$(payload "gh api graphql -F query=@- < q.graphql")"            guard-bash.sh
+check "graphql read from -F @file"  allow "$(payload "gh api graphql -F query=@$GQL_READ")"                guard-bash.sh
+check "graphql viewer read"         allow "$(payload "gh api graphql -f query='query { viewer { login } }'")" guard-bash.sh
+check "graphql read of reviews"     allow "$(payload "gh api graphql -f query='query { repository(owner: \"o\", name: \"r\") { pullRequest(number: 1) { mergeable reviews(first: 5) { nodes { state } } } } }'")" guard-bash.sh
+check "graphql addComment mutation" allow "$(payload "gh api graphql -f query='mutation { addComment(input: {subjectId: \"X\", body: \"hi\"}) { clientMutationId } }'")" guard-bash.sh
+rm -f "$GQL_FILE" "$GQL_READ"
 # #117 -- reads inside a substitution stay allowed, and the anchor still needs a word
 # boundary: a command that merely ends in "gh" is not gh.
 check 'pr view in $(...)'           allow "$(payload 'x=$(gh pr view 12 --json state)')"                  guard-bash.sh
