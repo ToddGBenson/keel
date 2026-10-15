@@ -50,7 +50,11 @@ from pathlib import Path
 ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 # Characters XML 1.0 cannot carry at all, escaped or not. A test that prints a
 # bell character must not make the whole report unparseable.
-XML_ILLEGAL = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f￾￿]")
+# A translate table, not a regex character range: CodeQL's py/overly-large-range
+# reads the 0x0E-0x1F span as a suspicious range and fails the sast gate on it.
+XML_ILLEGAL = dict.fromkeys(
+    [*range(0x00, 0x09), 0x0B, 0x0C, *range(0x0E, 0x20), 0xFFFE, 0xFFFF], "?"
+)
 
 PASS_LINE = re.compile(r"^\s*(?:\[ok\]|✓)\s+(.*\S)\s*$")
 FAIL_LINE = re.compile(r"^\s*(?:\[FAIL\]|✗)\s+(.*\S)\s*$")
@@ -59,7 +63,7 @@ TAIL_LINES = 60  # of output attached to a suite-level failure
 
 
 def clean(text: str) -> str:
-    return XML_ILLEGAL.sub("?", ANSI.sub("", text))
+    return ANSI.sub("", text).translate(XML_ILLEGAL)
 
 
 def parse_cases(output: str) -> list[tuple[str, bool]]:
