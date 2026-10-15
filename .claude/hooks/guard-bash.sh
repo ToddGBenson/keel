@@ -109,9 +109,19 @@ g 'continue-on-error:[[:space:]]*true' \
 # supposed to do -- and it would block `gh api graphql`, where an ordinary READ
 # is a POST. Denying by endpoint keeps the read path whole and still closes the
 # four actions a human is meant to perform.
+#
+# #115: gh api needs no method flag to write. Any body -- -f/--raw-field,
+# -F/--field, --input -- makes it a POST unless a method is given, and an
+# explicit GET turns the fields into query parameters. So an invocation with a
+# body flag and no method is a write. Judged per invocation, not per command
+# line: a `-X GET` earlier in a && chain must not exempt a later POST.
 gh_api_write() { # true if this is a gh api call carrying a write method
   g '(^|[|;&[:space:]])gh[[:space:]]+api\b' || return 1
-  printf '%s' "$cmd" | grep -qE '(-X[[:space:]]*|--method[[:space:]]*=?[[:space:]]*)(POST|PUT|PATCH|DELETE)\b'
+  printf '%s' "$cmd" | grep -qE '(-X[[:space:]]*|--method[[:space:]]*=?[[:space:]]*)(POST|PUT|PATCH|DELETE)\b' && return 0
+  printf '%s' "$cmd" | tr '|;&' '\n' \
+    | grep -E '(^|[[:space:]])gh[[:space:]]+api\b' \
+    | grep -E '[[:space:]](-i*[fF]|--(raw-)?field([=[:space:]]|$)|--input([=[:space:]]|$))' \
+    | grep -qvE '(-X[[:space:]]*|--method[[:space:]]*=?[[:space:]]*)[A-Za-z]'
 }
 
 if gh_api_write; then
