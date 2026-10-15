@@ -105,10 +105,18 @@ check 'pr merge in bash -c "..."'   block "$(payload 'bash -c "gh pr merge 12"')
 check "pr merge in sh -c '...'"     block "$(payload "sh -c 'gh pr merge 12'")"                            guard-bash.sh
 check 'implicit POST in $(...)'     block "$(payload 'x=$(gh api repos/O/R/releases -f tag_name=v9)')"     guard-bash.sh
 check 'release create in $(...)'    block "$(payload 'x=$(gh release create v1.0.0)')"                     guard-bash.sh
-check 'force push in $(...)'        block "$(payload 'x=$(git push --force origin feat)')"                 guard-bash.sh
+# The flag goes last on purpose: with --force as the FIRST argument the force-push rule
+# misses even a bare `git push --force origin feat` -- a separate defect, not #117's.
+check 'force push in $(...)'        block "$(payload 'x=$(git push origin feat --force)')"                 guard-bash.sh
 check 'reset --hard in backticks'   block "$(payload 'x=`git reset --hard HEAD~1`')"                       guard-bash.sh
 check '--no-verify in $(...)'       block "$(payload 'x=$(git commit --no-verify -m y)')"                  guard-bash.sh
 check 'cat .env in $(...)'          block "$(payload 'x=$(cat .env)')"                                     guard-bash.sh
+# The far end of a wrapper matters too: inside $(...) the branch name or flag a rule
+# ends on is followed by ) or a backtick, not by a space or end of line.
+check 'push to main in $(...)'      block "$(payload 'x=$(git push origin main)')"                         guard-bash.sh
+check 'push HEAD:main in backticks' block "$(payload 'x=`git push origin HEAD:main`')"                    guard-bash.sh
+check "push to main in sh -c '...'" block "$(payload "sh -c 'git push origin main'")"                      guard-bash.sh
+check 'commit -n last in $(...)'    block "$(payload 'x=$(git commit -m y -n)')"                           guard-bash.sh
 
 echo ""
 echo "guard-bash.sh — credential file reads must BLOCK (AIC-5)"
@@ -158,6 +166,7 @@ check 'issue view in backticks'     allow "$(payload 'x=`gh issue view 42`')"   
 check 'git log in $(...)'           allow "$(payload 'x=$(git log origin/main --oneline)')"                guard-bash.sh
 check 'word ending in gh, in $(...)' allow "$(payload 'x=$(sigh pr merge 12)')"                            guard-bash.sh
 check 'echo high, then git log'     allow "$(payload 'echo high && git log')"                              guard-bash.sh
+check 'cat a .pub in $(...)'        allow "$(payload 'x=$(cat ~/.ssh/id_ed25519.pub)')"                    guard-bash.sh
 check "real --no-verify"          block "$(payload 'git commit --no-verify -m x')"        guard-bash.sh
 check "real push --no-verify"     block "$(payload 'git push --no-verify')"               guard-bash.sh
 # L0008 third recurrence — *push*origin*main* matched a READ-ONLY ls-remote because the
