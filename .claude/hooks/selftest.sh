@@ -189,6 +189,8 @@ GQL_READ=$(mktemp); printf '%s\n' 'query { viewer { login } }' > "$GQL_READ"
 check "graphql review from -F @file" block "$(payload "gh api graphql -F query=@$GQL_FILE")"               guard-bash.sh
 check "graphql review from --input" block "$(payload "gh api graphql --input $GQL_FILE")"                  guard-bash.sh
 check "graphql query from stdin"    block "$(payload "gh api graphql -F query=@- < q.graphql")"            guard-bash.sh
+check "graphql review via --field=@" block "$(payload "gh api graphql --field query=@$GQL_FILE")"           guard-bash.sh
+check "-f query=@ is a literal"     allow "$(payload "gh api graphql -f query=@$GQL_FILE")"                guard-bash.sh
 check "graphql read from -F @file"  allow "$(payload "gh api graphql -F query=@$GQL_READ")"                guard-bash.sh
 check "graphql viewer read"         allow "$(payload "gh api graphql -f query='query { viewer { login } }'")" guard-bash.sh
 check "graphql read of reviews"     allow "$(payload "gh api graphql -f query='query { repository(owner: \"o\", name: \"r\") { pullRequest(number: 1) { mergeable reviews(first: 5) { nodes { state } } } } }'")" guard-bash.sh
