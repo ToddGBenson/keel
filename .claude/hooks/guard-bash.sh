@@ -160,6 +160,37 @@ if gh_api_write; then
     && block "changing a deployment environment. Its reviewers ARE the G5 authorization gate." "CM-3, AC-5, AIC-1"
 fi
 
+# #118: GraphQL is one endpoint and every call is a POST, so the rules above cannot
+# tell a read from a merge. Read the document instead -- inline, or from the file
+# that -F query=@path or --input path names -- and block, by mutation name, the same
+# actions the REST rules block. A document that cannot be read (stdin) is refused:
+# its contents are unknowable here, and an inline query works just as well.
+if g "$B"'gh[[:space:]]+api[[:space:]]+([^|;&]*[[:space:]])?graphql'"$E"; then
+  gql="$cmd"
+  # Only -F/--field reads @path; with -f/--raw-field "@q.graphql" is a literal string.
+  for f in $(printf '%s' "$cmd" | grep -oE '((-F[[:space:]]*|--field[[:space:]=]+)query=@|--input[[:space:]=]+)[^[:space:]|;&)`"'"'"']+' \
+               | sed -E 's/^((-F[[:space:]]*|--field[[:space:]=]+)query=@|--input[[:space:]=]+)//'); do
+    if [ "$f" = "-" ] || [ ! -r "$f" ]; then
+      block "a GraphQL document this hook cannot read ($f). Pass the query inline with -f query='...'." "AC-5, AIC-2"
+    fi
+    gql="$gql
+$(cat -- "$f")"
+  done
+  if printf '%s' "$gql" | grep -qE '(^|[^A-Za-z0-9_])mutation([^A-Za-z0-9_]|$)'; then
+    m() { printf '%s' "$gql" | grep -qE '(^|[^A-Za-z0-9_])('"$1"')([^A-Za-z0-9_]|$)'; }
+    m 'mergePullRequest|enablePullRequestAutoMerge|mergeBranch' \
+      && block "merging through a GraphQL mutation. Merge happens after independent review, via GitHub." "AC-5, CM-5, AIC-2"
+    m 'addPullRequestReview|submitPullRequestReview|dismissPullRequestReview' \
+      && block "reviewing a PR through a GraphQL mutation. Agents recommend; a human or a separate identity approves. Use gh pr comment to say something." "AC-5, AIC-2"
+    m '(create|update|delete)Release' \
+      && block "creating or changing a release through GraphQL. G5 requires human authorization via the Environment." "CM-3, AIC-1"
+    m '(create|update|delete)(BranchProtectionRule|RepositoryRuleset)' \
+      && block "changing branch protection or a ruleset through GraphQL. This enforces separation of duties." "AC-5, CM-5"
+    m '(create|update|delete)Environment' \
+      && block "changing a deployment environment through GraphQL. Its reviewers ARE the G5 authorization gate." "CM-3, AC-5, AIC-1"
+  fi
+fi
+
 # ── Secrets (AIC-5) ─────────────────────────────────────────────────────────
 # Reading credential material into a context is disclosure. If it happens, the correct
 # response is to ROTATE first, then remediate the path — deleting a message is not a
