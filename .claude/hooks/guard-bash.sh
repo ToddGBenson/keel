@@ -82,7 +82,9 @@ g() { # g <extended-regex> -> true if the command actually invokes this
 }
 
 # Destructive git
-g "$B"'git[[:space:]]+([^|;&]*[[:space:]])?push([[:space:]]|$)[^|;&]*[[:space:]]--?(force|f)(-with-lease)?\b' \
+# #120: the flag may come straight after push. `push([[:space:]]|$)` used to eat the one
+# space in front of it, so `git push --force origin feat` passed.
+g "$B"'git[[:space:]]+([^|;&]*[[:space:]])?push[[:space:]]([^|;&]*[[:space:]])?--?(force|f)(-with-lease)?\b' \
   && block "force push. Published history is immutable — it is the AU-12 audit trail." "AIC-3, AU-12, SI-7"
 g "$B"'git[[:space:]]+([^|;&]*[[:space:]])?reset([[:space:]]|$)[^|;&]*--hard\b' \
   && block "git reset --hard. Discards work irrecoverably; use git revert or a branch." "AIC-3"
