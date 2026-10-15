@@ -196,6 +196,27 @@ check "graphql viewer read"         allow "$(payload "gh api graphql -f query='q
 check "graphql read of reviews"     allow "$(payload "gh api graphql -f query='query { repository(owner: \"o\", name: \"r\") { pullRequest(number: 1) { mergeable reviews(first: 5) { nodes { state } } } } }'")" guard-bash.sh
 check "graphql addComment mutation" allow "$(payload "gh api graphql -f query='mutation { addComment(input: {subjectId: \"X\", body: \"hi\"}) { clientMutationId } }'")" guard-bash.sh
 rm -f "$GQL_FILE" "$GQL_READ"
+# #127 -- the push-to-main rule knew one spelling, git push. The API commits to a branch
+# three other ways: a GraphQL commit or ref move, a ref PATCH, and a contents write
+# (which lands on the default branch when it names none).
+check "graphql commit to main"      block "$(payload "gh api graphql -f query='mutation { createCommitOnBranch(input: {branch: {repositoryNameWithOwner: \"O/R\", branchName: \"main\"}, expectedHeadOid: \"X\", message: {headline: \"m\"}}) { commit { oid } } }'")" guard-bash.sh
+# A ref id or branch id is opaque -- it could be main -- so those spellings are refused.
+check "graphql updateRef"           block "$(payload "gh api graphql -f query='mutation { updateRef(input: {refId: \"X\", oid: \"Y\"}) { clientMutationId } }'")" guard-bash.sh
+check "graphql commit by branch id" block "$(payload "gh api graphql -f query='mutation { createCommitOnBranch(input: {branch: {id: \"X\"}, expectedHeadOid: \"X\", message: {headline: \"m\"}}) { commit { oid } } }'")" guard-bash.sh
+check "graphql commit, main as a var" block "$(payload "gh api graphql -f query='mutation(\$b: String!) { createCommitOnBranch(input: {branch: {repositoryNameWithOwner: \"O/R\", branchName: \$b}, expectedHeadOid: \"X\", message: {headline: \"m\"}}) { commit { oid } } }' -f b=main")" guard-bash.sh
+check "graphql commit to a feature" allow "$(payload "gh api graphql -f query='mutation { createCommitOnBranch(input: {branch: {repositoryNameWithOwner: \"O/R\", branchName: \"feat/x\"}, expectedHeadOid: \"X\", message: {headline: \"m\"}}) { commit { oid } } }'")" guard-bash.sh
+check "PATCH refs/heads/main"       block "$(payload 'gh api -X PATCH repos/O/R/git/refs/heads/main -f sha=abc')"             guard-bash.sh
+check "implicit POST to master"   block "$(payload 'gh api repos/O/R/git/refs/heads/master -f sha=abc -F force=true')"   guard-bash.sh
+check "PATCH a feature ref"         allow "$(payload 'gh api -X PATCH repos/O/R/git/refs/heads/feat-x -f sha=abc')"       guard-bash.sh
+check "read refs/heads/main"        allow "$(payload 'gh api repos/O/R/git/refs/heads/main')"                            guard-bash.sh
+check "contents write, no branch"   block "$(payload 'gh api -X PUT repos/O/R/contents/a.txt -f message=m -f content=eA==')" guard-bash.sh
+check "contents write to main"      block "$(payload 'gh api -X PUT repos/O/R/contents/a.txt -f message=m -f content=eA== -f branch=main')" guard-bash.sh
+check "contents delete, no branch"  block "$(payload 'gh api -X DELETE repos/O/R/contents/a.txt -f message=m -f sha=abc')" guard-bash.sh
+check "contents in \$(...)"         block "$(payload 'x=$(gh api -X PUT repos/O/R/contents/a.txt -f message=m -f content=eA==)')" guard-bash.sh
+check "contents write to a feature" allow "$(payload 'gh api -X PUT repos/O/R/contents/a.txt -f message=m -f content=eA== -f branch=feat-x')" guard-bash.sh
+check "contents read"               allow "$(payload 'gh api repos/O/R/contents/README.md')"                             guard-bash.sh
+check "merge a branch into main"    block "$(payload 'gh api repos/O/R/merges -f base=main -f head=feat-x')"              guard-bash.sh
+check "merge main into a feature"   allow "$(payload 'gh api repos/O/R/merges -f base=feat-x -f head=main')"              guard-bash.sh
 # #117 -- reads inside a substitution stay allowed, and the anchor still needs a word
 # boundary: a command that merely ends in "gh" is not gh.
 check 'pr view in $(...)'           allow "$(payload 'x=$(gh pr view 12 --json state)')"                  guard-bash.sh

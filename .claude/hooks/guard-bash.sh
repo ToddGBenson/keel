@@ -158,6 +158,25 @@ if gh_api_write; then
     && block "writing a secret through gh api. Agents never touch secrets; escalate to a human." "AIC-5, IA-5"
   g "$B"'gh[[:space:]]+api[^|;&]*/environments([^A-Za-z0-9_-]|$)' \
     && block "changing a deployment environment. Its reviewers ARE the G5 authorization gate." "CM-3, AC-5, AIC-1"
+  # #127: the push-to-main rule knew one spelling, git push. These three reach main
+  # through the REST API instead.
+  g "$B"'gh[[:space:]]+api[^|;&]*/git/refs/heads/(main|master)'"$E" \
+    && block "moving main through the git refs API. All change goes through a reviewed PR." "AC-5, CM-5"
+  # The value a -f/-F/--field/--raw-field flag gives to field $1, if any.
+  api_field() { printf '%s' "$cmd" \
+    | grep -oE '(-[fF][[:space:]]*|--(raw-)?field[[:space:]=]+)'"$1"'=[^[:space:]|;&)`"'"'"']+' \
+    | head -n1 | sed -E 's/^[^=]*=//'; }
+  is_main() { printf '%s' "$1" | grep -qE '^(refs/heads/)?(main|master)$'; }
+  # A contents write is a commit. With no branch field it lands on the default branch.
+  if g "$B"'gh[[:space:]]+api[^|;&]*/contents/'; then
+    br=$(api_field branch)
+    { [ -z "$br" ] || is_main "$br"; } \
+      && block "a commit to main through the contents API (it commits to the default branch when no branch is named). All change goes through a reviewed PR; pass -f branch=<feature>." "AC-5, CM-5"
+  fi
+  if g "$B"'gh[[:space:]]+api[^|;&]*/merges'"$E"; then
+    is_main "$(api_field base)" \
+      && block "merging into main through the merges API. Merge happens after independent review, via GitHub." "AC-5, CM-5, AIC-2"
+  fi
 fi
 
 # #118: GraphQL is one endpoint and every call is a POST, so the rules above cannot
@@ -188,6 +207,18 @@ $(cat -- "$f")"
       && block "changing branch protection or a ruleset through GraphQL. This enforces separation of duties." "AC-5, CM-5"
     m '(create|update|delete)Environment' \
       && block "changing a deployment environment through GraphQL. Its reviewers ARE the G5 authorization gate." "CM-3, AC-5, AIC-1"
+    # #127: moving a ref is a push. A ref id is opaque -- it may be main -- so any
+    # GraphQL ref move is refused; a commit is refused when main appears anywhere in
+    # the call (inline, or as a variable: -f b=main) or its branch is named only by
+    # id. Quotes may still be JSON-escaped here, so main is matched as a word, not
+    # as "main". Push a feature branch with git instead.
+    m 'updateRefs?' \
+      && block "moving a ref through GraphQL. A ref id may be main; push a feature branch with git." "AC-5, CM-5"
+    if m 'createCommitOnBranch'; then
+      { printf '%s' "$gql" | grep -qE '(^|[^A-Za-z0-9_/.-])(refs/heads/)?(main|master)([^A-Za-z0-9_/.-]|$)' \
+        || ! printf '%s' "$gql" | grep -qE '(^|[^A-Za-z0-9_])branchName([^A-Za-z0-9_]|$)'; } \
+        && block "a commit to main through GraphQL (or to a branch named only by id). All change goes through a reviewed PR." "AC-5, CM-5"
+    fi
   fi
 fi
 
