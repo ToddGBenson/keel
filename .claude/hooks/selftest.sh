@@ -72,6 +72,20 @@ check "ruleset via gh api"        block "$(payload 'gh api --method POST repos/O
 check "secret write via gh api"   block "$(payload 'gh api --method PUT repos/O/R/actions/secrets/TOKEN')" guard-bash.sh
 check "environment via gh api"    block "$(payload 'gh api --method PUT repos/O/R/environments/production')" guard-bash.sh
 check "full URL, not a path"      block "$(payload 'gh api --method PUT https://api.github.com/repos/O/R/pulls/12/merge')" guard-bash.sh
+# #115 — gh api needs no method flag to write: any body (-f/-F/--input) makes it POST.
+# Every case above spells the method, so the rules were tested against the one form
+# of the request that is least likely to be typed. Each body-flag spelling is exercised.
+check "release, implicit POST -f"   block "$(payload 'gh api repos/O/R/releases -f tag_name=v9')"            guard-bash.sh
+check "approve, implicit POST -f"   block "$(payload 'gh api repos/O/R/pulls/12/reviews -f event=APPROVE')"  guard-bash.sh
+check "approve, --raw-field"        block "$(payload 'gh api repos/O/R/pulls/12/reviews --raw-field event=APPROVE')" guard-bash.sh
+check "approve, --input"            block "$(payload 'gh api repos/O/R/pulls/12/reviews --input r.json')"    guard-bash.sh
+check "approve, --input="           block "$(payload 'gh api repos/O/R/pulls/12/reviews --input=r.json')"    guard-bash.sh
+check "release, -F"                 block "$(payload 'gh api repos/O/R/releases -F draft=false')"            guard-bash.sh
+check "ruleset, --field"            block "$(payload 'gh api repos/O/R/rulesets --field name=x')"            guard-bash.sh
+check "release, --field="           block "$(payload 'gh api repos/O/R/releases --field=tag_name=v9')"       guard-bash.sh
+check "release, attached -fVALUE"   block "$(payload 'gh api repos/O/R/releases -ftag_name=v9')"             guard-bash.sh
+check "release, packed -if"         block "$(payload 'gh api repos/O/R/releases -if tag_name=v9')"           guard-bash.sh
+check "GET earlier in the chain"    block "$(payload 'gh api -X GET repos/O/R/issues && gh api repos/O/R/releases -f tag_name=v9')" guard-bash.sh
 
 echo ""
 echo "guard-bash.sh — credential file reads must BLOCK (AIC-5)"
@@ -105,6 +119,14 @@ check "read protection via api"   allow "$(payload 'gh api repos/O/R/branches/ma
 check "graphql read is a POST"    allow "$(payload 'gh api graphql -f query=@q.graphql')"    guard-bash.sh
 check "file an issue via gh api"  allow "$(payload 'gh api --method POST repos/O/R/issues -f title=x')" guard-bash.sh
 check "comment via gh api"        allow "$(payload 'gh api --method POST repos/O/R/issues/12/comments -f body=x')" guard-bash.sh
+# #115 — an explicit GET sends the fields as query parameters, so it stays a read.
+check "-X GET with -f is a read"    allow "$(payload 'gh api -X GET repos/O/R/releases -f per_page=5')"      guard-bash.sh
+check "-XGET with -F is a read"     allow "$(payload 'gh api -XGET repos/O/R/releases -F per_page=5')"       guard-bash.sh
+check "--method GET with -f"        allow "$(payload 'gh api --method GET repos/O/R/pulls/12/reviews -f per_page=5')" guard-bash.sh
+check "--method=GET with --field"   allow "$(payload 'gh api --method=GET repos/O/R/releases --field per_page=5')" guard-bash.sh
+check "list PRs via gh api"         allow "$(payload 'gh api repos/O/R/pulls')"                              guard-bash.sh
+check "list reviews via gh api"     allow "$(payload 'gh api repos/O/R/pulls/12/reviews --paginate')"        guard-bash.sh
+check "issue via implicit POST"     allow "$(payload 'gh api repos/O/R/issues -f title=x')"                  guard-bash.sh
 check "real --no-verify"          block "$(payload 'git commit --no-verify -m x')"        guard-bash.sh
 check "real push --no-verify"     block "$(payload 'git push --no-verify')"               guard-bash.sh
 # L0008 third recurrence — *push*origin*main* matched a READ-ONLY ls-remote because the
