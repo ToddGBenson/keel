@@ -1,0 +1,130 @@
+# Unit results to MyKronos — this repository's own test suites, reported as the
+# `unit` capability. Controls: SA-11, CA-7
+#
+# WHAT THIS IS. The sast, secrets, iac and atlas lanes upload to MyKronos from
+# the mykronos-*.yml workflows; nothing uploaded test results, so MyKronos's
+# `unit` capability had no data behind it. This runs the same suites the
+# Concourse `test` and `lint` stages run (ci/scripts/ci-stage.sh), converts each
+# one's [ok]/[FAIL] lines to JUnit with scripts/junit-suite.py, and uploads
+# through the same pinned action and the same MYKRONOS_INGESTION_TOKEN secret
+# as the generated lanes. MyKronos records a run and a case count — never
+# findings — so a red test never enters a security risk score (MyKronos D-046).
+#
+# OPT-IN, AND INERT IN A FORK. Every step is behind the repository variable
+# MYKRONOS_UNIT_UPLOAD == 'true'. Unset, the job is skipped: a fork inherits
+# this file (.github/workflows/ is merge_required) and does not thereby acquire
+# a dependency on MyKronos (ADR-0004 — this repository is a template, and its
+# forks are not MyKronos tenants). Pull requests from a fork are skipped too,
+# because they cannot read the ingestion secret.
+#
+# The operator also has to grant the capability on the platform side; the
+# token authorises the repository, and each capability it may write is a
+# separate grant:   docker exec mykronos-backend mykronos grant <owner>/<repo> unit
+#
+# A SUITE THAT NEVER RAN DOES NOT UPLOAD AS PASSING. Each failure mode is a
+# failing or erroring testcase in the XML (test/junit-suite.test.py proves each
+# one), and if no XML is produced at all the uploader records the run as a
+# FAILURE, not as an empty pass.
+#
+# Not named mykronos-unit.yml on purpose: that is the path the MyKronos
+# Workflow Installer renders its own `unit` template to. If the unit lane is
+# ever installed from MyKronos instead, delete this file in the same change,
+# or every run uploads twice.
+
+name: Unit results
+
+on:
+  pull_request:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: unit-results-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit:
+    name: Unit suites → MyKronos
+    runs-on: ${{ fromJSON(vars.KEEL_RUNNER_LABELS || '["ubuntu-latest"]') }}
+    timeout-minutes: 20
+    if: >-
+      vars.MYKRONOS_UNIT_UPLOAD == 'true' &&
+      (github.event_name != 'pull_request' ||
+       github.event.pull_request.head.repo.full_name == github.repository)
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.12'
+
+      - name: Install test dependencies
+        run: pip install --quiet --require-hashes -r ci/requirements.txt
+
+      - name: Fail fast if MyKronos is unreachable
+        # Same probe, same retries, as the generated lanes. The token goes
+        # through env rather than being expanded into the script text.
+        env:
+          MYKRONOS_INGESTION_TOKEN: ${{ secrets.MYKRONOS_INGESTION_TOKEN }}
+        run: |
+          curl --fail --silent --show-error --max-time 15 \
+            --retry 2 --retry-delay 5 --retry-all-errors \
+            -H "Authorization: Bearer $MYKRONOS_INGESTION_TOKEN" \
+            "https://mykronos.toddbenson.net/api/ingest/health" > /dev/null
+
+      - name: Run the suites
+        # continue-on-error, so a red suite still uploads; the last step turns
+        # the job red afterwards. Every suite runs even after one fails.
+        id: suites
+        continue-on-error: true
+        env:
+          OUT: ${{ runner.temp }}/mykronos-results
+        run: |
+          set -uo pipefail
+          mkdir -p "$OUT"
+          rc=0
+          suite() { python scripts/junit-suite.py --name "$1" --out "$OUT" -- "${@:2}" || rc=1; }
+
+          # Every test file, found rather than listed, so a new one cannot be
+          # left out. A glob that matches nothing is passed through literally,
+          # and the wrapper reports the missing file as an error.
+          for t in test/*.test.py; do suite "$(basename "$t" .py)" python "$t"; done
+          for t in test/*.test.js; do suite "$(basename "$t" .js)" node "$t"; done
+
+          suite guard-selftest bash .claude/hooks/selftest.sh
+          suite agent-evals    bash evals/run-agent-evals.sh
+          exit "$rc"
+
+      - name: Say what the suites did
+        if: always()
+        run: |
+          count=$(find "${{ runner.temp }}/mykronos-results" -maxdepth 1 -name '*.xml' 2>/dev/null | wc -l)
+          echo "unit: outcome=${{ steps.suites.outcome }}, $count JUnit report(s)."
+          if [ "$count" -eq 0 ]; then
+            echo "::warning::No JUnit XML was produced. MyKronos will record this run as a failure."
+          fi
+
+      - name: Upload results to MyKronos
+        # The action and ref every mykronos-*.yml lane in this repository uses.
+        if: always()
+        uses: ToddGBenson/mykronos/actions/upload-results@cce7495afafb3f22b014847bd91624ced9b8e2dd
+        with:
+          capability: unit
+          tool: junit
+          results-path: ${{ runner.temp }}/mykronos-results
+          ingestion-url: https://mykronos.toddbenson.net
+          token: ${{ secrets.MYKRONOS_INGESTION_TOKEN }}
+          severity-threshold: low
+          blocking: "false"
+          mykronos-ref: cce7495afafb3f22b014847bd91624ced9b8e2dd
+
+      - name: Fail the job if a suite failed
+        # Last, so the run is recorded first.
+        if: steps.suites.outcome == 'failure'
+        run: |
+          echo "::error::One or more test suites failed. See the step above, or the run in MyKronos."
+          exit 1
