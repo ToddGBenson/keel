@@ -192,6 +192,7 @@ process_one() {
 
   # 1. Traceability first: every change needs a work item (CM-3). No issue, no work.
   local issue_url issue_num
+  # shellcheck disable=SC2016  # backticks are Markdown code spans in the issue body, not command substitution
   issue_url="$(gh issue create --title "$issue_title" --label sprint \
       --body "$(printf 'Queued from `%s` by the sprint runner.\n\n---\n\n%s' "$desc" "$(cat "$desc")")" \
       2>/dev/null | tail -1)"
@@ -265,8 +266,8 @@ Stopping is a success state (AIC-11) — this needs a human decision before it c
   local touched; touched="$(git diff --name-only origin/main..HEAD | grep -E "$PROTECTED" || true)"
   if [ -n "$touched" ]; then
     warn "ABANDONED — the run modified control files, which it must never do:"
-    printf '      %s\n' $touched
-    gh issue comment "$issue_num" --body "Sprint run **abandoned**: it modified control files (\`$(printf '%s ' $touched)\`). A change to a control must be a deliberate human act, never a side effect of an automated build. Branch \`$branch\` left for inspection." >/dev/null 2>&1
+    printf '%s\n' "$touched" | sed 's/^/      /'
+    gh issue comment "$issue_num" --body "Sprint run **abandoned**: it modified control files (\`$(printf '%s\n' "$touched" | tr '\n' ' ')\`). A change to a control must be a deliberate human act, never a side effect of an automated build. Branch \`$branch\` left for inspection." >/dev/null 2>&1
     git switch -q main; return 1
   fi
   ok "touched no control files"
@@ -290,7 +291,7 @@ Stopping is a success state (AIC-11) — this needs a human decision before it c
   # Marking it ready for review is the human's act, and that is the moment
   # governance starts demanding the record. The ordering IS the control: the
   # runner proposes, a person accepts.
-  gh pr create --draft --title "feat: ${issue_title}" --body "$(cat <<PRBODY
+  if gh pr create --draft --title "feat: ${issue_title}" --body "$(cat <<PRBODY
 Closes #$issue_num
 
 Built autonomously by the sprint runner from \`$desc\`.
@@ -329,7 +330,11 @@ and it is demanded the moment you take the draft flag off (#44, #47).
 ## Rollback
 \`git revert\`, or close this PR unmerged — nothing has shipped.
 PRBODY
-)" >/dev/null 2>&1 && ok "PR opened" || warn "PR creation failed"
+)" >/dev/null 2>&1; then
+    ok "PR opened"
+  else
+    warn "PR creation failed"
+  fi
 
   mv "$desc" "$DONE/" 2>/dev/null
   git switch -q main
@@ -466,6 +471,7 @@ PROMPT
   # Structural check -- the prompt above is advisory (AIC-3); this is what holds.
   if git diff --name-only main...HEAD 2>/dev/null | grep -qE "$PROTECTED"; then
     warn "#$num touched a control path - branch abandoned"
+    # shellcheck disable=SC2016  # backticks are Markdown code spans in the BLOCKED record, not command substitution
     printf 'The run modified a protected path. Branch `%s` abandoned unmerged.\n' "$branch" \
       > "$DONE/issue-${num}.BLOCKED.md"
     git switch -q "$STARTED_ON" 2>/dev/null; return 1
@@ -481,6 +487,7 @@ PROMPT
     cmd="$(pol "test_${suite}_command")"
     if ! eval "$cmd" >> "$log" 2>&1; then
       warn "#$num failed the $suite suite - no PR opened"
+      # shellcheck disable=SC2016  # backticks are Markdown code spans in the BLOCKED record, not command substitution
       printf 'Command `%s` failed. Branch `%s` left for inspection; see `%s`.\n' "$cmd" "$branch" "$log" \
         > "$DONE/issue-${num}.BLOCKED.md"
       git switch -q "$STARTED_ON" 2>/dev/null; return 1
@@ -503,10 +510,14 @@ PROMPT
 
   # --draft for the same reason as above (#47): no human has read this, so it
   # must not present as ready to merge.
-  gh pr create --draft --title "feat: $title" --base main --head "$branch" \
+  # shellcheck disable=SC2016  # backticks are Markdown code spans in the PR body, not command substitution
+  if gh pr create --draft --title "feat: $title" --base main --head "$branch" \
     --body "$(printf 'Closes #%s\n\nImplemented by the unattended sprint runner from a G1-approved story.\n\n## Non-prod (P3)\n%s\n\n## Tests (P5)\nUnit, functional and security suites were re-run by the runner after the agent reported done. All passed, or this PR would not exist.\n\n## Your gate (P4)\nApprove what is RUNNING in `%s`, not this diff. The diff is how it got there; the environment is what you are accepting.\n\n## AI authorship (AIC-6)\n- [x] **Parts AI-authored:** all of it\n- [x] **Agent / model:** claude-opus-5 via the unattended runner\n\nGive this MORE scrutiny than a hand-written PR: no human watched it being written.\n\n## This is a DRAFT\nRun `/self-review` and commit `evidence/%s/g3/self-review.md` before marking it ready. Governance skips drafts and demands that record the moment you do (#44, #47).\n' \
-      "$num" "$deployed" "$(pol nonprod_name)" "$num")" >/dev/null 2>&1 \
-    && ok "PR opened for #$num" || warn "#$num PR creation failed"
+      "$num" "$deployed" "$(pol nonprod_name)" "$num")" >/dev/null 2>&1; then
+    ok "PR opened for #$num"
+  else
+    warn "#$num PR creation failed"
+  fi
 
   git switch -q "$STARTED_ON" 2>/dev/null
 }
