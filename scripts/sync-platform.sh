@@ -186,9 +186,11 @@ if [ "$CHECK_ONLY" = "0" ] && [ "$changed" != "0" ]; then
   else
     warn "guard self-test FAILED after sync — investigate before committing"
   fi
-  python scripts/validate-platform.py --quiet >/dev/null 2>&1 \
-    && info "platform validation: pass" \
-    || warn "platform validation reported issues — run it directly"
+  if python scripts/validate-platform.py --quiet >/dev/null 2>&1; then
+    info "platform validation: pass"
+  else
+    warn "platform validation reported issues — run it directly"
+  fi
 fi
 
 say "Next"

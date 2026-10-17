@@ -64,7 +64,11 @@ for c in evals/agents/[0-9]*.md; do
   n_cases=$((n_cases+1))
   grep -qi 'Expected verdict' "$c" || bad "$(basename "$c"): no 'Expected verdict'"
 done
-[ "$n_cases" -gt 0 ] && ok "$n_cases seeded behavioral case(s) present" || bad "no seeded cases in evals/agents/"
+if [ "$n_cases" -gt 0 ]; then
+  ok "$n_cases seeded behavioral case(s) present"
+else
+  bad "no seeded cases in evals/agents/"
+fi
 
 echo
 printf '%s\n' "${B}Agent assurance — behavioral (operator, monthly)${R}"

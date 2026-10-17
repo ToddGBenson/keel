@@ -80,9 +80,9 @@ info "Enabling: secret scanning, PUSH PROTECTION, dependency graph, Dependabot"
 confirm
 run "secret scanning + push protection + Dependabot" \
   gh api -X PATCH "repos/$REPO" \
-    -f security_and_analysis[secret_scanning][status]=enabled \
-    -f security_and_analysis[secret_scanning_push_protection][status]=enabled \
-    -f security_and_analysis[dependabot_security_updates][status]=enabled
+    -f 'security_and_analysis[secret_scanning][status]=enabled' \
+    -f 'security_and_analysis[secret_scanning_push_protection][status]=enabled' \
+    -f 'security_and_analysis[dependabot_security_updates][status]=enabled'
 run "vulnerability alerts" gh api -X PUT "repos/$REPO/vulnerability-alerts"
 run "automated security fixes" gh api -X PUT "repos/$REPO/automated-security-fixes"
 
@@ -103,8 +103,11 @@ REVIEWER_ID="$(gh api user --jq .id 2>/dev/null || echo '')"
 if [ "$DRY" = "1" ]; then
   info "would create 'staging' (no reviewers) and 'production' (required reviewer: you)"
 else
-  gh api -X PUT "repos/$REPO/environments/staging" >/dev/null 2>&1 \
-    && info "staging environment created" || bad "staging environment"
+  if gh api -X PUT "repos/$REPO/environments/staging" >/dev/null 2>&1; then
+    info "staging environment created"
+  else
+    bad "staging environment"
+  fi
 
   if [ -n "$REVIEWER_ID" ]; then
     # The deploy job physically cannot start until a human approves in the GitHub UI.
@@ -395,12 +398,12 @@ fi
 say "7. CIS Software Supply Chain v1.0"
 
 # 1.2.5 / 1.2.6 — security policy, description, discoverability
-[ -f SECURITY.md ]  && info "[ok]   1.2.5 SECURITY.md present"  || bad "1.2.5 SECURITY.md missing"
-[ -f LICENSE ]      && info "[ok]   ---   LICENSE present"      || bad "LICENSE missing (a public repo without one is all-rights-reserved)"
-[ -f CONTRIBUTING.md ] && info "[ok]   ---   CONTRIBUTING.md present" || warn "CONTRIBUTING.md missing"
+if [ -f SECURITY.md ]; then info "[ok]   1.2.5 SECURITY.md present"; else bad "1.2.5 SECURITY.md missing"; fi
+if [ -f LICENSE ]; then info "[ok]   ---   LICENSE present"; else bad "LICENSE missing (a public repo without one is all-rights-reserved)"; fi
+if [ -f CONTRIBUTING.md ]; then info "[ok]   ---   CONTRIBUTING.md present"; else warn "CONTRIBUTING.md missing"; fi
 
 DESC="$(gh repo view --json description --jq '.description // ""')"
-[ -n "$DESC" ] && info "[ok]   1.2.6 repository description set" || bad "1.2.6 no repository description"
+if [ -n "$DESC" ]; then info "[ok]   1.2.6 repository description set"; else bad "1.2.6 no repository description"; fi
 
 # 1.3.2 — MFA. Account-level; report, cannot enforce from a repo.
 MFA="$(gh api user --jq '.two_factor_authentication // "unknown"' 2>/dev/null || echo unknown)"
