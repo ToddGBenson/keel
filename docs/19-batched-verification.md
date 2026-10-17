@@ -70,7 +70,8 @@ looks wrong, re-triage it on the issue with a reason recorded.
 ## The flow
 
 ```
-/plan                    rank the backlog (RICE from G0), find a COHERENT group,
+/plan                    rank the backlog (ideas on RICE from G0, defects on recorded
+                         severity — never one scale), find a COHERENT group,
                          propose 3-5 stories + the deferred list
      │
      ▼  ← YOU approve. Selection is scope, and scope stays human.

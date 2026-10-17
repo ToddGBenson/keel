@@ -19,13 +19,24 @@ gh issue list --state open --limit 100 \
   --jq '.[] | "\(.number)\t\([.labels[].name]|join(","))\t\(.title)"'
 ```
 
-Pull the **RICE score already recorded at G0** from each issue body. Do not re-score. If an
-issue has no RICE, say so rather than inventing one — an issue that never passed G0 is not
-eligible for planning, it is eligible for `/idea`.
+Classify each issue by kind and pull the ranking input **its intake route already recorded**
+(the skill's "Rank from what you already have" table). Do not re-score.
 
-## Step 2 — rank, then group for coherence
+- **Idea / story** — the RICE score recorded at G0. No RICE means it never passed G0: not
+  eligible for planning, eligible for `/idea`. Say so rather than inventing one.
+- **Defect** (`bug` label, filed via `bug.yml`) — the **severity recorded on the bug form**,
+  then the data-loss/exposure flags, then scope of impact. Defects never pass G0 and never
+  get a RICE score; **never back-fill one**. A defect with no recorded severity is not Ready —
+  say so and route it to triage.
+- **Security finding, compliance gap, EOL** — the SLA due date. These are constraints the plan
+  fits around, not candidates ranked against features.
 
-Rank by RICE, adjusted for dependency order, risk flags, and decay (see the skill).
+## Step 2 — rank within each kind, then group for coherence
+
+Rank each kind on its own path, adjusted for dependency order, risk flags, and decay (see the
+skill). **There is no common scale across kinds** — do not convert a severity into a RICE-like
+number to merge the lists. Present them separately, state the path per item, and leave the
+interleave to the human at approval.
 
 Then find the **coherent** group — stories sharing a component, a data set, a user journey, or
 a trust boundary. The top N by score is usually the wrong epic: a scatter of unrelated high
