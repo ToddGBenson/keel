@@ -32,14 +32,14 @@ CODEQL_QUERIES="${CODEQL_QUERIES:-security-extended}"
 # The CLI uses the underlying extractor names, and the query packs use a third
 # spelling. Mapping all three here rather than hoping they coincide — they do not.
 case "${CODEQL_LANGUAGE}" in
-  python)                cli_lang=python;     pack=python;     find_pat='-name *.py' ;;
-  javascript-typescript) cli_lang=javascript; pack=javascript; find_pat='-name *.js -o -name *.jsx -o -name *.ts -o -name *.tsx -o -name *.mjs -o -name *.cjs' ;;
-  javascript)            cli_lang=javascript; pack=javascript; find_pat='-name *.js -o -name *.jsx -o -name *.mjs -o -name *.cjs' ;;
-  go)                    cli_lang=go;         pack=go;         find_pat='-name *.go' ;;
-  java-kotlin)           cli_lang=java;       pack=java;       find_pat='-name *.java -o -name *.kt' ;;
-  csharp)                cli_lang=csharp;     pack=csharp;     find_pat='-name *.cs' ;;
-  ruby)                  cli_lang=ruby;       pack=ruby;       find_pat='-name *.rb' ;;
-  c-cpp)                 cli_lang=cpp;        pack=cpp;        find_pat='-name *.c -o -name *.cc -o -name *.cpp -o -name *.h' ;;
+  python)                cli_lang=python;     pack=python;     find_pat=(-name '*.py') ;;
+  javascript-typescript) cli_lang=javascript; pack=javascript; find_pat=(-name '*.js' -o -name '*.jsx' -o -name '*.ts' -o -name '*.tsx' -o -name '*.mjs' -o -name '*.cjs') ;;
+  javascript)            cli_lang=javascript; pack=javascript; find_pat=(-name '*.js' -o -name '*.jsx' -o -name '*.mjs' -o -name '*.cjs') ;;
+  go)                    cli_lang=go;         pack=go;         find_pat=(-name '*.go') ;;
+  java-kotlin)           cli_lang=java;       pack=java;       find_pat=(-name '*.java' -o -name '*.kt') ;;
+  csharp)                cli_lang=csharp;     pack=csharp;     find_pat=(-name '*.cs') ;;
+  ruby)                  cli_lang=ruby;       pack=ruby;       find_pat=(-name '*.rb') ;;
+  c-cpp)                 cli_lang=cpp;        pack=cpp;        find_pat=(-name '*.c' -o -name '*.cc' -o -name '*.cpp' -o -name '*.h') ;;
   *)
     echo "ERROR: unknown CODEQL_LANGUAGE '${CODEQL_LANGUAGE}'." >&2
     echo "Add it to the mapping in ci/scripts/codeql.sh rather than guessing." >&2
@@ -68,11 +68,10 @@ esac
 # to the ported script changed the meaning of code that had not been touched.
 #
 # `-print -quit` stops find at the first hit, so there is no pipe and no second
-# process to race. `set -f` because $find_pat must word-split but must NOT be
-# glob-expanded against the build directory first.
-set -f
-first_hit="$(find repo -path repo/.git -prune -o -path repo/node_modules -prune -o \( ${find_pat} \) -print -quit 2>/dev/null)"
-set +f
+# process to race. find_pat is an array so each -name pattern reaches find as
+# one quoted word: no word-splitting, and no glob expansion against the build
+# directory (which the old string form needed `set -f` to prevent).
+first_hit="$(find repo -path repo/.git -prune -o -path repo/node_modules -prune -o \( "${find_pat[@]}" \) -print -quit 2>/dev/null)"
 if [ -z "${first_hit}" ]; then
   cat <<EOF
 

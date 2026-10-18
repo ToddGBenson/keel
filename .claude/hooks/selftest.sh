@@ -96,15 +96,22 @@ check "GET earlier in the chain"    block "$(payload 'gh api -X GET repos/O/R/is
 # ( nor a backtick nor a quote is in that set, so the same call inside $(...), `...`,
 # <(...) or bash -c "..." matched no rule at all. Each wrapper is exercised, and the git
 # and credential-read rules share the anchor, so they are exercised too.
+# shellcheck disable=SC2016  # literal $(...) / backticks: the unexpanded command text is the hook input under test
 check 'merge in $(...)'             block "$(payload 'x=$(gh api --method PUT repos/O/R/pulls/12/merge)')"  guard-bash.sh
+# shellcheck disable=SC2016  # literal $(...) / backticks: the unexpanded command text is the hook input under test
 check 'pr merge in backticks'       block "$(payload 'x=`gh pr merge 12`')"                                guard-bash.sh
+# shellcheck disable=SC2016  # literal $(...) / backticks: the unexpanded command text is the hook input under test
 check 'pr merge in $( ... ) spaced' block "$(payload 'x=$( gh pr merge 12 )')"                             guard-bash.sh
+# shellcheck disable=SC2016  # literal $(...) / backticks: the unexpanded command text is the hook input under test
 check '$(...) after && in a chain'  block "$(payload 'git status && y=$(gh pr merge 12)')"                 guard-bash.sh
 check 'approve in <(...)'           block "$(payload 'cat <(gh pr review 12 --approve)')"                  guard-bash.sh
 check 'pr merge in bash -c "..."'   block "$(payload 'bash -c "gh pr merge 12"')"                          guard-bash.sh
 check "pr merge in sh -c '...'"     block "$(payload "sh -c 'gh pr merge 12'")"                            guard-bash.sh
+# shellcheck disable=SC2016  # literal $(...) / backticks: the unexpanded command text is the hook input under test
 check 'implicit POST in $(...)'     block "$(payload 'x=$(gh api repos/O/R/releases -f tag_name=v9)')"     guard-bash.sh
+# shellcheck disable=SC2016  # literal $(...) / backticks: the unexpanded command text is the hook input under test
 check 'release create in $(...)'    block "$(payload 'x=$(gh release create v1.0.0)')"                     guard-bash.sh
+# shellcheck disable=SC2016  # literal $(...) / backticks: the unexpanded command text is the hook input under test
 check 'force push in $(...)'        block "$(payload 'x=$(git push origin feat --force)')"                 guard-bash.sh
 # #120 -- `push([[:space:]]|$)` ate the one space the flag needed in front of it, so a
 # force flag straight after `push` (the usual spelling) passed. The old "force push"
@@ -112,19 +119,26 @@ check 'force push in $(...)'        block "$(payload 'x=$(git push origin feat -
 check 'push --force first, feat'    block "$(payload 'git push --force origin feat')"                      guard-bash.sh
 check 'push -f first, feat'         block "$(payload 'git push -f origin feat')"                           guard-bash.sh
 check 'push --force-with-lease first' block "$(payload 'git push --force-with-lease origin feat')"         guard-bash.sh
+# shellcheck disable=SC2016  # literal $(...) / backticks: the unexpanded command text is the hook input under test
 check 'push --force first in $(...)' block "$(payload 'x=$(git push --force origin feat)')"                guard-bash.sh
 check 'push -f first in sh -c'      block "$(payload "sh -c 'git push -f origin feat'")"                   guard-bash.sh
 check 'plain push to feat'          allow "$(payload 'git push origin feat')"                              guard-bash.sh
 check 'push -u to feat'             allow "$(payload 'git push -u origin feat')"                           guard-bash.sh
 check 'push --follow-tags to feat'  allow "$(payload 'git push --follow-tags origin feat')"                guard-bash.sh
+# shellcheck disable=SC2016  # literal $(...) / backticks: the unexpanded command text is the hook input under test
 check 'reset --hard in backticks'   block "$(payload 'x=`git reset --hard HEAD~1`')"                       guard-bash.sh
+# shellcheck disable=SC2016  # literal $(...) / backticks: the unexpanded command text is the hook input under test
 check '--no-verify in $(...)'       block "$(payload 'x=$(git commit --no-verify -m y)')"                  guard-bash.sh
+# shellcheck disable=SC2016  # literal $(...) / backticks: the unexpanded command text is the hook input under test
 check 'cat .env in $(...)'          block "$(payload 'x=$(cat .env)')"                                     guard-bash.sh
 # The far end of a wrapper matters too: inside $(...) the branch name or flag a rule
 # ends on is followed by ) or a backtick, not by a space or end of line.
+# shellcheck disable=SC2016  # literal $(...) / backticks: the unexpanded command text is the hook input under test
 check 'push to main in $(...)'      block "$(payload 'x=$(git push origin main)')"                         guard-bash.sh
+# shellcheck disable=SC2016  # literal $(...) / backticks: the unexpanded command text is the hook input under test
 check 'push HEAD:main in backticks' block "$(payload 'x=`git push origin HEAD:main`')"                    guard-bash.sh
 check "push to main in sh -c '...'" block "$(payload "sh -c 'git push origin main'")"                      guard-bash.sh
+# shellcheck disable=SC2016  # literal $(...) / backticks: the unexpanded command text is the hook input under test
 check 'commit -n last in $(...)'    block "$(payload 'x=$(git commit -m y -n)')"                           guard-bash.sh
 
 echo ""
@@ -212,6 +226,7 @@ check "read refs/heads/main"        allow "$(payload 'gh api repos/O/R/git/refs/
 check "contents write, no branch"   block "$(payload 'gh api -X PUT repos/O/R/contents/a.txt -f message=m -f content=eA==')" guard-bash.sh
 check "contents write to main"      block "$(payload 'gh api -X PUT repos/O/R/contents/a.txt -f message=m -f content=eA== -f branch=main')" guard-bash.sh
 check "contents delete, no branch"  block "$(payload 'gh api -X DELETE repos/O/R/contents/a.txt -f message=m -f sha=abc')" guard-bash.sh
+# shellcheck disable=SC2016  # literal $(...) / backticks: the unexpanded command text is the hook input under test
 check "contents in \$(...)"         block "$(payload 'x=$(gh api -X PUT repos/O/R/contents/a.txt -f message=m -f content=eA==)')" guard-bash.sh
 check "contents write to a feature" allow "$(payload 'gh api -X PUT repos/O/R/contents/a.txt -f message=m -f content=eA== -f branch=feat-x')" guard-bash.sh
 check "contents read"               allow "$(payload 'gh api repos/O/R/contents/README.md')"                             guard-bash.sh
@@ -219,12 +234,18 @@ check "merge a branch into main"    block "$(payload 'gh api repos/O/R/merges -f
 check "merge main into a feature"   allow "$(payload 'gh api repos/O/R/merges -f base=feat-x -f head=main')"              guard-bash.sh
 # #117 -- reads inside a substitution stay allowed, and the anchor still needs a word
 # boundary: a command that merely ends in "gh" is not gh.
+# shellcheck disable=SC2016  # literal $(...) / backticks: the unexpanded command text is the hook input under test
 check 'pr view in $(...)'           allow "$(payload 'x=$(gh pr view 12 --json state)')"                  guard-bash.sh
+# shellcheck disable=SC2016  # literal $(...) / backticks: the unexpanded command text is the hook input under test
 check 'gh api read in $(...)'       allow "$(payload 'x=$(gh api repos/O/R/pulls/12/merge)')"              guard-bash.sh
+# shellcheck disable=SC2016  # literal $(...) / backticks: the unexpanded command text is the hook input under test
 check 'issue view in backticks'     allow "$(payload 'x=`gh issue view 42`')"                              guard-bash.sh
+# shellcheck disable=SC2016  # literal $(...) / backticks: the unexpanded command text is the hook input under test
 check 'git log in $(...)'           allow "$(payload 'x=$(git log origin/main --oneline)')"                guard-bash.sh
+# shellcheck disable=SC2016  # literal $(...) / backticks: the unexpanded command text is the hook input under test
 check 'word ending in gh, in $(...)' allow "$(payload 'x=$(sigh pr merge 12)')"                            guard-bash.sh
 check 'echo high, then git log'     allow "$(payload 'echo high && git log')"                              guard-bash.sh
+# shellcheck disable=SC2016  # literal $(...) / backticks: the unexpanded command text is the hook input under test
 check 'cat a .pub in $(...)'        allow "$(payload 'x=$(cat ~/.ssh/id_ed25519.pub)')"                    guard-bash.sh
 check "real --no-verify"          block "$(payload 'git commit --no-verify -m x')"        guard-bash.sh
 check "real push --no-verify"     block "$(payload 'git push --no-verify')"               guard-bash.sh

@@ -350,9 +350,11 @@ if git remote get-url upstream >/dev/null 2>&1; then
   info "upstream already set: $(git remote get-url upstream)"
 else
   ask UPSTREAM_DEFAULT "Platform upstream URL" "$UPSTREAM_DEFAULT"
-  git remote add upstream "$UPSTREAM_DEFAULT" 2>/dev/null \
-    && info "upstream -> $UPSTREAM_DEFAULT" \
-    || info "could not add upstream; set it later with: git remote add upstream <url>"
+  if git remote add upstream "$UPSTREAM_DEFAULT" 2>/dev/null; then
+    info "upstream -> $UPSTREAM_DEFAULT"
+  else
+    info "could not add upstream; set it later with: git remote add upstream <url>"
+  fi
 fi
 
 # ── 7. Remove bootstrap-only files ───────────────────────────────────────────
@@ -369,17 +371,25 @@ PY
 # ── 8. Hooks and validation ──────────────────────────────────────────────────
 say "Hooks and validation"
 bash scripts/install-hooks.sh >/dev/null 2>&1 && info "git hooks installed"
-bash .claude/hooks/selftest.sh >/dev/null 2>&1 && info "guard self-test: passed" \
-  || info "guard self-test FAILED — investigate before proceeding"
-python scripts/validate-platform.py --quiet >/dev/null 2>&1 && info "platform validation: pass" \
-  || info "platform validation reported issues — run: python scripts/validate-platform.py"
+if bash .claude/hooks/selftest.sh >/dev/null 2>&1; then
+  info "guard self-test: passed"
+else
+  info "guard self-test FAILED — investigate before proceeding"
+fi
+if python scripts/validate-platform.py --quiet >/dev/null 2>&1; then
+  info "platform validation: pass"
+else
+  info "platform validation reported issues — run: python scripts/validate-platform.py"
+fi
 
 # Your liveness baseline, generated from YOUR evidence — which is now none. The
 # ratchet has to start at your zero, not the platform's, or your first regression
 # is measured against somebody else's position and passes.
-python scripts/control-liveness.py --update-baseline >/dev/null 2>&1 \
-  && info "control-liveness baseline set to your (empty) starting position" \
-  || info "could not write .control-liveness.json — run: python scripts/control-liveness.py --update-baseline"
+if python scripts/control-liveness.py --update-baseline >/dev/null 2>&1; then
+  info "control-liveness baseline set to your (empty) starting position"
+else
+  info "could not write .control-liveness.json — run: python scripts/control-liveness.py --update-baseline"
+fi
 
 # Validate what we just generated. Bootstrap previously emitted invalid YAML and still
 # printed its success banner — a generator that does not check its own output is a
