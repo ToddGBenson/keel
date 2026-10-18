@@ -48,6 +48,22 @@ check_phrase release-manager.md   "do(es)? not authorize|human"     "does not se
 check_phrase compliance-officer.md "assess|do(es)? not"             "assesses, does not implement"
 check_phrase architect.md         "do(es)? not implement|not.*implement" "does not implement"
 
+# ── 1b. Method boundaries that live in a skill or command, not an agent ─────
+# Same logic as §1, applied where the method is authoritative (CLAUDE.md §3a). #39: /plan
+# had one ranking path (RICE from G0), so a defect — which never passes G0 — could not be
+# ranked at all, and the tempting workaround was a back-filled RICE score. The boundary is
+# two kinds ranked on their own recorded inputs, never a fabricated common scale.
+check_file_phrase() { # path  ere-needle  label
+  if grep -qiE "$2" "$1" 2>/dev/null; then ok "$(basename "$(dirname "$1")")/$(basename "$1"): $3"
+  else bad "$1: MISSING boundary — $3"; fi
+}
+BP=.claude/skills/backlog-prioritization/SKILL.md
+check_file_phrase "$BP" "defects? .*(recorded|bug form).*severity|severity .*recorded" "defects ranked on their recorded severity (#39)"
+check_file_phrase "$BP" "never (invent|back-?fill).*RICE|RICE.*never (invent|back-?fill)" "never back-fills a RICE score (#39)"
+check_file_phrase "$BP" "not .*common scale|no common scale" "no common scale across kinds (#39)"
+check_file_phrase "$BP" "\| *Path *\|" "output states the ranking path per item (#39)"
+check_file_phrase .claude/commands/plan.md "defect" "/plan routes defects instead of dropping them (#39)"
+
 # ── 2. Tool grants match the inventory (the enforceable half of AIC-3) ──────
 if "$PY" scripts/validate-platform.py --quiet >/dev/null 2>&1; then
   ok "tool grants match ai-inventory.md (validate-platform)"
