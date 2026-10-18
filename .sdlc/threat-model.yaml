@@ -1,0 +1,173 @@
+# keel's threat model, declared for MyKronos (mykronos specs/28-threat-model-resolution.md
+# §8, schema v1). MyKronos's threat-model-sync job reads this file from `main`
+# every six hours and loads it read-only: rows declared here change by pull
+# request, not through the MyKronos API or UI. An invalid file changes nothing;
+# deleting the file withdraws every row it declared.
+#
+# This is keel's own threat model, so it is project-owned in platform/MANIFEST.yml:
+# a fork's threat model describes the fork, and sync must never overwrite it.
+#
+# Authored for TheHub #60834 (S11b of epic #60822) from a read-only recon of the
+# host on 2026-10-17 (Concourse anonymous reads, listening ports) and GitHub API
+# reads of this repository's settings on 2026-10-18. keel runs no service and
+# listens on no port (dashboard.py writes static HTML). Its surfaces are the
+# repository, the scripts operators and forks run, and the Concourse pipeline
+# that uploads evidence to MyKronos.
+#
+# Selectors place findings in a surface (mykronos surface_match): `paths` for
+# sast/secrets/iac/sca. Re-confirming a control is editing its `reviewed_at`.
+
+version: 1
+
+assets:
+  - id: process-corpus
+    name: Process and evidence corpus
+    description: >-
+      Gate definitions, agent roles, skills, hooks and process docs that keel
+      ships to every fork. Integrity is the product: an unreviewed change here
+      changes the controls every downstream repository runs. Confidentiality
+      is low (the repository is public).
+    exposure: local
+    sensitivity: source
+    ir: M
+    evidence_ref: platform/MANIFEST.yml
+    selectors:
+      paths:
+        - process/**
+        - docs/**
+        - .claude/**
+        - platform/**
+
+  - id: gate-evidence
+    name: Gate evidence and compliance records (G0-G5, NIST 800-53/SSDF)
+    description: >-
+      The evidence keel's gates produce: evidence/<issue>/ in the repository,
+      Concourse build history and the findings uploaded to MyKronos. Integrity
+      matters (a falsified record misstates compliance); confidentiality is low.
+      Concourse build metadata for the keel pipeline is anonymously readable
+      from the host (2026-10-17).
+    exposure: local
+    sensitivity: source
+    ir: M
+    evidence_ref: process/gates/g4-verified.md
+    selectors:
+      paths:
+        - evidence/**
+
+entry_points:
+  - id: ci-evidence-upload
+    name: CI evidence upload (ci/scripts -> MyKronos ingestion)
+    description: >-
+      The Concourse lanes upload scanner results to MyKronos with a per-repo
+      ingestion token through the shared mykronos-upload task.
+      ci/vars.example.yml points ((mykronos_ingestion_url)) at
+      https://mykronos.toddbenson.net, whose /api/ingest/* is internet-reachable
+      and gate-exempt, so the target is not internal even though the CI side
+      runs on the host. A stolen token forges or suppresses findings for keel
+      only.
+    exposure: internet
+    evidence_ref: ci/scripts/mykronos-upload.sh
+    selectors:
+      paths:
+        - ci/**
+
+  - id: concourse-pipeline
+    name: Concourse keel pipeline (127.0.0.1:8080, public=true, 26 jobs)
+    description: >-
+      The pipeline is public, so its config and build metadata are anonymously
+      readable from the host (2026-10-17). It runs on MyKronos's shared,
+      privileged Concourse workers.
+    exposure: local
+    evidence_ref: ci/pipeline.yml
+    selectors:
+      paths:
+        - ci/pipeline.yml
+        - ci/vars.example.yml
+
+  - id: platform-scripts
+    name: keel CLI and platform scripts (run by the operator and by forks)
+    description: >-
+      bootstrap.sh, configure-github.sh, sync-platform.sh, sprint.sh and the
+      validators run on the operator's workstation with their credentials
+      (gh, git). They are platform-owned, so every fork receives and runs the
+      same code.
+    exposure: local
+    evidence_ref: scripts/bootstrap.sh
+    selectors:
+      paths:
+        - scripts/**
+        - keel
+        - test/**
+
+trust_boundaries:
+  - id: github-repository
+    name: GitHub repository settings
+    description: >-
+      Public repository. Observed 2026-10-18 through the API: secret scanning,
+      push protection and Dependabot security updates enabled; main requires one
+      approving review, admins are not held to it, and no required status
+      checks are listed on the classic protection. configure-github.sh is what
+      sets these.
+    exposure: internet
+    evidence_ref: scripts/configure-github.sh
+    selectors:
+      paths:
+        - .github/**
+
+  - id: upstream-to-forks
+    name: keel upstream -> forks (sync-platform.sh)
+    description: >-
+      sync-platform.sh overwrites every platform-owned path in a fork (Binnacle
+      today) with upstream's version. A change merged here becomes a fork's
+      gates, agents and scripts on its next sync, so this boundary carries
+      tampering from keel into every downstream repository.
+    exposure: local
+    evidence_ref: scripts/sync-platform.sh
+
+controls:
+  - id: ingestion-response-parsing
+    kind: input_validation
+    stride: tampering
+    description: >-
+      The MyKronos ingestion response is read positionally and each value is
+      validated against the shape it must have; it is never sourced or
+      evaluated by the shell.
+    evidence_ref: ci/scripts/atlas-evidence.sh
+    applies_to: ci-evidence-upload
+    reviewed_at: 2026-10-17
+
+  - id: secret-scanning
+    kind: secrets_management
+    stride: information_disclosure
+    description: >-
+      GitHub secret scanning and push protection are enabled on the repository
+      (API read 2026-10-18); configure-github.sh enables them. Non-provider
+      patterns and validity checks are disabled.
+    evidence_ref: scripts/configure-github.sh
+    applies_to: github-repository
+    reviewed_at: 2026-10-18
+
+  - id: branch-protection
+    kind: authorization
+    stride: tampering
+    description: >-
+      main requires one approving review before merge (API read 2026-10-18).
+      enforce_admins is false, so the owner can bypass it, and no required
+      status checks appear on the classic protection; the PR governance checks
+      are therefore advisory to an admin.
+    evidence_ref: scripts/configure-github.sh
+    applies_to: github-repository
+    reviewed_at: 2026-10-18
+
+  - id: agent-guard-hooks
+    kind: authorization
+    stride: elevation_of_privilege
+    description: >-
+      PreToolUse hooks block agent Bash and Write calls that would force-push,
+      skip hooks, touch secrets or otherwise cross the agent constraints, so
+      those limits do not depend on the model complying. selftest.sh exercises
+      them. Code-read; they protect agent sessions only, not a human at a
+      shell.
+    evidence_ref: .claude/hooks/guard-bash.sh
+    applies_to: process-corpus
+    reviewed_at: 2026-10-17

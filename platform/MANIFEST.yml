@@ -109,6 +109,11 @@ project_owned:
   # Your reconciled merge strands. Ours reference our PR numbers, which mean
   # something entirely different in your repository (#69).
   - .merge-reconciled.json
+  # Your threat model, which MyKronos reads (mykronos spec 28 §8). It declares
+  # this repository's assets, entry points and controls; upstream's would be
+  # false the moment it landed in a fork, and sync replacing a fork's would
+  # silently rewrite what the fork has declared about itself.
+  - .sdlc/threat-model.yaml
   # Created by scripts/bootstrap.sh in YOUR repository and absent from upstream.
   # Unclassified, these made every fork fail its own manifest validator on day
   # one — and that validator runs in platform-integrity, a required check, so a

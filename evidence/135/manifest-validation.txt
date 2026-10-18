@@ -1,0 +1,45 @@
+Evidence for #135: .sdlc/threat-model.yaml validation and selector coverage
+Produced 2026-10-18T17:26Z by the authoring agent (Claude Code, claude-opus-5.5).
+This is author-produced verification output, not a review record.
+
+1. Parser (AC-1)
+   mykronos main e602e7bd55afb45bccfe5ceb61933d6787c6a7d0,
+   backend/mykronos/threat_model_manifest.py parse_manifest(<file text>)
+
+   ToddGBenson/keel: state=valid error=None
+     assets=2 entry_points=3 trust_boundaries=2 controls=4
+
+2. Selector coverage (AC-2)
+   Every finding with status='open' for ToddGBenson/keel in the MyKronos lake
+   (read-only read_parquet of /data/datalake/findings inside mykronos-backend),
+   placed with backend/mykronos/surface_match.py surface_for(finding, surfaces)
+   at the same commit.
+
+     open findings=1 by capability={'sast': 1}
+     mapped=1/1 = 100.0%
+       -> platform-scripts                 sast       1
+   (the one finding is in scripts/bootstrap.sh)
+
+3. Platform manifest (AC-3)
+   python scripts/validate-manifest.py
+
+   Platform manifest validation
+     267 tracked files, 86 manifest entries
+     [warn]  14 project_owned/bootstrap_only entries point at paths this repository does not have - correct, they describe a fork's content (.bootstrapped, .env.example, Cargo.toml, app/...)
+     [ok]    every tracked path is governed, and every shipped entry exists
+
+   Without the platform/MANIFEST.yml entry the same command reports
+   ".sdlc/threat-model.yaml is tracked but classified by no bucket" and exits 1
+   (observed on the Binnacle fork, whose manifest predates the entry).
+
+4. GitHub settings read for the trust boundary and controls (2026-10-18)
+   gh api repos/ToddGBenson/keel --jq .security_and_analysis
+     secret_scanning enabled, secret_scanning_push_protection enabled,
+     dependabot_security_updates enabled, non_provider_patterns disabled,
+     validity_checks disabled
+   gh api repos/ToddGBenson/keel/branches/main/protection
+     required_approving_review_count 1, enforce_admins false,
+     required_status_checks.contexts null
+
+Not verified: the agent guard hooks were code-read for this file; selftest.sh
+was not run for this change.
