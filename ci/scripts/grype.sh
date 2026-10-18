@@ -4,6 +4,20 @@ set -euo pipefail
 
 SEVERITY_CUTOFF="${SEVERITY_CUTOFF:-high}"
 
+# GATE decides whether this run fails the build on findings. Refs: #133
+#   true  (default) -- the `sca` job. Fails at or above SEVERITY_CUTOFF, exactly
+#                      as it did before GATE existed.
+#   false           -- the `mykronos-sca` upload lane. Findings are a result for
+#                      the uploader to record, not a reason to fail the step, so
+#                      `--fail-on` is not passed. The upload lane does not decide
+#                      CI outcomes, same as `mykronos-secrets`.
+# Anything else is refused: a typo must not switch the gate off.
+GATE="${GATE:-true}"
+case "${GATE}" in
+  true|false) ;;
+  *) echo "ERROR: GATE must be 'true' or 'false', got '${GATE}'" >&2; exit 2 ;;
+esac
+
 # The pin is checked after the manifest-presence test below, not before it. A
 # repository with nothing to scan must not go red over a tool version it was
 # never going to use.
@@ -52,11 +66,19 @@ grype version
 # is the absolute-count gate and is deliberately paired with a severity cutoff
 # high enough that the existing backlog is driven down through the POA&M on SLA
 # rather than by turning this job off.
+#
+# With GATE=false there is no `--fail-on`, so a non-zero exit can only mean grype
+# itself failed. That is reported as a scan failure below, never as a clean scan.
+fail_on=()
+if [ "${GATE}" = "true" ]; then
+  fail_on=(--fail-on "${SEVERITY_CUTOFF}")
+fi
+
 rc=0
 grype "dir:repo" \
   --output sarif \
   --file sca-results/grype.sarif \
-  --fail-on "${SEVERITY_CUTOFF}" || rc=$?
+  ${fail_on[@]+"${fail_on[@]}"} || rc=$?
 
 python3 - <<'PY'
 import json, pathlib
@@ -68,6 +90,11 @@ else:
     n = sum(len(run.get("results", [])) for run in doc.get("runs", []))
     print(f"grype findings: {n}")
 PY
+
+if [ "${rc}" -ne 0 ] && [ "${GATE}" = "false" ]; then
+  echo "ERROR: grype exited ${rc} with no --fail-on — that is a scan failure, not a findings result." >&2
+  exit "${rc}"
+fi
 
 if [ "${rc}" -ne 0 ]; then
   echo "ERROR: grype found vulnerabilities at or above '${SEVERITY_CUTOFF}'." >&2

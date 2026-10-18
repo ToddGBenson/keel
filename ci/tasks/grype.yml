@@ -26,6 +26,10 @@ params:
   GRYPE_VERSION: ""
   GRYPE_SHA256: ""
   SEVERITY_CUTOFF: high
+  # "true": fail on findings at or above SEVERITY_CUTOFF (the `sca` job).
+  # "false": report only, for the `mykronos-sca` upload lane. A grype error
+  # still fails. Anything else is refused. See ci/scripts/grype.sh. Refs: #133
+  GATE: "true"
 
 run:
   path: bash

@@ -306,7 +306,7 @@ groups:
   # the usual hazard and costs the same: somebody debugging missing keel
   # coverage reads "no token", stops, and never looks at the 401.
   - name: mykronos
-    jobs: [mykronos-sast, mykronos-secrets, mykronos-atlas]
+    jobs: [mykronos-sast, mykronos-secrets, mykronos-sca, mykronos-atlas]
 
   # G5. A chain, and the only path a human starts by hand.
   #   release-preflight → deploy-staging → authorize-production
@@ -778,6 +778,55 @@ jobs:
             CAPABILITY: secrets
             TOOL: gitleaks
             TRIGGERED_BY: schedule
+
+  # grype's findings, to the system of record. Refs: #133, mykronos#414
+  #
+  # `sca` runs grype, gates on `high`, and until this lane existed its findings
+  # went nowhere except the build artifacts. That was harmless while keel had no
+  # manifest. ci/requirements.txt arrived 2026-09-17, so grype now scans something
+  # and gates on it. The `sca` job is unchanged and still the gate. This lane runs
+  # the same task with GATE=false, so findings reach the uploader rather than
+  # failing the step, and a grype error still fails it.
+  #
+  # Uploaded as `atlas/grype`, beside osv-scanner. osv-scanner reads manifests;
+  # grype reads more, which is why a second tool is worth having.
+  #
+  # NEEDS MyKronos `AdapterSpec("atlas", "grype", ...)` AND a `mykronos_ref` that
+  # includes it. At f8d8cfd (and mykronos main as of 2026-10-17) the upload fails
+  # with "No adapter for capability 'atlas' with tool 'grype'".
+  #
+  # A SECOND LANE ON ONE CAPABILITY (mykronos#380). The platform takes the newest
+  # scan per (repo, capability), so if either this lane or `mykronos-atlas` stops,
+  # the other keeps `atlas` looking fresh. Both run on the same triggers, so
+  # neither routinely outlives the other, but it is a mask, not a fix.
+  #
+  # TRIGGERED_BY is unset for the reason given on `iac`: this job triggers on
+  # both `repo` and `weekly`, and `schedule` would be wrong on every push run.
+  - name: mykronos-sca
+    public: true
+    plan:
+      - get: repo
+        trigger: true
+      - get: weekly
+        trigger: true
+      - do:
+          - *mykronos_preflight
+          - task: grype
+            file: repo/ci/tasks/grype.yml
+            params:
+              GRYPE_VERSION: ((grype_version))
+              GRYPE_SHA256: ((grype_sha256))
+              SEVERITY_CUTOFF: high
+              GATE: "false"
+        ensure:
+          task: upload
+          file: repo/ci/tasks/mykronos-upload.yml
+          input_mapping: { mykronos-results: sca-results }
+          params:
+            <<: *mykronos_upload_params
+            CAPABILITY: atlas
+            TOOL: grype
+            TOOL_VERSION: ((grype_version))
 
   - name: mykronos-atlas
     public: true
