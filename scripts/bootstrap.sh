@@ -234,9 +234,9 @@ if [ -n "$files" ]; then
   done <<< "$files"
 fi
 info "identity applied to $count file(s)"
-[ -n "$OLD_OWNER" ] && [ "$OLD_OWNER" != "$PORG" ] \
-  && info "CODEOWNERS reassigned: @$OLD_OWNER -> @$PORG" \
-  || true
+if [ -n "$OLD_OWNER" ] && [ "$OLD_OWNER" != "$PORG" ]; then
+  info "CODEOWNERS reassigned: @$OLD_OWNER -> @$PORG"
+fi
 
 # ── 5. Reset the ledgers ─────────────────────────────────────────────────────
 # You inherit the platform's PROCESS, not its findings. Carrying the base repo's POA&M
