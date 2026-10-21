@@ -8,9 +8,9 @@
 # guards were found only by exercising them (POAM-002/003/004), including one
 # that blocked edits REMOVING a secret.
 #
-# These also run on pull requests in .github/workflows/pr-governance.yml, which
-# stays enabled. Running them here too covers the case that workflow cannot see:
-# a change that reaches main without a pull request.
+# In a fork that runs Actions these also run on pull requests in
+# .github/workflows/pr-governance.yml. In keel that workflow is retired (TheHub
+# #60849), so this job is the only run, after the merge.
 platform: linux
 
 image_resource:

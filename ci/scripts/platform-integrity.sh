@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Platform integrity. Refs: #42
 #
-# Ported from the pr-governance.yml job of the same name. That workflow stays
-# enabled and keeps running these on pull requests, where they are a required
-# check. This copy covers what a PR check cannot: a change that reaches main
-# without one.
+# Ported from the pr-governance.yml job of the same name. In keel that workflow
+# is retired (TheHub #60849, 2026-10-20) — Actions cannot start, and nothing
+# requires it — so this copy, after the merge, is the only run. A fork that runs
+# Actions gets both: pre-merge prevention there, post-merge detection here.
 set -euo pipefail
 
 cd repo

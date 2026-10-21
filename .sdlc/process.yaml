@@ -54,7 +54,7 @@ gates:
     doc: process/gates/g3-code-complete.md
     checklist:
       - id: dod
-        text: PR Definition of Done complete, AI authorship declared (pr-governance.yml)
+        text: PR Definition of Done complete, AI authorship declared (reviewer-checked; pr-governance.yml retired 2026-10-20, TheHub #60849)
   - id: G4
     name: Verified
     recommends: QA Engineer + Security Engineer (+ AI Risk Officer if AI-relevant)
@@ -83,10 +83,13 @@ backlog:
 
 delivery:
   summary: >-
-    Issue -> branch <type>/<issue>-<slug> -> PR to main with the required
-    pr-governance check -> human merge. Concourse ci/pipeline.yml runs after merge
-    (it cannot see PR branches, POAM-014); authorize-release is started by a human.
-  steps: [issue, branch, pr, pr-governance, human-merge, concourse, authorize-release]
+    Issue -> branch <type>/<issue>-<slug> -> PR to main -> one approving review
+    -> human merge. Concourse ci/pipeline.yml runs after merge and posts the
+    `Concourse / keel` check run on the main commit (it cannot see PR branches,
+    POAM-014). That check is the merge gate once TheHub #60580 lands; no status
+    check is required today and pr-governance is retired (TheHub #60849).
+    authorize-release is started by a human.
+  steps: [issue, branch, pr, review, human-merge, concourse, authorize-release]
 
 automation_policy:
   - id: P1
