@@ -1,5 +1,11 @@
 #!/usr/bin/env bash
 # AI assurance — evals, guardrails, or agent regression. Refs: #42
+#
+# `evals` and `guardrails` are TEMPLATE ONLY (TheHub #60850, 2026-10-20). keel
+# has no AI feature, so its pipeline has no ai-evals or ai-guardrails job. Both
+# stages used to echo ADAPT lines and exit 0; they now FAIL until a fork that
+# ships an AI feature replaces them with its harness. `agent-assurance` is real
+# and runs in keel.
 set -euo pipefail
 
 : "${STAGE:?STAGE is required (evals|guardrails|agent-assurance)}"
@@ -47,6 +53,12 @@ EOF
       echo "unset key must FAIL this job rather than skip it — a green eval job"
       echo "that never called a model is the worst outcome available here."
     fi
+    echo
+    echo "ERROR: STAGE=evals is a TEMPLATE stage and has not been adapted." >&2
+    echo "keel's own pipeline does not run it (TheHub #60850): it used to echo" >&2
+    echo "ADAPT lines and exit 0, which is a green job that verified nothing." >&2
+    echo "Replace this branch with the real eval harness before wiring the job." >&2
+    exit 1
     ;;
 
   guardrails)
@@ -66,6 +78,12 @@ EOF
     echo "  - tool-call authz against the USER's rights, server-side"
     echo "  - rate and cost limits"
     echo "  - fallback when the model is unavailable or a guardrail trips"
+    echo
+    echo "ERROR: STAGE=guardrails is a TEMPLATE stage and has not been adapted." >&2
+    echo "keel's own pipeline does not run it (TheHub #60850): it used to echo" >&2
+    echo "ADAPT lines and exit 0, which is a green job that verified nothing." >&2
+    echo "Replace this branch with the real guardrail test suite before wiring the job." >&2
+    exit 1
     ;;
 
   agent-assurance)

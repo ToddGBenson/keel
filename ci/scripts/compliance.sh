@@ -4,6 +4,12 @@
 # Scheduled rather than event-driven, because the risk changes while your code
 # does not. A clean scan at build time says nothing about a CVE published
 # yesterday.
+#
+# `daily`, `weekly` and `metrics` are TEMPLATE ONLY (TheHub #60850, 2026-10-20).
+# Every line in them was an ADAPT echo, and keel's pipeline ran them anyway —
+# green every day as CA-7 evidence of checks that were never made. keel's
+# pipeline no longer has those jobs, and the bundles now FAIL until a fork
+# replaces them. `monthly` runs real checks and stays in keel's pipeline.
 set -euo pipefail
 
 : "${PERIOD:?PERIOD is required (daily|weekly|monthly|metrics)}"
@@ -62,6 +68,12 @@ case "${PERIOD}" in
     echo "Escalate past-due Critical/High to a human immediately — do not wait"
     echo "for the weekly review. An aging chart that only goes up is the clearest"
     echo "early signal of a team that has stopped being able to absorb its own risk."
+    echo
+    echo "ERROR: PERIOD=daily is a TEMPLATE bundle and has not been adapted." >&2
+    echo "keel's own pipeline does not run it (TheHub #60850): it used to echo" >&2
+    echo "ADAPT lines and exit 0, which read as monitoring that never happened." >&2
+    echo "Replace this branch with the real checks before wiring the job." >&2
+    exit 1
     ;;
 
   weekly)
@@ -82,6 +94,12 @@ case "${PERIOD}" in
     echo "  2. entries extended MORE THAN ONCE (a resourcing or will problem, not"
     echo "     a schedule problem — name it as one)"
     echo "  3. entries closed without evidence of remediation"
+    echo
+    echo "ERROR: PERIOD=weekly is a TEMPLATE bundle and has not been adapted." >&2
+    echo "keel's own pipeline does not run it (TheHub #60850): it used to echo" >&2
+    echo "ADAPT lines and exit 0, which read as monitoring that never happened." >&2
+    echo "Replace this branch with the real checks before wiring the job." >&2
+    exit 1
     ;;
 
   monthly)
@@ -148,6 +166,12 @@ case "${PERIOD}" in
     echo "NEVER collect velocity, story points, or per-person commit counts. They"
     echo "are trivially gamed, and measuring them corrupts the estimates the whole"
     echo "process depends on within one sprint."
+    echo
+    echo "ERROR: PERIOD=metrics is a TEMPLATE bundle and has not been adapted." >&2
+    echo "keel's own pipeline does not run it (TheHub #60850): it used to echo" >&2
+    echo "ADAPT lines and exit 0, which read as monitoring that never happened." >&2
+    echo "Replace this branch with the real checks before wiring the job." >&2
+    exit 1
     ;;
 
   *)

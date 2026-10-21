@@ -13,8 +13,10 @@
 name: AI Evaluation
 
 # ── DISABLED 2026-08-13 — ported to Concourse. Refs: #42 ──────────────────────
-# Now the `ai-evals`, `ai-guardrails` and `agent-assurance` jobs in
-# ci/pipeline.yml.
+# Was the `ai-evals`, `ai-guardrails` and `agent-assurance` jobs in
+# ci/pipeline.yml. Only `agent-assurance` is still there: keel has no AI feature,
+# and the other two were ADAPT stubs that exited 0, removed under TheHub #60850.
+# Their stages remain in ci/scripts/ai.sh as template (ci/README.md).
 #
 # SCOPE CHANGED, in the safe direction: the path filters below are gone, because
 # Concourse git resources do not filter by path in a way that composes with the

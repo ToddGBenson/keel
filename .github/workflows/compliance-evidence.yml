@@ -7,8 +7,10 @@
 name: Compliance & Continuous Monitoring
 
 # ── DISABLED 2026-08-13 — ported to Concourse. Refs: #42 ──────────────────────
-# Now the `compliance-daily`, `compliance-weekly`, `compliance-monthly` and
-# `metrics-snapshot` jobs in ci/pipeline.yml.
+# Was the `compliance-daily`, `compliance-weekly`, `compliance-monthly` and
+# `metrics-snapshot` jobs in ci/pipeline.yml. Only `compliance-monthly` is still
+# there; the other three were ADAPT stubs that exited 0, removed under TheHub
+# #60850. Their bundles remain in ci/scripts/compliance.sh as template.
 #
 # CADENCE CHANGED: Concourse's bundled `time` resource has no day-of-month, so
 # the monthly bundle fires weekly and executes on the first Monday. A run that is

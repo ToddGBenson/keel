@@ -1,7 +1,8 @@
 # CI stage — build, lint, test, or full-suite. Refs: #42
 #
 # One task, four stages, because all four are the same shape: check out, run the
-# toolchain, emit evidence. The STAGE param selects which.
+# toolchain, emit evidence. The STAGE param selects which. keel's pipeline runs
+# build, lint and test; full-suite is template for forks (TheHub #60850).
 platform: linux
 
 image_resource:
@@ -22,7 +23,6 @@ outputs:
 
 params:
   STAGE: ""
-  COVERAGE_THRESHOLD: "80"
 
 run:
   path: bash
