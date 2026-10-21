@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# CI stage — build, lint, test, or full-suite. Refs: #42
+# CI stage — build, lint, test, or full-suite. Refs: #42, TheHub #60850
 #
 # ── THESE WERE STUBS UNTIL 2026-08-13 ────────────────────────────────────────
 # All four stages echoed "ADAPT: ..." and exited 0, mirroring three GitHub
@@ -10,6 +10,10 @@
 # What is language-specific here is still yours to replace. What is now real:
 # a shellcheck pass over 3,785 lines of shell, syntax checks for every language,
 # the pipeline's own structural validation, and the actual test suites.
+#
+# `full-suite` is TEMPLATE ONLY (TheHub #60850, 2026-10-20). keel's pipeline has
+# no full-suite job, because keel has no slow suite; the stage is kept for a fork
+# that does, and it FAILS until adapted rather than echoing and exiting 0.
 #
 # Runs locally exactly as CI runs it:
 #   mkdir -p /tmp/wk && cd /tmp/wk && ln -s ~/src/keel repo
@@ -147,22 +151,30 @@ PY
       echo "alongside the workflow that is the only consumer of that module."
     fi
 
-    # ADAPT: unit and integration tests for application code, with coverage
-    # >= ${COVERAGE_THRESHOLD:-80}% and no drop against main. There is no
-    # application code in this repository yet.
+    # ADAPT (forks): unit and integration tests for application code, with a
+    # coverage floor (80% is a sensible start) AND no drop against main — a drop
+    # fails even above the floor, or a large untested change passes by diluting
+    # an already-high number. Add the threshold param to ci/tasks/ci-stage.yml in
+    # the same change as the gate that reads it.
     #
     # MUST include the negative-case test for every control the threat model
     # allocated — the test proving the control DENIES is the security evidence.
-    echo "── coverage ───────────────────────────────────────────────────────────"
-    echo "ADAPT: assert coverage >= ${COVERAGE_THRESHOLD:-80}% and no drop vs main."
-    echo "A coverage DROP fails even when above the threshold — otherwise a large"
-    echo "untested change passes by diluting an already-high number."
+    #
+    # keel has no application code, so it has no coverage step. There used to be
+    # one that echoed "ADAPT: assert coverage >= 80%" and measured nothing, with
+    # COVERAGE_THRESHOLD="80" set on the job (TheHub #60850). An unmeasured
+    # threshold reads as a control; its absence does not.
     ;;
 
   full-suite)
-    echo "ADAPT: every test, including the slow ones."
-    echo "ADAPT: E2E — critical journeys only. Few. Slow, brittle, and"
-    echo "irreplaceable for proving the whole thing hangs together."
+    # TEMPLATE: every test, including the slow ones, and E2E for critical
+    # journeys only. Few. Slow, brittle, and irreplaceable for proving the whole
+    # thing hangs together.
+    echo "ERROR: STAGE=full-suite is a TEMPLATE stage and has not been adapted." >&2
+    echo "keel's own pipeline does not run it (TheHub #60850): it used to echo" >&2
+    echo "ADAPT lines and exit 0, which is a green job that verified nothing." >&2
+    echo "Replace this branch with the real slow suite before wiring the job." >&2
+    exit 1
     ;;
 
   *)

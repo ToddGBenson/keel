@@ -55,6 +55,33 @@ Three consequences that change how this pipeline reads:
 - **Inert lanes are inherited, not dead.** `container-scan`, `build-and-attest` and
   `verify-artifact` do nothing here on purpose. They are what a fork gets on the day it first
   ships an image. Deleting them because the template has no image would be deleting the point.
+- **A stub is not an inert lane.** An inert lane runs real tooling and says loudly that it
+  found nothing to act on. A stub echoes `ADAPT: ...` and exits 0: a green build that asserts
+  nothing. Six of those ran in keel's own pipeline until 2026-10-20 and were removed (TheHub
+  #60850). Their stages stay in the scripts as template. See
+  [Template lanes keel does not run](#template-lanes-keel-does-not-run).
+
+### Template lanes keel does not run
+
+keel ships these stages to forks (`ci/` is `merge_required` in `platform/MANIFEST.yml`). keel
+does not run them, because it has nothing for them to check:
+
+| Stage | Script | What a fork replaces it with |
+|---|---|---|
+| `STAGE=full-suite` | `ci/scripts/ci-stage.sh` | the slow suite and E2E for critical journeys, as a job `passed:` the fast lanes |
+| coverage, in `STAGE=test` | `ci/scripts/ci-stage.sh` | a real coverage gate: a floor plus no drop vs `main`, with the threshold param added in the same change |
+| `STAGE=evals`, `STAGE=guardrails` | `ci/scripts/ai.sh` | the eval harness and guardrail suite for an AI feature, with `((anthropic_api_key))` |
+| `PERIOD=daily`, `weekly`, `metrics` | `ci/scripts/compliance.sh` | deployed-artifact rescans, drift against an IaC baseline, the retro metrics snapshot |
+
+Each one now **fails** until it is adapted. Before 2026-10-20 each echoed its ADAPT lines and
+exited 0, and keel's pipeline ran all of them: `full-suite` sat in the commit chain, so a green
+`Concourse / keel` passed through a job that tested nothing, and the `test` job carried
+`COVERAGE_THRESHOLD: "80"` that nothing measured. To bring one into a fork's pipeline, add a job
+that runs the stage (the deleted job definitions are in this file's git history at
+`git show d5db77b:ci/pipeline.yml`), and replace the stage before the first run.
+
+MyKronos did not count any of the six as coverage. Its `ci.py` maps only keel's
+`mykronos-*` jobs, and the other jobs report `unknown` there.
 
 ## Where things run
 
@@ -63,14 +90,14 @@ Everything is in `ci/pipeline.yml`. There is no second system.
 | Concern | Job | Trigger |
 |---|---|---|
 | Pipeline updates itself from `main` | `set-pipeline` | per commit |
-| Build, lint, test, full suite | `build` `lint` `test` `full-suite` | per commit + daily |
+| Build, lint, test | `build` `lint` `test` | per commit + daily |
 | **SAST — CodeQL, python + js, GATES on findings** | `sast` | per commit + daily |
 | Secrets, SCA, IaC, suppressions | `secrets` `sca` `iac` `suppression-audit` | per commit + daily |
 | Container scan | `container-scan` | manual (inert until an image exists; zero builds as of 2026-10-11, see `lane-audit-2026-10-11.md`) |
 | Platform / control integrity | `platform-integrity` | per commit + daily |
 | Mykronos ingestion | `mykronos-*` | per commit + weekly — running since 2026-09-08 |
-| AI evals, guardrails, agent assurance | `ai-*` `agent-assurance` | per commit / weekly |
-| Compliance monitoring, metrics | `compliance-*` `metrics-snapshot` | daily / weekly |
+| Agent assurance (structural evals, tool-grant drift) | `agent-assurance` | weekly |
+| Monthly compliance bundle (tool-grant audit, guard self-test, agent evals) | `compliance-monthly` | weekly, executes days 1-7 |
 | SBOM, sign, verify | `build-and-attest` `verify-artifact` | per commit |
 | **Release G5** | `release-preflight` → `authorize-release` (`passed:` edge) | **manual only** |
 
@@ -212,8 +239,8 @@ the first real release.
 Concourse's verdict on a `main` commit now shows on that commit in GitHub, as one
 check run named **`Concourse / keel`**. `build` reports it in progress before it
 builds. `verify-artifact` reports success as its last step, because it is the end
-of the only chain in this pipeline (`build`/`lint`/`test` → `full-suite` →
-`build-and-attest` → `verify-artifact`). Every job in that chain reports failure
+of the only chain in this pipeline (`build`/`lint`/`test`/`sast`/`secrets`/`sca`/`iac`
+→ `build-and-attest` → `verify-artifact`). Every job in that chain reports failure
 from `on_failure:` and `on_error:`.
 
 Concourse does not call GitHub for this. `ci/scripts/check-run.sh` posts the job's
@@ -224,9 +251,14 @@ check run per commit. That is the pattern MyKronos D-136 built for TheHub, reuse
 here under TheHub #60580. It does not reopen the archived-resource-type question
 above: there is no new resource type, and no GitHub credential in the pipeline.
 
-The scanning lanes (`sast`, `secrets`, `sca`, `iac`, `suppression-audit`) are not
-part of this verdict. Nothing in the chain waits on them, so wiring their
-failures in would make the check's colour depend on which job finished last.
+The scanning lanes `sast`, `secrets`, `sca` and `iac` are part of this verdict
+since TheHub #60850. `build-and-attest` gathers them: its `passed:` names all
+seven verifying lanes, so `verify-artifact` reports success only for a commit
+that passed every one. A scanner can only report failure, so the colour no
+longer depends on which job finished last (the objection MyKronos D-151
+recorded). The cost is time: the verdict now waits on `sca` and the serial
+CodeQL `sast`, which took 12-22 minutes on push builds in October 2026.
+`suppression-audit`, `platform-integrity` and the MyKronos lanes stay out.
 
 **The trade, stated plainly: this check lands on `main` commits only, and that is
 why it is not required.** Verification runs after the merge (POAM-014). `repo`
@@ -318,8 +350,11 @@ in the credential manager instead:
 
 ```
 github_token · webhook_token · mykronos_ingestion_token
-anthropic_api_key · registry_user · registry_password
+registry_user · registry_password
 ```
+
+`anthropic_api_key` is needed only by a fork that wires the `ai-evals` template
+lane. keel's own pipeline no longer references it.
 
 With Vault at the default paths, `((foo))` resolves from
 `/concourse/<team>/<pipeline>/foo`, then `/concourse/<team>/foo`.

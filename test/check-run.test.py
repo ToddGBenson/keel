@@ -31,7 +31,10 @@ ROOT = Path(__file__).resolve().parent.parent
 PIPELINE = ROOT / "ci" / "pipeline.yml"
 SCRIPT = ROOT / "ci" / "scripts" / "check-run.sh"
 TASK_FILE = "repo/ci/tasks/check-run.yml"
-CHAIN = ["build", "lint", "test", "full-suite", "build-and-attest", "verify-artifact"]
+# build-and-attest gathers every verifying lane (TheHub #60850): the scanners are
+# in the verdict, and full-suite (an ADAPT stub) is gone from it.
+CHAIN = ["build", "lint", "test", "sast", "secrets", "sca", "iac",
+         "build-and-attest", "verify-artifact"]
 FIRST, LAST = "build", "verify-artifact"
 SHA = "0123456789abcdef0123456789abcdef01234567"
 failures = []
@@ -110,7 +113,8 @@ def pipeline_checks():
             check(f"{name} is outside the verdict and does not report", not reporters(job))
 
     every = reporters(doc["jobs"])
-    check("6 jobs x 2 hooks, one start, one success", len(every) == 14, len(every))
+    expected = len(CHAIN) * 2 + 2
+    check(f"{len(CHAIN)} jobs x 2 hooks, one start, one success", len(every) == expected, len(every))
     for step in every:
         p = step.get("params") or {}
         ok = (step.get("file") == TASK_FILE and "attempts" not in step and step.get("timeout")

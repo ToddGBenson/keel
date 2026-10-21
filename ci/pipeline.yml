@@ -65,17 +65,32 @@ mykronos_upload_params: &mykronos_upload_params
 # The commit chain is what it reports on, because it is the one path in this file
 # whose end means "every step before it passed on this commit":
 #
-#   build ┐
-#   lint  ├→ full-suite → build-and-attest → verify-artifact
-#   test  ┘
+#   build   ┐
+#   lint    │
+#   test    │
+#   sast    ├→ build-and-attest → verify-artifact
+#   secrets │
+#   sca     │
+#   iac     ┘
 #
 # `build` reports the start. `verify-artifact` reports success as its LAST step.
 # Every job in the chain reports failure from `on_failure:` and `on_error:`, so a
 # red lane is a red check and not a check left in progress.
 #
-# NOT in the verdict: `sast`, `secrets`, `sca`, `iac` and `suppression-audit` run
-# on the same commit but nothing in the chain waits on them. Wiring their failure
-# hooks would make the check's colour depend on which job finished last.
+# THE SCANNERS ARE IN THE VERDICT since TheHub #60850 (2026-10-20). Until then
+# the chain ran through `full-suite`, an `echo "ADAPT: ..."` stub that exited 0,
+# so build-and-attest waited on build/lint/test and on nothing that scanned.
+# `build-and-attest` is now the gather: its `passed:` names every verifying lane,
+# so `verify-artifact` can only report success for a version that passed all of
+# them. That answers the objection D-151 recorded against wiring the scanners
+# in ("the colour would depend on which job finished last"): a scanner can only
+# report failure, and success needs every one of them green on the same commit.
+# The cost is latency: the verdict now waits on `sca` and the serial CodeQL
+# `sast`, which took 12-22 minutes on push builds in October 2026.
+#
+# Still NOT in the verdict: `suppression-audit` and `platform-integrity` (they
+# audit the repository's process, not the commit's code), and the Mykronos
+# ingestion lanes (they report; they do not decide).
 #
 # MAIN COMMITS ONLY. `repo` tracks main, and verification runs after the merge
 # (POAM-014), so a pull request never carries this check. Requiring it on `main`
@@ -193,7 +208,7 @@ resources:
   #   03:00  build, lint, test                 the commit chain, cheap
   #   04:00  sast, secrets
   #   05:00  sca, iac
-  #   06:00  suppression-audit, platform-integrity, compliance-daily
+  #   06:00  suppression-audit, platform-integrity
 
   - name: daily-0300
     type: time
@@ -257,16 +272,17 @@ groups:
   # What happens to a commit, end to end. This is the only group with `passed:`
   # arrows running all the way through, so it is the one that draws a line.
   #   set-pipeline
-  #   build ┐
-  #   lint  ├→ full-suite → build-and-attest → verify-artifact
-  #   test  ┘
+  #   build, lint, test, sast, secrets, sca, iac → build-and-attest → verify-artifact
   - name: commit
     jobs:
       - set-pipeline
       - build
       - lint
       - test
-      - full-suite
+      - sast
+      - secrets
+      - sca
+      - iac
       - build-and-attest
       - verify-artifact
 
@@ -283,14 +299,11 @@ groups:
     jobs:
       - platform-integrity
       - suppression-audit
-      - compliance-daily
-      - compliance-weekly
       - compliance-monthly
-      - metrics-snapshot
 
   # The agents are a system that can regress.
   - name: ai
-    jobs: [ai-evals, ai-guardrails, agent-assurance]
+    jobs: [agent-assurance]
 
   # Ingestion to the system of record. RUNNING since 2026-09-08. Grouped
   # separately so the lane is obvious rather than a grey box in the middle of
@@ -318,12 +331,8 @@ groups:
   # subject-based tabs is how a silent cadence stays silent.
   - name: scheduled
     jobs:
-      - ai-guardrails
       - agent-assurance
-      - compliance-daily
-      - compliance-weekly
       - compliance-monthly
-      - metrics-snapshot
 
   - name: all
     jobs: ["*"]
@@ -502,38 +511,21 @@ jobs:
         trigger: true
       - get: daily-0300
         trigger: true
+      # No COVERAGE_THRESHOLD (TheHub #60850). It was "80" and nothing measured
+      # against it: the coverage step echoed "ADAPT: assert coverage >= 80%" and
+      # exited 0. keel has no application code to cover. A fork that has some
+      # adds a real coverage gate and its threshold together, in one change.
       - task: test
         file: repo/ci/tasks/ci-stage.yml
-        params:
-          STAGE: test
-          # A floor, not a target — coverage measures reach, not quality.
-          COVERAGE_THRESHOLD: "80"
+        params: { STAGE: test }
 
-  # The deep, slow checks that would blow the 10-minute budget. `passed:` is the
-  # Concourse equivalent of the original's "only on push to main" condition —
-  # this resource only ever tracks main, so gating on the fast jobs is what makes
-  # this a post-merge suite rather than a parallel one.
-  - name: full-suite
-    public: true
-    on_failure:
-      task: check-run
-      file: repo/ci/tasks/check-run.yml
-      # Three attempts of 45s plus two 5s delays is 145s; 5m is twice that.
-      timeout: 5m
-      params: { <<: *check_run_params, JOB: full-suite, PHASE: end, CONCLUSION: failure }
-    on_error:
-      task: check-run
-      file: repo/ci/tasks/check-run.yml
-      # Three attempts of 45s plus two 5s delays is 145s; 5m is twice that.
-      timeout: 5m
-      params: { <<: *check_run_params, JOB: full-suite, PHASE: end, CONCLUSION: failure }
-    plan:
-      - get: repo
-        passed: [build, lint, test]
-        trigger: true
-      - task: full-suite
-        file: repo/ci/tasks/ci-stage.yml
-        params: { STAGE: full-suite }
+  # ── NO `full-suite` JOB (TheHub #60850, 2026-10-20) ──────────────────────────
+  # It ran `STAGE=full-suite`, which echoed "ADAPT: every test, including the
+  # slow ones" and exited 0, and it sat in the middle of the commit chain, so a
+  # green `Concourse / keel` passed through a job that verified nothing. keel has
+  # no slow suite. The stage stays in ci/scripts/ci-stage.sh as TEMPLATE for a
+  # fork that has one, and it now fails until it is adapted. See ci/README.md,
+  # "Template lanes keel does not run".
 
   # ── Security ────────────────────────────────────────────────────────────────
   # Gate on NEW findings, not TOTAL. Gating on the absolute count in any real
@@ -562,6 +554,18 @@ jobs:
     # up during testing and none of them finished — they were not deadlocked,
     # just starving each other. A job this expensive must not run against itself.
     serial: true
+    on_failure:
+      task: check-run
+      file: repo/ci/tasks/check-run.yml
+      # Three attempts of 45s plus two 5s delays is 145s; 5m is twice that.
+      timeout: 5m
+      params: { <<: *check_run_params, JOB: sast, PHASE: end, CONCLUSION: failure }
+    on_error:
+      task: check-run
+      file: repo/ci/tasks/check-run.yml
+      # Three attempts of 45s plus two 5s delays is 145s; 5m is twice that.
+      timeout: 5m
+      params: { <<: *check_run_params, JOB: sast, PHASE: end, CONCLUSION: failure }
     plan:
       - get: repo
         trigger: true
@@ -598,6 +602,18 @@ jobs:
   # is the difference between it and the ingestion lane below.
   - name: secrets
     public: true
+    on_failure:
+      task: check-run
+      file: repo/ci/tasks/check-run.yml
+      # Three attempts of 45s plus two 5s delays is 145s; 5m is twice that.
+      timeout: 5m
+      params: { <<: *check_run_params, JOB: secrets, PHASE: end, CONCLUSION: failure }
+    on_error:
+      task: check-run
+      file: repo/ci/tasks/check-run.yml
+      # Three attempts of 45s plus two 5s delays is 145s; 5m is twice that.
+      timeout: 5m
+      params: { <<: *check_run_params, JOB: secrets, PHASE: end, CONCLUSION: failure }
     plan:
       - get: repo
         trigger: true
@@ -612,6 +628,18 @@ jobs:
 
   - name: sca
     public: true
+    on_failure:
+      task: check-run
+      file: repo/ci/tasks/check-run.yml
+      # Three attempts of 45s plus two 5s delays is 145s; 5m is twice that.
+      timeout: 5m
+      params: { <<: *check_run_params, JOB: sca, PHASE: end, CONCLUSION: failure }
+    on_error:
+      task: check-run
+      file: repo/ci/tasks/check-run.yml
+      # Three attempts of 45s plus two 5s delays is 145s; 5m is twice that.
+      timeout: 5m
+      params: { <<: *check_run_params, JOB: sca, PHASE: end, CONCLUSION: failure }
     plan:
       - get: repo
         trigger: true
@@ -650,6 +678,18 @@ jobs:
   # fabricated attribution on every push-triggered run.
   - name: iac
     public: true
+    on_failure:
+      task: check-run
+      file: repo/ci/tasks/check-run.yml
+      # Three attempts of 45s plus two 5s delays is 145s; 5m is twice that.
+      timeout: 5m
+      params: { <<: *check_run_params, JOB: iac, PHASE: end, CONCLUSION: failure }
+    on_error:
+      task: check-run
+      file: repo/ci/tasks/check-run.yml
+      # Three attempts of 45s plus two 5s delays is 145s; 5m is twice that.
+      timeout: 5m
+      params: { <<: *check_run_params, JOB: iac, PHASE: end, CONCLUSION: failure }
     plan:
       - get: repo
         trigger: true
@@ -912,28 +952,13 @@ jobs:
   # catches the failure mode unique to hosted models: the provider updates the
   # model, behavior changes, and there is no diff on your side to notice.
 
-  - name: ai-evals
-    public: true
-    plan:
-      - get: repo
-        trigger: true
-      - get: weekly
-        trigger: true
-      - task: evals
-        file: repo/ci/tasks/ai.yml
-        params:
-          STAGE: evals
-          ANTHROPIC_API_KEY: ((anthropic_api_key))
-
-  - name: ai-guardrails
-    public: true
-    plan:
-      - get: repo
-      - get: weekly
-        trigger: true
-      - task: guardrails
-        file: repo/ci/tasks/ai.yml
-        params: { STAGE: guardrails }
+  # NO `ai-evals` OR `ai-guardrails` (TheHub #60850, 2026-10-20). keel has no
+  # AI feature to evaluate: both stages echoed "ADAPT: run your eval harness" /
+  # "ADAPT: run the guardrail test suite" and exited 0, every week, as green
+  # evidence of AI assurance that did not happen. The stages stay in
+  # ci/scripts/ai.sh as TEMPLATE for a fork that ships an AI feature, and fail
+  # until adapted. `agent-assurance` is real (it runs the agent evals and the
+  # tool-grant drift check) and stays.
 
   - name: agent-assurance
     public: true
@@ -950,29 +975,14 @@ jobs:
   # does not. A clean scan at build time says nothing about a CVE published
   # yesterday.
 
-  - name: compliance-daily
-    public: true
-    plan:
-      - get: repo
-      - get: daily-0600
-        trigger: true
-      - task: compliance
-        file: repo/ci/tasks/compliance.yml
-        params:
-          PERIOD: daily
-          REPO_SLUG: ((github_owner))/((github_repo))
-
-  - name: compliance-weekly
-    public: true
-    plan:
-      - get: repo
-      - get: weekly
-        trigger: true
-      - task: compliance
-        file: repo/ci/tasks/compliance.yml
-        params:
-          PERIOD: weekly
-          REPO_SLUG: ((github_owner))/((github_repo))
+  # NO `compliance-daily`, `compliance-weekly` OR `metrics-snapshot` (TheHub
+  # #60850, 2026-10-20). Each was an `echo "ADAPT: ..."` that exited 0: a daily
+  # "deployed artifact rescan" of a template with no deployment, a weekly drift
+  # check against an IaC baseline that does not exist, a metrics snapshot that
+  # wrote nothing. Green builds every day, read as CA-7 monitoring. The periods
+  # stay in ci/scripts/compliance.sh as TEMPLATE, and fail until adapted.
+  # `compliance-monthly` stays: it runs the tool-grant audit, the guard self-test
+  # and the agent evals for real.
 
   # Fires weekly, executes on the first Monday of the month. See the cadence note
   # in ci/scripts/compliance.sh — a run that is not due says so loudly rather
@@ -987,18 +997,6 @@ jobs:
         file: repo/ci/tasks/compliance.yml
         params:
           PERIOD: monthly
-          REPO_SLUG: ((github_owner))/((github_repo))
-
-  - name: metrics-snapshot
-    public: true
-    plan:
-      - get: repo
-      - get: weekly
-        trigger: true
-      - task: metrics
-        file: repo/ci/tasks/compliance.yml
-        params:
-          PERIOD: metrics
           REPO_SLUG: ((github_owner))/((github_repo))
 
   # ── Supply chain ────────────────────────────────────────────────────────────
@@ -1022,9 +1020,13 @@ jobs:
       timeout: 5m
       params: { <<: *check_run_params, JOB: build-and-attest, PHASE: end, CONCLUSION: failure }
     plan:
+      # The gather. Every verifying lane, on the same commit, before anything
+      # is signed: an attestation over a tree that failed SAST or SCA is a
+      # signature on a known-bad artifact. It used to be `passed: [full-suite]`,
+      # which reached build/lint/test through a stub and no scanner at all.
       - get: repo
         trigger: true
-        passed: [full-suite]
+        passed: [build, lint, test, sast, secrets, sca, iac]
       # The SBOM is generated HERE, in this job. It was previously taken as an
       # optional input, which could never arrive: syft runs in `mykronos-atlas`,
       # and Concourse does not pass task outputs between jobs. So the branch was
