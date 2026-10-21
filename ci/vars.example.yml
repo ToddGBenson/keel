@@ -60,7 +60,14 @@ mykronos_ingestion_url: https://mykronos.toddbenson.net
 # BUMPING THIS IS A REAL CHANGE. It moves every adapter for every lane at once,
 # so it belongs in its own commit with its own reason, never folded into an
 # unrelated one.
-mykronos_ref: f8d8cfd46bea39fe4fc38242c5b7e710edfb4d9c
+#
+# Moved to v15 (2dd4e44) on 2026-10-19 for the `mykronos-sca` lane, which
+# uploads grype SARIF as atlas. f8d8cfd predates the atlas/grype adapter
+# (mykronos #900), so every build failed with "No adapter for capability
+# 'atlas' with tool 'grype'" and nothing it found reached the lake. v15 is
+# the tag TheHub and mykronos already run, and it accepts every flag
+# mykronos-upload.sh passes.
+mykronos_ref: 2dd4e4465c21e4b6e8f2bf046c6ab565ba03b285
 
 # ── CodeQL ────────────────────────────────────────────────────────────────────
 # The bundle is what actually performs the SAST analysis, so it is verified
