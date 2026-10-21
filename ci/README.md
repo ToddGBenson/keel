@@ -10,31 +10,38 @@ approve anything. Gate approval stays a human act recorded in GitHub (PD-2).
 
 ## What runs where, after the port
 
-> ## ⚠️ READ THIS FIRST — Concourse is the pipeline; Actions gates the merge
+> ## ⚠️ READ THIS FIRST — the Concourse check run is the gate; PR Governance is retired
 >
-> **As of 2026-08-14** the repository is **public**, hosted Actions work, and `PR Governance`
-> is three **required status checks** on `main` with `enforce_admins` on.
+> **Read 2026-10-20.** The repository is **private**. GitHub Actions does not start, because of
+> billing. `PR Governance` (`.github/workflows/pr-governance.yml`) is `disabled_manually` and
+> **retired** (TheHub #60849, option C). Branch protection on `main` requires one approving
+> review, linear history and resolved conversations. It requires **no status checks**
+> (`required_status_checks: null`), and `enforce_admins` is **off**.
 >
-> **The division of labour is the point.** Concourse builds, tests, scans and records evidence
-> — everything below. It has no pull-request concept at all, so Actions does the one thing it
-> structurally cannot: read the pull request.
+> **The decision (2026-10-20): the merge gate is the Concourse check run, `Concourse / keel`.**
+> It becomes a **required** status check once TheHub #60580 lands. Concourse builds, tests and
+> scans each commit. `verify-artifact` posts the verdict to GitHub through MyKronos, and only
+> after every verifying lane has passed on that commit. See
+> [`Concourse / keel`](#concourse--keel-the-commit-chains-verdict-on-github-107) below.
 >
-> - **Process compliance** — reads the PR *body*: issue linkage, AI-authorship declaration, DoD
->   checklist, and the self-review artifact that is POAM-008's compensating control.
-> - **Platform integrity** — also a Concourse job. The duplication is deliberate: post-merge is
->   detection, pre-merge is prevention.
-> - **Dependency review** — a GitHub feature, not a tool, and it needs a public repo or Advanced
->   Security. It runs again now; grype and osv-scanner still cover the SCA function.
+> **What gates a merge today: a human review, and nothing automated.** The check run lands on
+> `main` commits only, so it cannot be required yet. A required context that never arrives on a
+> pull request head blocks every merge. Until #60580, Concourse detects a bad change after the
+> merge and does not prevent it. That is **POAM-014**, still open at High.
 >
-> **What still is not gated: the code.** Tests, SAST, secrets, SCA and IaC run in Concourse
-> *after* merge, because Concourse tracks `main` and cannot see a PR branch. **A green check
-> means the process was followed, not that the code works.** That is **POAM-014**, still open at
-> High; closing it needs Concourse to build PR branches.
+> **What retiring PR Governance gives up**, stated rather than implied. It read the PR *body*:
+> issue linkage, the AI-authorship declaration, the DoD checklist, and the self-review artifact
+> that is POAM-008's compensating control. It also ran dependency review. Nothing reads the PR
+> body now. Those checks are reviewer-enforced, and `platform-integrity` (a Concourse job)
+> still runs the non-PR half after merge.
 >
 > *History, because the sequence matters:* on 2026-08-13 the repository went private, Actions
 > stopped starting on billing, all ten workflows were disabled and every required check was
-> removed — nothing gated a merge at all. The gate was restored on a self-hosted runner (#58)
-> and that runner was retired the same day the repository went public (#63).
+> removed — nothing gated a merge at all. The gate was restored on a self-hosted runner (#58).
+> That runner was retired on 2026-08-14, the day the repository went public (#63), and
+> `PR Governance` ran on hosted runners as three required checks with `enforce_admins` on. The
+> repository later went private again. By 2026-10-11 the workflow was disabled and branch
+> protection required no checks (POAM-014). This box said otherwise until 2026-10-20.
 
 ## keel is a template, not a service
 
@@ -171,22 +178,32 @@ caught an SC2183 in a later commit.
   fixes arriving — a patch-currency risk traded for a supply-chain one. Promote to
   an error once Dependabot updates digests.
 
-### Why the pull-request half stayed on Actions
+### Why the pull-request half was on Actions, and why it is retired
 
 Concourse has no first-class pull-request trigger, and cannot report a commit
 status back to GitHub without a third-party resource type — the well-known
 options are archived. Taking an unmaintained dependency into the pipeline that
 enforces SR-3/SR-4 would be worse than leaving GitHub-shaped checks on GitHub.
+That reasoning kept `pr-governance.yml` on Actions after the port.
 
-`pr-governance.yml` additionally reads the PR *body* through the GitHub API.
-That data does not exist outside GitHub.
+Two things changed. Actions stopped starting on billing, so the workflow was
+disabled and its checks stopped being required. And Concourse found a way to
+report to GitHub without a resource type: it posts to MyKronos, and MyKronos
+posts the check run through its own GitHub App (#107, below). So on 2026-10-20
+the operator chose the Concourse check run as the gate and retired
+`PR Governance` (TheHub #60849, option C). The workflow file stays, with its
+triggers reduced to `workflow_dispatch`, which is the convention for every
+retired workflow here. `.github/workflows/` is `merge_required`, so a fork that
+does run Actions still receives it.
 
-Eleven required status checks protect `main`, and eight of them come from
-`ci.yml` and `security.yml`. The first cut of this port disabled both outright —
-which would have left no SAST, secret, SCA, IaC, coverage or suppression gate on
-any pull request at all. A High CVE would have merged cleanly and turned `main`
-red afterwards. Both keep their `pull_request:` trigger for that reason; they
-lost only `push` and `schedule`, which Concourse now owns.
+`pr-governance.yml` read the PR *body* through the GitHub API, and that data
+does not exist outside GitHub. No Concourse check replaces that part. It is
+reviewer-enforced now, and the box at the top of this file says so.
+
+This section used to say that eleven required status checks protect `main`,
+eight of them from `ci.yml` and `security.yml`. That stopped being true on
+2026-08-13. Both workflows are reduced to `workflow_dispatch`, and nothing is
+required.
 
 ### Why release authorization stayed on Actions
 
@@ -232,10 +249,11 @@ failures in would make the check's colour depend on which job finished last.
 why it is not required.** Verification runs after the merge (POAM-014). `repo`
 tracks `main`, and Concourse never sees a pull request's head. So:
 
-- **A pull request never carries `Concourse / keel`.** Requiring it on `main`
-  would make every pull request wait for a check that cannot arrive. With
+- **A pull request never carries `Concourse / keel` yet.** Requiring it on `main`
+  today would make every pull request wait for a check that cannot arrive. With
   `enforce_admins` off, the owner's merges would bypass it. Anyone else, and
-  Dependabot, could never merge at all.
+  Dependabot, could never merge at all. This is what TheHub #60580 has to change
+  before the requirement below is switched on.
 - **It does not prevent anything.** It turns a red `main` from "visible in
   Concourse, if you look" into "visible on the commit in GitHub". That is
   detection, not prevention, and POAM-014 stays open.
@@ -250,13 +268,17 @@ tracks `main`, and Concourse never sees a pull request's head. So:
   together, the chain takes the newer one, and the older commit's check stays
   `in_progress`.
 
-**Requiring it: not done, and the command is here for the owner's decision.**
+**Requiring it: decided, not yet applied (TheHub #60849, option C).** This is
+keel's merge gate. It is switched on when TheHub #60580 lands, by #60580 or by
+the owner. It is never switched on before then, for the reason in the first
+bullet above. Nothing in this repository changes branch protection.
 `required_status_checks` is off on `main` today, so the sub-resource `PATCH`
 returns `404 Required status checks not enabled`. Enabling it means a `PUT` of
 the whole protection, which restates every other setting exactly as read on
-2026-10-11. Re-read with `gh api repos/ToddGBenson/keel/branches/main/protection`
-first, and change the body if anything has moved. Pinning `app_id` means a status
-of the same name from anything else cannot satisfy it.
+2026-10-20 (unchanged since 2026-10-11). Re-read with
+`gh api repos/ToddGBenson/keel/branches/main/protection` first, and change the
+body if anything has moved. Pinning `app_id` means a status of the same name
+from anything else cannot satisfy it.
 
 ```sh
 gh api -X PUT repos/ToddGBenson/keel/branches/main/protection --input - <<'JSON'
@@ -344,17 +366,18 @@ GitHub webhook pointing at:
 ### 5. Branch protection — read it, do not assume it
 
 This section used to say eleven required status checks protect `main`. **Read on
-2026-10-11, none do:** `required_status_checks` is off, because Actions cannot run
-here and every required check was removed so that anything could merge
-(POAM-014). Reviews (one approval, `enforce_admins` off), linear history and
-conversation resolution are on.
+2026-10-11 and again on 2026-10-20, none do:** `required_status_checks` is off,
+because Actions cannot run here and every required check was removed so that
+anything could merge (POAM-014). Reviews (one approval, `enforce_admins` off),
+linear history and conversation resolution are on. `PR Governance` is
+`disabled_manually` and retired (TheHub #60849).
 
 ```sh
 gh api repos/ToddGBenson/keel/branches/main/protection   --jq '{checks: .required_status_checks, admins: .enforce_admins.enabled}'
 ```
 
-`Concourse / keel` is the check that could be required next, and the section
-above says why it is not, and gives the command.
+`Concourse / keel` is the check that will be required, once TheHub #60580 lands.
+The section above gives the command and says why it must not be applied sooner.
 
 ---
 

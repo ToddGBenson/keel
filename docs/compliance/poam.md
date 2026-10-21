@@ -283,6 +283,15 @@ configuration-only path.
 > and the three Mykronos workflows could be enabled for real — which revises the reasoning
 > recorded on PR #60, where `ubuntu-latest` being unable to start was the deciding argument.
 
+> **Re-read 2026-10-20 (TheHub #60849, option C), still open at High.** The re-scope below no
+> longer describes `main`. `PR Governance` is `disabled_manually` and is now **retired**. Branch
+> protection requires no status checks, and `enforce_admins` is off. So nothing automated stands
+> between a pull request and `main`. The only gate is one approving review. The operator chose
+> the Concourse check run `Concourse / keel` as the gate. It becomes required once TheHub #60580
+> lands, and this entry closes only when that check is required **and** arrives on a pull
+> request's head, not just on `main` commits. PR-body checks (issue link, AI declaration, DoD,
+> self-review artifact) are reviewer-enforced until then, with no mechanical backstop.
+
 > **Re-scoped 2026-08-14 (#58), not closed.** Option 3 below was taken: a self-hosted runner
 > now executes `PR Governance`, and its three jobs are required status checks on `main`. The
 > original weakness — "nothing stands between a pull request and `main`" — no longer holds.

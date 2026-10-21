@@ -7,13 +7,15 @@
 # human acts recorded in GitHub; this pipeline produces the EVIDENCE those gates
 # are approved against. It does not approve anything.
 #
-# ── WHAT IS DELIBERATELY NOT HERE ─────────────────────────────────────────────
-# `pr-governance.yml` stays on GitHub Actions and stays ENABLED. It reads the PR
-# body through the GitHub API and it is the required status check on `main`.
-# Concourse has no first-class pull-request trigger; every option for adding one
-# means depending on an archived third-party resource type, which is a
-# supply-chain regression this repository's own rules (SR-3, SR-4) would flag.
-# PR-time governance is better served where the data lives.
+# ── THE MERGE GATE (TheHub #60849, option C, 2026-10-20) ──────────────────────
+# The gate is this pipeline's `Concourse / keel` check run (see the
+# check_run_params anchor below). It becomes a required status check on `main`
+# once TheHub #60580 lands; until then it lands on main commits only and gates
+# nothing. `pr-governance.yml` is RETIRED: Actions cannot start (billing), the
+# workflow is disabled, and branch protection requires no checks. What it read
+# from the PR body (issue link, AI declaration, DoD, self-review) is
+# reviewer-enforced now. There is still no third-party resource type here:
+# the check run goes through MyKronos, not a PR resource. See ci/README.md.
 #
 # ── NO THIRD-PARTY RESOURCE TYPES ─────────────────────────────────────────────
 # Every resource below is one Concourse ships with (`git`, `time`,
@@ -892,10 +894,9 @@ jobs:
                   REPO_SLUG: ((github_owner))/((github_repo))
 
   # ── Platform integrity ──────────────────────────────────────────────────────
-  # The non-GitHub half of pr-governance.yml. Those checks remain required on
-  # PRs in Actions; running them here as well means a direct push to main, or a
-  # change that lands without a PR, still gets them. Per the control-assessment
-  # skill: TEST beats EXAMINE.
+  # The non-GitHub half of pr-governance.yml. That workflow is retired (TheHub
+  # #60849), so this is now the ONLY place these checks run, after the merge.
+  # Per the control-assessment skill: TEST beats EXAMINE.
 
   - name: platform-integrity
     public: true

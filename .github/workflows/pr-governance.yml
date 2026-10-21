@@ -6,6 +6,27 @@
 
 name: PR Governance
 
+# ── RETIRED IN KEEL 2026-10-20 (TheHub #60849, option C) ──────────────────────
+# Not a required check, and not running: the repository is private, Actions
+# does not start on billing, the workflow is `disabled_manually`, and branch
+# protection on `main` requires no status checks. Triggers are reduced to
+# `workflow_dispatch`, the convention for every retired workflow here, so
+# "cannot run" and "is not configured to run" say the same thing.
+#
+# keel's merge gate is the Concourse check run `Concourse / keel`, required once
+# TheHub #60580 lands (ci/README.md). What this workflow read from the PR body
+# (issue link, AI-authorship declaration, DoD, self-review artifact) is
+# reviewer-enforced in keel now; platform-integrity still runs in Concourse.
+#
+# KEPT, NOT DELETED: .github/workflows/ is merge_required (platform/MANIFEST.yml),
+# so this file is what a fork that runs Actions receives, and
+# scripts/selfreview-check.js and test/selfreview-check.test.js are platform-
+# owned code this workflow is the only consumer of. A fork restores PR-time
+# governance by restoring the `on:` block below and adding the three check names
+# to branch protection. Both, or it is decorative.
+#
+# Everything below this banner describes the 2026-08-14 state and is history.
+#
 # ── RESTORED 2026-08-14. Refs: #58, #63 ───────────────────────────────────────
 # Disabled 2026-08-13 because Actions could not start at all:
 #   "The job was not started because recent account payments have failed or your
@@ -40,8 +61,9 @@ name: PR Governance
 # the check name in branch protection. Any one of them missing and the gate is
 # decorative — which is exactly the state POAM-014 describes.
 on:
-  pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
+  # Retired 2026-10-20 (TheHub #60849). Was:
+  #   pull_request:
+  #     types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
 
 permissions:
