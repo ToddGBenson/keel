@@ -3,6 +3,8 @@
 # ADAPT: this lane is inert until you ship containers — it carried `if: false` in
 # the Actions version and has no trigger here. Left visible rather than deleted:
 # a job that is plainly not running beats one that silently does not exist.
+# Started with no IMAGE_REF, it FAILS (TheHub #60935): no image means nothing
+# was scanned, and that is not a pass.
 #
 # `--ignore-unfixed` is deliberate — gate on what you can actually act on.
 platform: linux
