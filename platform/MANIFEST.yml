@@ -32,6 +32,11 @@ platform_owned:
   # scripts/junit-suite.py's guarantee that a suite which never ran cannot
   # report as passing. .github/workflows/unit-results.yml depends on it.
   - test/junit-suite.test.py
+  # Regression guard for previously fixed guard-hook bypasses (TheHub #60818).
+  # The hooks are platform-owned, so the bypasses they were fixed against are
+  # too: a fork that receives a hook without the corpus can regress it silently.
+  - test/hook-bypass-corpus.test.py
+  - test/hook-bypass-corpus.yml
   - docs/00-overview.md
   - docs/01-roles.md
   - docs/02-intake-and-discovery.md

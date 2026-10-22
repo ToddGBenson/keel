@@ -135,6 +135,13 @@ PY
     # exercising them (POAM-002/003/004).
     bash .claude/hooks/selftest.sh
 
+    echo "── guard hook bypass corpus (TheHub #60818) ───────────────────────────"
+    # selftest.sh was green while the keel#93 bypasses worked. This replays every
+    # previously fixed bypass through the real hooks, in both parser modes, and
+    # fails if any is allowed again. Needs PyYAML, so install it here as lint does.
+    python -m pip install --quiet --disable-pip-version-check       --require-hashes -r ci/requirements.txt
+    python test/hook-bypass-corpus.test.py
+
     echo "── agent assurance (AIC-12 structural) ────────────────────────────────"
     bash evals/run-agent-evals.sh
 

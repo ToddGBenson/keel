@@ -163,6 +163,11 @@ jobs:
       - name: Guard hook self-test
         run: bash .claude/hooks/selftest.sh
 
+      # Regression guard for previously fixed hook bypasses (TheHub #60818):
+      # selftest.sh was green while the keel#93 bypasses worked.
+      - name: Guard hook bypass corpus
+        run: python test/hook-bypass-corpus.test.py
+
       # AIC-12 structural half. The behavioural half needs a live model and is run
       # by the operator monthly — not faked here.
       - name: Agent assurance (AIC-12 structural)
