@@ -79,6 +79,14 @@ PYEOF
   else
     warn "guard self-test FAILED — a control is misbehaving"; fail=1
   fi
+  # 3b. No previously fixed hook bypass works again (TheHub #60818)
+  if [ -f test/hook-bypass-corpus.test.py ]; then
+    if "$PY" test/hook-bypass-corpus.test.py >/dev/null 2>&1; then
+      ok "guard hooks (bypass corpus)"
+    else
+      warn "bypass corpus FAILED — run: $PY test/hook-bypass-corpus.test.py"; fail=1
+    fi
+  fi
 
   # 4. Platform's own unit tests (the dashboard generator has real logic worth testing)
   if [ -f test/dashboard.test.py ]; then
