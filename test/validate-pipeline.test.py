@@ -10,13 +10,14 @@ on its first-ever run (2026-10-11) with the file sitting on main the whole time.
 Each case writes a small script into a throwaway tree and runs the REAL
 `check_script_refs` over it, then the whole validator runs over the real repo:
 
-  * the pre-fix release.sh shape (no `cd repo`) is an error, per file it names;
+  * the pre-fix release.sh shape (no `cd repo`) is an error, per file it names
+    (release.sh itself was deleted 2026-10-22, TheHub #60935; the shape is kept);
   * the same script after `cd repo` is clean;
   * a file that is missing from the repo is an error even from inside repo/;
   * `( cd repo && ... )` covers its own line only -- a subshell's cd does not leak;
   * a `repo/`-prefixed path from the build root is fine;
   * comments, heredoc bodies and `$VAR` paths are not references;
-  * the real ci/scripts/release.sh is clean, and the real pipeline validates.
+  * every real ci/scripts/*.sh is clean, and the real pipeline validates.
 
 Needs PyYAML (ci/requirements.txt).
 
@@ -110,8 +111,13 @@ errs = refs("# python scripts/gone.py\n"
 check("comments, heredoc bodies, $VAR paths and -m modules are not references",
       errs == [], f"{errs}")
 
-errs = vp.check_script_refs(ROOT / "ci" / "scripts" / "release.sh", ROOT, {"repo"})
-check("the real ci/scripts/release.sh is clean", errs == [], f"{errs}")
+# release.sh, the script this check was written for, was deleted with the
+# Concourse release jobs (POAM-016, TheHub #60935). Every script that remains is
+# held to the same rule instead of none.
+real = sorted((ROOT / "ci" / "scripts").glob("*.sh"))
+errs = [e for f in real for e in vp.check_script_refs(f, ROOT, {"repo"})]
+check(f"every real ci/scripts/*.sh is clean ({len(real)} scripts)",
+      real and errs == [], f"{errs}")
 
 proc = subprocess.run([sys.executable, str(ROOT / "scripts" / "validate-pipeline.py")],
                       capture_output=True, text=True)

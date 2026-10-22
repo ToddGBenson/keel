@@ -81,6 +81,11 @@ request, Concourse owns main and everything scheduled.*
 
 ### D2 — Release authorization stays on GitHub Actions
 
+> **Reaffirmed 2026-10-22 (TheHub #60935, POAM-016).** ADR-0004 §D2 later put a release lane
+> back in Concourse, so two paths existed. This decision is the one kept. `release.yml` is the
+> only release path, and the Concourse jobs are deleted. POAM-010, marked "Closed by D2" in the
+> table below, was reopened on 2026-08-13 and is tracked in `docs/compliance/poam.md`.
+
 **Chosen.** `release.yml` remains the live G5 path. Concourse has no release lane.
 
 **Why.** The G5 gate is a `production` environment with required reviewers. The deploy job

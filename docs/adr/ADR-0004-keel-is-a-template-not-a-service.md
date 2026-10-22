@@ -43,6 +43,14 @@ template to be an application, which is the confusion this ADR removes.
 
 ### D2 — A release is a tag, and its blast radius is wider than a deploy
 
+> **Amended 2026-10-22 (TheHub #60935, POAM-016).** The release lane is no longer in Concourse.
+> This ADR and ADR-0003 §D2 named two different release paths. The one kept is
+> `.github/workflows/release.yml`. Its `preflight` runs the checks listed below, and its
+> `authorize-release` waits for a `production` environment reviewer. That reviewer is the
+> control ADR-0003 §D2 chose over a job with no trigger. `release-preflight` and
+> `authorize-release` are deleted from `ci/pipeline.yml`. The paragraph below is kept as
+> written.
+
 `deploy-staging` is removed rather than left as scaffolding around an absence. The release
 lane is `release-preflight` → `authorize-release`, and preflight now checks what actually
 matters: does the manifest govern everything, does the platform validate, does the pipeline

@@ -12,6 +12,11 @@ approve anything. Gate approval stays a human act recorded in GitHub (PD-2).
 
 > ## ⚠️ READ THIS FIRST — the Concourse check run is the gate; PR Governance is retired
 >
+> **Re-read 2026-10-22 (TheHub #60935).** The repository is **public** again, and Actions runs
+> on pull requests: `Unit results`, `Mykronos sast` and `Mykronos secrets` ran on #142's head.
+> **None is required.** Branch protection is otherwise as described below. The rest of this box
+> is the 2026-10-20 reading, kept as written.
+>
 > **Read 2026-10-20.** The repository is **private**. GitHub Actions does not start, because of
 > billing. `PR Governance` (`.github/workflows/pr-governance.yml`) is `disabled_manually` and
 > **retired** (TheHub #60849, option C). Branch protection on `main` requires one approving
@@ -58,7 +63,9 @@ Three consequences that change how this pipeline reads:
 - **A release is a tag, and its blast radius is wider than a deploy.** A bad service deploy
   affects one environment and rolls back in minutes. A bad platform release is fast-forwarded
   into every fork's platform-owned paths, overwriting local edits by design.
-  `authorize-release` still refuses to run without a recorded human.
+  **Release is not in this pipeline** (POAM-016, 2026-10-22). It runs in
+  `.github/workflows/release.yml`, where `authorize-release` waits for a `production`
+  reviewer and refuses to finish if no approval is recorded.
 - **Inert lanes are inherited, not dead.** `container-scan`, `build-and-attest` and
   `verify-artifact` do nothing here on purpose. They are what a fork gets on the day it first
   ships an image. Deleting them because the template has no image would be deleting the point.
@@ -100,21 +107,25 @@ Everything is in `ci/pipeline.yml`. There is no second system.
 | Build, lint, test | `build` `lint` `test` | per commit + daily |
 | **SAST — CodeQL, python + js, GATES on findings** | `sast` | per commit + daily |
 | Secrets, SCA, IaC, suppressions | `secrets` `sca` `iac` `suppression-audit` | per commit + daily |
-| Container scan | `container-scan` | manual (inert until an image exists; zero builds as of 2026-10-11, see `lane-audit-2026-10-11.md`) |
+| Container scan | `container-scan` | manual (inert until an image exists; **fails with no `IMAGE_REF`** since 2026-10-22, see `lane-audit-2026-10-11.md`) |
 | Platform / control integrity | `platform-integrity` | per commit + daily |
 | Mykronos ingestion | `mykronos-*` | per commit + weekly — running since 2026-09-08 |
 | Agent assurance (structural evals, tool-grant drift) | `agent-assurance` | weekly |
 | Monthly compliance bundle (tool-grant audit, guard self-test, agent evals) | `compliance-monthly` | weekly, executes days 1-7 |
 | SBOM, sign, verify | `build-and-attest` `verify-artifact` | per commit |
-| **Release G5** | `release-preflight` → `authorize-release` (`passed:` edge) | **manual only** |
+| **Release G5** | none here. `.github/workflows/release.yml`: `preflight` → `authorize-release` (`production` environment) | dispatched by hand against a tag |
 
 `sast` **gates** — it is the only thing in the system that blocks anything, and it blocks a
 build rather than a merge. It fails on CodeQL security findings at severity ≥ medium; quality
 findings do not gate, or `security-and-quality` becomes a style gate and the lane gets
 switched off within a week.
 
-`authorize-production` has no trigger and refuses to run when Concourse records no triggering
-human. That is the entire G5 control now — see POAM-006/010.
+`sca` and `container-scan` **fail when there is nothing to scan** (no dependency manifest, no
+`IMAGE_REF`), as `iac` does. Decided 2026-10-22, TheHub #60935.
+
+G5 is not a Concourse job. It is the `production` environment in `release.yml`: a required
+reviewer approves, and `authorize-release` refuses a run with no recorded approval. See
+POAM-010/016.
 
 ### Trying a pipeline change on a branch
 
@@ -159,7 +170,7 @@ the pipeline has been reverted to an HTTPS config — see the trap above.
 | **Detect** | Is `main` still clean, against today's advisories, by a route prevention missed? | daily / weekly |
 | **Ingest** | What are the findings for this exact commit, in the system of record? | per commit |
 | **Assure** | Are the agents themselves still constrained? | weekly |
-| **Authorize** | Did a named human approve the release? | manual, `authorize-production` |
+| **Authorize** | Did a named human approve the release? | `release.yml` `authorize-release`, `production` environment reviewer |
 
 The original split was by *engine* — Actions gates the PR, Concourse owns main — and the
 measurable result was duplication: CodeQL ran twice per language per change, gitleaks three
@@ -233,6 +244,12 @@ eight of them from `ci.yml` and `security.yml`. That stopped being true on
 required.
 
 ### Why release authorization stayed on Actions
+
+> **2026-10-22 (TheHub #60935, POAM-016).** Release *orchestration* also left Concourse.
+> `release-preflight` and `authorize-release` were deleted. Their checks run in `release.yml`'s
+> `preflight`, so there is one release path, not two. `release.yml` no longer has staging or
+> deploy jobs: keel has no artifact to verify or deploy (ADR-0004), so the cosign consequence
+> below applies to a fork that ships one.
 
 The G5 gate is a `production` environment with required reviewers: the deploy job
 physically cannot start until a named human approves, and that record — identity,
