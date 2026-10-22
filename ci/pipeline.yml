@@ -323,11 +323,6 @@ groups:
   - name: mykronos
     jobs: [mykronos-sast, mykronos-secrets, mykronos-sca, mykronos-atlas]
 
-  # G5. A chain, and the only path a human starts by hand.
-  #   release-preflight → deploy-staging → authorize-production
-  - name: release
-    jobs: [release-preflight, authorize-release]
-
   # What runs when nobody pushes. Worth its own view: after an outage or a
   # holiday, this is the list you check, and hunting for it across five
   # subject-based tabs is how a silent cadence stays silent.
@@ -716,6 +711,11 @@ jobs:
   # ADAPT: enable when you ship containers. Left with no trigger rather than
   # deleted — the original carried `if: false` for the same reason, and a job
   # that is visibly not running beats one that silently does not exist.
+  #
+  # Started by hand with no IMAGE_REF it goes RED, by decision (TheHub #60935,
+  # the rule `iac` and `sca` follow): a scan of nothing is not a pass. It stays
+  # out of the `commit` chain and has no trigger, so that red never reaches
+  # `Concourse / keel`; it only stops the lane reading green while unused.
   - name: container-scan
     public: true
     plan:
@@ -1082,47 +1082,15 @@ jobs:
         timeout: 5m
         params: { <<: *check_run_params, JOB: verify-artifact, PHASE: end, CONCLUSION: success }
 
-  # ── Release (G5) — A TEMPLATE RELEASE, NOT A DEPLOY ─────────────────────────
+  # ── Release (G5) is NOT in this pipeline (POAM-016, TheHub #60935) ───────────
   #
-  # keel ships no artifact and has no production environment. Its release is a
-  # TAGGED VERSION that forks pull via scripts/sync-platform.sh, so "deploy to
-  # staging" had nothing to deploy and `deploy-staging` is gone rather than left
-  # as scaffolding around an absence.
+  # `release-preflight` and `authorize-release` were deleted on 2026-10-22. The
+  # one release path is .github/workflows/release.yml: the same preflight
+  # checks, then a job in the `production` environment that cannot start until
+  # a required reviewer approves, and refuses if no approval is recorded.
   #
-  # The blast radius is not smaller than a service deploy — it is wider and
-  # slower. A bad service deploy affects one environment and is rolled back in
-  # minutes; a bad platform release is fast-forwarded into every fork's
-  # platform-owned paths, overwriting their local edits by design, and each fork
-  # discovers it independently.
-  #
-  # So G5 still means a named human authorises, and `authorize-release` still
-  # refuses to run without one.
-
-  # MANUAL BY DESIGN, like authorize-release below (#60013). It has no trigger on
-  # purpose: G5 is a human act, and the `passed: [release-preflight]` edge on
-  # authorize-release is what forces preflight to run first. A job with zero builds
-  # here means nobody has released yet, not that the job is dead.
-  - name: release-preflight
-    public: true
-    plan:
-      - get: repo
-      - task: preflight
-        file: repo/ci/tasks/release.yml
-        params:
-          STAGE: preflight
-          COSIGN_VERSION: ((cosign_version))
-          COSIGN_SHA256: ((cosign_sha256))
-
-  - name: authorize-release
-    public: true
-    serial: true
-    # No trigger anywhere in this plan. A human presses it, and Concourse records
-    # who — see ci/scripts/release.sh for exactly how weak that is, and POAM-010.
-    plan:
-      - get: repo
-        passed: [release-preflight]
-      - task: authorize
-        file: repo/ci/tasks/release.yml
-        params:
-          STAGE: release
-          CONCOURSE_URL: ((concourse_external_url))
+  # A job here could only ever be authorised by pressing it. Triggering and
+  # approving were one act, nothing required the approver to differ from the
+  # author, and anyone on the team could press it (POAM-010). That is weaker
+  # than the environment gate, and keeping both was two release paths that
+  # disagreed about what a release is.

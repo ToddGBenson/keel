@@ -70,7 +70,7 @@ gates:
     doc: process/gates/g5-release.md
     checklist:
       - id: authorize
-        text: authorize-release run by a human (the job has no trigger)
+        text: release.yml dispatched against the tag; authorize-release approved by a production environment reviewer
 
 backlog:
   # keel's work items are GitHub issues (docs/15-tracking.md), read by MyKronos
@@ -88,7 +88,8 @@ delivery:
     `Concourse / keel` check run on the main commit (it cannot see PR branches,
     POAM-014). That check is the merge gate once TheHub #60580 lands; no status
     check is required today and pr-governance is retired (TheHub #60849).
-    authorize-release is started by a human.
+    Release is release.yml, dispatched against a tag; its authorize-release job
+    waits for a production environment reviewer (POAM-016, TheHub #60935).
   steps: [issue, branch, pr, review, human-merge, concourse, authorize-release]
 
 automation_policy:

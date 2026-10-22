@@ -1,231 +1,181 @@
-# Release — G5. The human authorization gate, expressed as a technical control.
-# Controls: CM-3, CM-4, CM-5, SI-7, SR-4(3), CP-10, AU-2, AC-5
+# Release — G5. THE ONE RELEASE PATH. Refs: #42, TheHub #60935
+# Controls: CM-3, CM-4, CM-5, SA-10, AU-2, AC-5
 #
-# ── THE GATE IS THE ENVIRONMENT, NOT THE DOCUMENT ─────────────────────────────
-# The `production` environment must be configured in repo settings with REQUIRED REVIEWERS.
-# The deploy job then physically cannot start until a human approves in the GitHub UI, and
-# that approval is recorded with identity and timestamp. THAT record is the CM-3 evidence.
+# ── ONE PATH (POAM-016, closed 2026-10-22) ────────────────────────────────────
+# Until 2026-10-22 there were two release paths and they disagreed:
 #
-# Without the environment protection rule configured, this workflow is documentation.
-# Configure it: Settings → Environments → production → Required reviewers.
+#   * this workflow, which ADR-0003 §D2 named "the live G5 path", described a
+#     staging deploy and a production deploy to a PRODUCTION_URL. ADR-0004 says
+#     keel has no artifact and no production environment, so every one of those
+#     steps was an `echo "ADAPT: ..."` that would have exited 0;
+#   * Concourse `release-preflight` → `authorize-release`, which ADR-0004 §D2
+#     named the release lane. Its preflight ran real checks. Its authorisation
+#     was a job with no trigger: pressing it WAS approving it, nothing required
+#     the approver to differ from the author, and it had never run (POAM-010).
 #
-# Agents never deploy. The pipeline identity deploys. A hand deployment has no attestation,
-# no verification, and no audit trail.
+# This file is now the only one. It keeps what was true in each: the Concourse
+# preflight's checks (same three validators, same order) and this workflow's
+# authorisation, which is a technical control rather than a button. The
+# Concourse jobs, ci/tasks/release.yml and ci/scripts/release.sh are deleted.
+#
+# ── WHAT A KEEL RELEASE IS ───────────────────────────────────────────────────
+# A tag. keel ships no artifact (ADR-0004). Forks take a tagged version through
+# scripts/sync-platform.sh, which fast-forwards platform-owned paths over their
+# local edits by design. So a bad release reaches every fork, and the
+# authorisation matters more here than it would for one deploy, not less.
+#
+# A fork that DOES deploy a service adds its staging and production jobs after
+# `authorize-release` (`needs: authorize-release`), deploying by digest. See
+# docs/07-release-and-change.md. The template does not ship them as `echo`
+# stubs: a step that prints ADAPT and exits 0 is a green build that asserts
+# nothing (ci/README.md, "A stub is not an inert lane").
+#
+# ── THE GATE IS THE ENVIRONMENT ──────────────────────────────────────────────
+# `authorize-release` runs in the `production` environment. Its required
+# reviewers mean the job cannot start until a named human approves in the
+# GitHub UI. The environment keeps its old name so the protection rule it
+# already carries is not recreated.
+#
+# The environment must ALSO allow tags. Release runs against a tag (below), and
+# an environment limited to protected branches refuses every tag ref. As
+# measured 2026-10-22 keel's `production` was `protected_branches: true`, so
+# no tag could ever have reached the gate. scripts/configure-github.sh now
+# sets a custom policy: `main` and tags matching `v*`.
+#
+# Run it: Actions → Release → Run workflow → choose the TAG as the ref.
 
 name: Release
 
-# ── THIS IS THE LIVE G5 PATH. Refs: #42 ──────────────────────────────────────
-#
-# CI/CD moved to Concourse (ci/pipeline.yml); release authorization deliberately
-# did NOT. It was ported, the weakening was measured, and it was moved back.
-#
-# Concourse cannot reproduce what the `production` environment below does. Its
-# nearest equivalent is a job with no trigger, which means: no approval workflow
-# (triggering and approving become one action), no requirement that the approver
-# differ from the author, and team-level rather than per-job authorization.
-# Accepting that would have reopened POAM-006 and put a High finding on the one
-# control the entire lifecycle terminates in.
-#
-# So G5 stays here, where required reviewers make the gate a technical control
-# rather than a documented intention. The cost is that release orchestration
-# lives apart from the rest of CI. That is the cheaper half of the trade.
-#
-# ⚠️  ONE THING CHANGED — the artifact is now built by CONCOURSE, not by this
-# workflow. `cosign verify` in preflight must match Concourse's signing identity,
-# not `token.actions.githubusercontent.com`, and `gh attestation verify` will not
-# work at all, because nothing here was built by Actions (POAM-011). Adapt the
-# verify steps below before the first real release: a verification that passes
-# against the wrong identity is worse than none.
-#
-# ── DISPATCH AGAINST THE TAG YOU ARE RELEASING ───────────────────────────────
-# `version` used to be a free-text input. It is now `github.ref_name`, the ref
-# this workflow was dispatched against.
-#
-# checkov CKV_GHA_7 (#79) asks that the build output not be affected by user
-# parameters "other than the build entry point and the top-level source
-# location". The ref IS the top-level source location, so taking the version
-# from it is what the rule asks for rather than an exemption from it -- and
-# a version that cannot disagree with the code it names is worth more than
-# the rule anyway. `v1.4.0` typed into a box while dispatching from `main`
-# produced a deployment record for a release that was never cut.
-#
-# `change_record` stays an input. It is a pointer to a document a human wrote
-# and there is nothing in the ref to derive it from. It is still handled as
-# data, never as program text -- see the note on the preflight step below.
 on:
   workflow_dispatch:
-    inputs:
-      # checkov:skip=CKV_GHA_7: accepted risk (Mykronos e3d09b6c, expires 2027-03-27, #99) - change_record is evidence metadata handled as data, and this workflow builds nothing
-      #
-      # The skip is scoped to this one input and carries its own expiry. The
-      # platform stops seeing the finding once checkov skips it, so the
-      # acceptance's end date will NOT reopen it on its own: whoever touches
-      # this after 2027-03-27 re-decides it, or deletes this line.
-      change_record:
-        description: 'Path or URL to the G5 change record'
-        required: true
-        type: string
 
 permissions:
   contents: read
 
 jobs:
   preflight:
-    name: Preflight — G5 evidence check
+    name: Preflight — is this version fit to release?
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-
       - name: The ref must be a tag
-        # Now that the version comes from the ref, dispatching from a branch
-        # would write `evidence/releases/main/deployment-record.md` and call it
-        # a release. First step in preflight, before anything else is checked.
+        # First, before anything else is checked. The version comes from the
+        # ref, so dispatching from a branch would authorise "main" as a release.
+        # checkov CKV_GHA_7 (#79): no free-text input reaches this workflow at
+        # all now. The change record path is derived from the tag too.
+        # The ref reaches the shell through `env:`, never `${{ }}` inside `run:`:
+        # a ref name may contain `$(`, and an expression is pasted into the
+        # script before bash parses it.
         if: github.ref_type != 'tag'
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
         run: |
-          echo "::error::Dispatched against ${{ github.ref_type }} '${{ github.ref_name }}'."
+          echo "::error::Dispatched against $REF_TYPE '$REF_NAME'."
           echo "::error::Release runs against the TAG being released. Re-dispatch with"
           echo "::error::the tag selected as the ref."
           exit 1
 
-      - name: Verify the change record exists and is complete
-        # Through `env:`, never `${{ }}` inside `run:`. GitHub substitutes an
-        # expression into the script BEFORE bash parses it, so a free-text
-        # workflow_dispatch input becomes part of the program this job runs.
-        # This job is `preflight`: it has no `environment:`, so it executes the
-        # moment the workflow is dispatched -- ahead of the G5 human gate -- and
-        # it holds `id-token: write`. An env var is passed as data and is never
-        # parsed as a program.
-        env:
-          CHANGE_RECORD: ${{ inputs.change_record }}
-        run: |
-          echo "ADAPT: assert the change record at $CHANGE_RECORD exists and"
-          echo "contains all 13 required sections (docs/07-release-and-change.md)."
-
-      - name: Verify every included item cleared G4
-        run: |
-          echo "ADAPT: for each issue in scope, assert evidence/<issue>/g4/ contains"
-          echo "independent QA, security, and (if AI-relevant) AI pass records."
-          echo ""
-          echo "Anything without G4 clearance is REMOVED from the release, not waived."
-          echo "Scope shrinks; gates do not. This is the item most often pressured, and"
-          echo "holding it is what makes every upstream gate mean something."
-
-      - name: Verify no open Critical or High findings in scope
-        run: |
-          echo "ADAPT: query the finding register and POA&M."
-          echo "Open Critical or High in scope is a hard block, overridable only by a"
-          echo "documented, time-boxed, human-approved risk acceptance with a POA&M entry."
-
-      - name: Verify rollback was rehearsed
-        run: |
-          echo "ADAPT: assert a rollback rehearsal record exists for this artifact."
-          echo "An untested rollback plan is a hypothesis; this gate asks for a fact."
-
-      - name: Install cosign
-        uses: sigstore/cosign-installer@7e8b541eb2e61bf99390e1afd4be13a184e9ebc5 # v3.10.1
-
-      - name: Verify artifact signature and provenance — HARD BLOCK
-        run: |
-          echo "ADAPT: cosign verify + gh attestation verify."
-          echo "Failure here stops the release. A signature nobody verifies is decoration,"
-          echo "and this is the place the verification has to actually happen (SR-4(3), SI-7)."
-
-  staging:
-    name: Deploy to staging
-    needs: preflight
-    runs-on: ubuntu-latest
-    environment:
-      name: staging
-    permissions:
-      contents: read
-      id-token: write   # OIDC federation — no long-lived cloud keys (IA-5)
-    steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - name: Deploy the SAME artifact
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.12'
+
+      - name: The delivery contract — every path governed, every shipped path present
         run: |
-          echo "ADAPT: deploy by DIGEST, not by tag. Never rebuild — the artifact tested"
-          echo "here must be byte-identical to the one that reaches production."
+          python -m pip install --quiet --disable-pip-version-check \
+            --require-hashes -r ci/requirements.txt
+          python scripts/validate-manifest.py
 
-      - name: DAST (SA-11(8))
-        run: |
-          echo "ADAPT: dynamic scan against staging"
+      - name: The platform's own integrity
+        run: python scripts/validate-platform.py
 
-      - name: E2E + performance vs. NFR
-        run: |
-          echo "ADAPT: critical journeys; assert the stated NFR thresholds"
+      - name: The pipeline forks inherit
+        run: python scripts/validate-pipeline.py
 
-      - name: Configuration drift check (CM-2, CM-6)
-        run: |
-          echo "ADAPT: diff running configuration against the baseline"
-
-      - name: Rollback rehearsal (CP-10)
-        run: |
-          echo "ADAPT: actually roll back, verify, then roll forward."
-          echo "Include the data path. Record the window — that number goes in the"
-          echo "change record and the approver needs it."
-
-  authorize-and-deploy:
-    name: G5 — Production (HUMAN AUTHORIZATION REQUIRED)
-    needs: staging
-    runs-on: ubuntu-latest
-    # ── This is the gate. Required reviewers on this environment mean the job blocks
-    #    until a human approves in the GitHub UI. The approval record — identity and
-    #    timestamp — is the CM-3 change-approval evidence.
-    environment:
-      name: production
-      url: ${{ vars.PRODUCTION_URL }}
-    permissions:
-      contents: read
-      id-token: write
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-
-      - name: Record the authorization
-        # Same rule as preflight: inputs reach the shell as data, not as
-        # program text. `github.actor` is left interpolated deliberately --
-        # GitHub constrains it to a login, so it cannot carry a quote.
+      - name: The change record exists and has all 13 sections
+        # docs/07-release-and-change.md: stored at
+        # evidence/releases/<version>/change-record.md, committed BEFORE the tag,
+        # so the record the approver reads is the one in the tagged tree.
+        # Sections 4 (G4 clearance per item) and 5 (open findings, accepted
+        # risks) are what the approver reads to decide; this step checks they
+        # are there, not that they are right. That judgment is the gate.
         env:
           VERSION: ${{ github.ref_name }}
-          CHANGE_RECORD: ${{ inputs.change_record }}
         run: |
+          record="evidence/releases/${VERSION}/change-record.md"
+          if [ ! -s "$record" ]; then
+            echo "::error::No change record at $record in the tagged tree."
+            exit 1
+          fi
+          missing=0
+          for section in "Identifier" "Change class" "Impact analysis" "Gate evidence" \
+                         "Security posture" "AI assurance" "Test evidence" "Supply chain" \
+                         "Deployment plan" "Rollback plan" "Verification plan" \
+                         "Communication" "Authorization"; do
+            if ! grep -qiE "^#+ .*${section}" "$record"; then
+              echo "::error::$record has no '${section}' section heading."
+              missing=1
+            fi
+          done
+          [ "$missing" -eq 0 ] || exit 1
+          echo "change record: $record, 13 of 13 sections present"
+
+  authorize-release:
+    name: G5 — authorize the release (HUMAN APPROVAL REQUIRED)
+    needs: preflight
+    runs-on: ubuntu-latest
+    # ── This is the gate. The job blocks until a required reviewer of the
+    #    `production` environment approves. No `url:` — there is no service.
+    environment:
+      name: production
+    permissions:
+      contents: read
+      actions: read   # to read this run's environment approvals, below
+    steps:
+      - name: Record the approval — and refuse if there is none
+        # The environment holding the job is necessary and not sufficient: on
+        # 2026-08-13 a visibility change DELETED the `production` reviewer rule
+        # and nothing failed. With no rule, this job just starts. So it reads
+        # the approval GitHub recorded for THIS run and refuses without one.
+        # An admin bypass also leaves no approval, and is refused for the same
+        # reason: an authorisation with no approver is not one.
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ github.ref_name }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          DISPATCHED_BY: ${{ github.actor }}
+          TRIGGERED_BY: ${{ github.triggering_actor }}
+        run: |
+          approvals="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/approvals")"
+          approver="$(printf '%s' "$approvals" | jq -r \
+            '[.[] | select(.state == "approved")
+                  | select(any(.environments[]; .name == "production"))
+                  | .user.login] | first // empty')"
+          if [ -z "$approver" ]; then
+            echo "::error::No approval of the 'production' environment is recorded for this run."
+            echo "::error::Either the environment lost its required reviewers, or the gate was"
+            echo "::error::bypassed. Restore the rule (scripts/configure-github.sh) and re-run."
+            exit 1
+          fi
           {
-            echo "### G5 authorization"
+            echo "### G5 authorization — platform release"
             echo ""
             echo "| | |"
             echo "|---|---|"
-            echo "| Version | $VERSION |"
-            echo "| Change record | $CHANGE_RECORD |"
-            echo "| Authorized by | ${{ github.actor }} (environment approval) |"
-            echo "| Run | ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }} |"
+            echo "| Version | \`$VERSION\` |"
+            echo "| Commit | \`$GITHUB_SHA\` |"
+            echo "| Change record | \`evidence/releases/$VERSION/change-record.md\` |"
+            echo "| Dispatched by | $DISPATCHED_BY (triggering actor: $TRIGGERED_BY) |"
+            echo "| **Approved by** | **$approver** (environment \`production\`) |"
+            echo "| Approved at | $(date -u +%Y-%m-%dT%H:%M:%SZ) (job start, after approval) |"
+            echo "| Run | $RUN_URL |"
           } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Verify signature again, immediately before deploy
-        run: |
-          echo "ADAPT: re-verify. Time passed between preflight and authorization;"
-          echo "verify what you are about to run, not what you checked an hour ago."
-
-      - name: Progressive deploy — canary
-        run: |
-          echo "ADAPT: deploy to a small traffic slice."
-          echo "Watch error rate, latency, saturation against defined thresholds for a"
-          echo "defined bake time, then expand."
-          echo ""
-          echo "Automated rollback on threshold breach — no human decision in the loop,"
-          echo "because the human decision arrives ten minutes late every time."
-
-      - name: Post-deploy verification
-        run: |
-          echo "ADAPT: smoke tests, health checks, error rate vs. pre-deploy baseline"
-
-      - name: Write the deployment record
-        env:
-          VERSION: ${{ github.ref_name }}
-        run: |
-          echo "ADAPT: write evidence/releases/$VERSION/deployment-record.md"
-          echo "Then schedule the 24-hour check: did the success metric from the ORIGINAL"
-          echo "idea record actually move? That step closes the loop nearly everyone skips,"
-          echo "and it is why backlogs fill with features nobody uses."
+          if [ "$approver" = "$DISPATCHED_BY" ]; then
+            # Solo operation (POAM-008): the one reviewer is also the one who
+            # dispatches. Recorded, not refused, so the record says it plainly.
+            echo "::warning::Approver and dispatcher are the same identity ($approver). AC-5 is not met for this release; see POAM-008."
+          fi
+          echo "authorized: $VERSION by $approver"

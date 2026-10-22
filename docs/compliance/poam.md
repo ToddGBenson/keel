@@ -57,15 +57,15 @@ review*; POAM-005 and POAM-006 closed later the same day when the repository was
 | POAM-007 | Verification routine in `configure-github.sh` reported 5 false failures | CA-2 | Medium | *unassigned* | 2026-08-07 | **Closed** — fixed + re-verified |
 | POAM-008 | **Solo operation — AC-5 separation of duties cannot be satisfied** | AC-5, CM-5 | **High** | Todd Benson | on 2nd team member | Open — accepted with compensating controls |
 | POAM-009 | Commit signing not registered with GitHub — SI-7/CM-14 unsatisfied | SI-7, CM-14 | Medium | Todd Benson | 2026-08-08 | **Closed** — key registered; GitHub verifies commits; required_signatures enabled |
-| POAM-010 | **G5 release authorization weakened by the move to Concourse** — the GitHub-side dependency is restored, but the release path in use is Concourse, whose `authorize-release` **has never executed** | CM-3, AC-5 | **High** | Todd Benson | 2026-09-12 | Open — **not closed by POAM-006's closure**; see the 2026-08-14 note |
+| POAM-010 | **G5 release authorization weakened by the move to Concourse** — the GitHub-side dependency is restored, but the release path in use is Concourse, whose `authorize-release` **has never executed** | CM-3, AC-5 | **High** | Todd Benson | ~~2026-09-12~~ **2026-11-21** (extended once, 2026-10-22) | In progress — the Concourse job is **deleted**; G5 is `release.yml` `authorize-release` on the `production` environment, which refuses a run with no recorded approval. **Not closed: that job has never run either**, and the environment refused tags until the 2026-10-22 policy change. See the 2026-10-22 note |
 | POAM-011 | No provenance for what forks receive — cosign sign/attest are stubs (re-scoped 2026-08-14: the subject is the platform release, not an artifact) | SR-4(3), CM-14 | Medium | Todd Benson | 2026-11-11 | Open |
 | POAM-012 | CodeQL SARIF from Concourse does not reach GitHub code scanning | SA-11(1) | Low | Todd Benson | 2026-08-13 | **Closed** — the lane that discarded SARIF was deleted; SAST on main now ingests both languages to Mykronos |
 | POAM-013 | Monthly monitoring cadence approximated by a weekly trigger | CA-7 | Low | Todd Benson | 2026-11-11 | Open — accepted, detection is loud |
-| POAM-014 | **The merge gate verifies process, not code.** Tests and scans run in Concourse *after* merge (re-scoped 2026-08-14 from "no merge gate exists") | CM-3, CM-5, AC-5, SA-11 | **High** | Todd Benson | 2026-09-14 | Open — process gate restored and enforced; code verification still post-merge |
+| POAM-014 | **The merge gate verifies process, not code.** Tests and scans run in Concourse *after* merge (re-scoped 2026-08-14 from "no merge gate exists") | CM-3, CM-5, AC-5, SA-11 | **High** | Todd Benson | ~~2026-09-14~~ **2026-11-21** (extended once, 2026-10-22) | Open — measured 2026-10-22: `Concourse / keel` lands on `main` commits only and no check is required. PR heads do run `Unit results`, `Mykronos sast` and `Mykronos secrets` on Actions, none required. Closes when the check arrives on PR heads and is required (TheHub #60580) |
 | POAM-015 | Manifest coverage was checked per top-level directory, so six platform docs were never delivered to forks | CM-2, SA-10 | Medium | Todd Benson | 2026-08-14 | **Closed** — check now per file; six docs classified; both directions proven (#58) |
 | POAM-018 | **14 controls were marked satisfied on gates that have never run.** Five of six gates have produced zero evidence records; keel runs a one-gate lifecycle while documenting a six-gate one | SA-3, CA-2, CM-3, AC-3, AU-2, CP-10 +8 | **High** | Todd Benson | 2026-11-15 | Open — claims downgraded and measured; the gates remain unexercised |
 | POAM-017 | **Separation of duties is now agent-enforced, not human-enforced.** `delivery-lead` approves every gate; the control is a prompt boundary and a tool grant rather than a second person | AC-5, CM-5, SA-3 | **High** | Todd Benson | 2026-11-15 | Open — accepted by the system owner (ADR-0005) |
-| POAM-016 | **Two release paths that disagree.** `release.yml` still has `staging` and `authorize-and-deploy` jobs with a `PRODUCTION_URL`, describing a service deploy ADR-0004 says does not exist; Concourse has `release-preflight` → `authorize-release` | CM-3, CM-4, SA-10 | Medium | Todd Benson | 2026-09-14 | Open — found while closing POAM-005/006 (#61) |
+| POAM-016 | **Two release paths that disagree.** `release.yml` still has `staging` and `authorize-and-deploy` jobs with a `PRODUCTION_URL`, describing a service deploy ADR-0004 says does not exist; Concourse has `release-preflight` → `authorize-release` | CM-3, CM-4, SA-10 | Medium | Todd Benson | 2026-09-14 | **Closed 2026-10-22** (TheHub #60935, 38 days late) — one path, `release.yml`: Concourse release jobs, task and script deleted; staging/deploy stubs and `PRODUCTION_URL` removed. Evidence: `evidence/143/` |
 
 ### POAM-018 — Controls marked satisfied on gates that have never run ⚠️ HIGH
 
@@ -187,6 +187,69 @@ approvals by `compliance-officer` against the evidence actually cited. None is i
 POAM-008. They compound: POAM-008's compensating control is a self-review artifact that
 `delivery-lead` now checks — so one agent-enforced control is verified by another.
 
+### 2026-10-22 — the three overdue entries, re-measured (TheHub #60935)
+
+POAM-010, POAM-014 and POAM-016 were 38 to 40 days past due. Each was measured against the live
+system, not against this register. Record: `evidence/143/g3/self-review.md`.
+
+| Measured 2026-10-22 | Value |
+|---|---|
+| Repository visibility | **public** (`ci/README.md` still read "private" from 2026-10-20) |
+| `production` environment | `required_reviewers` (`ToddGBenson`, `prevent_self_review: false`) + `branch_policy` **`protected_branches: true`**; `can_admins_bypass: true` |
+| `release.yml` runs, ever | one, `31770313398`, dispatched from `main` on 2026-08-14 and **still `queued`** |
+| Concourse `release-preflight` | 2 builds (2026-10-11: #1 failed, #2 succeeded) |
+| Concourse `authorize-release` | **0 builds** |
+| `container-scan` | 1 build (2026-10-11), **succeeded while scanning nothing** |
+| `main` branch protection | 1 review, no required status checks, `enforce_admins` off |
+| PR-head workflows that ran on #142 | `Unit results`, `Mykronos sast`, `Mykronos secrets`: success, **none required** |
+
+**POAM-016 closes.** One release path: `.github/workflows/release.yml`. It keeps the Concourse
+preflight's three validators, adds a check that the tagged tree carries a 13-section change
+record, and authorises in the `production` environment. Deleted: Concourse `release-preflight`
+and `authorize-release`, the `release` group, `ci/tasks/release.yml`, `ci/scripts/release.sh`,
+and `release.yml`'s `staging` and `authorize-and-deploy` jobs, every step of which was an
+`echo "ADAPT"`. GitHub was chosen over Concourse for the reason ADR-0003 §D2 gives: an
+environment reviewer is a control and a job with no trigger is a button. The free-text
+`change_record` input went too, so the CKV_GHA_7 suppression (#99) is gone with the finding it
+suppressed. checkov `github_actions` over `.github/workflows/` after the change: 676 passed, 0
+failed, 0 skipped.
+
+**POAM-010 does not close, and the measurement says why.** The weak control is gone: the
+Concourse job is deleted, not kept as a second way in. But the replacement has never run, and it
+**could not have**. `release.yml` refuses any ref that is not a tag, and the `production`
+environment admitted protected branches only, so a release dispatched correctly would have
+been refused by the environment before the gate. Both halves were "configured" and together
+they were unusable. Two more gaps the entry did not name:
+
+- **An authorisation with no approval record now fails.** `authorize-release` reads this run's
+  environment approvals and exits 1 if none is `approved` for `production`. That catches the
+  2026-08-13 failure, when going private deleted the reviewer rule and nothing noticed, and it
+  catches an admin bypass (`can_admins_bypass: true`).
+- **Forks do not consume tags.** `scripts/sync-platform.sh` fetches `upstream/main` with
+  `--no-tags`. So what G5 authorises (a tag) is not what forks receive (`main`). Until the sync
+  follows authorised tags, a merge to `main` is the real release, and POAM-014's gate is the
+  control that actually protects forks.
+
+*Re-dated to 2026-11-21 (first extension). Milestones:* (1) this change merges; (2) the operator
+applies the tag policy (`scripts/configure-github.sh` §3) and cancels the stale run `31770313398`;
+(3) the first release, dispatched against a `v*` tag, is observed **waiting** for approval and
+its summary records the approver (closure evidence); (4) a decision on whether
+`sync-platform.sh` follows the latest authorised tag rather than `main`. Closing needs (3).
+(4) is recorded here so it is not lost. It can be scoped out with a reason.
+
+**POAM-014 does not close.** The brief for #60935 asked to confirm that the Concourse check
+runs the full gather on pull request heads. **It does not.** `repo` tracks `main`, so
+`Concourse / keel` reports on `main` commits only, after the merge (#141 says so in
+`ci/pipeline.yml`). What does run before merge, unrequired, is `Unit results` (every
+`test/*.test.py`, the guard self-test and the agent evals), `Mykronos sast` and `Mykronos secrets`
+on GitHub Actions. That is pre-merge *signal*, not a gate. *Re-dated to 2026-11-21 (first
+extension). Milestones:* (1) TheHub #60580 makes `Concourse / keel` arrive on a PR head; (2) a PR
+is observed carrying it, red and green; (3) it is made required with the `PUT` in `ci/README.md`.
+**If #60580 has not landed by 2026-11-07**, the operator decides whether to require
+`Unit results` meanwhile. It already runs on every same-repo PR and would turn "tests run before
+merge" into a gate today. The tradeoff it carries: the job is skipped when
+`MYKRONOS_UNIT_UPLOAD` is not `true`, and a skipped required check counts as passing.
+
 ### 2026-08-14 — the repository was made public, and the register was corrected
 
 **Decision.** The system owner directed that the repository be made public, having been shown
@@ -263,6 +326,11 @@ configuration-only path.
 ---
 
 ### POAM-014 — The merge gate verifies process, not code ⚠️ HIGH
+
+> **Re-measured 2026-10-22 (TheHub #60935), still open at High, re-dated to 2026-11-21.**
+> `Concourse / keel` still lands on `main` commits only. Pull requests run `Unit results`,
+> `Mykronos sast` and `Mykronos secrets` on Actions, and none of them is required. Milestones
+> and the fallback are in the 2026-10-22 note above.
 
 > **Update, later on 2026-08-14 (#61, #63).** The repository was made public, so hosted runners
 > work again — `CI` measured green on `ubuntu-latest`. **This changes the remediation options,
@@ -389,6 +457,12 @@ setting should not age.
 ---
 
 ### POAM-010 — G5 release authorization weakened by the move to Concourse ⚠️ REOPENED 2026-08-13
+
+> **2026-10-22 (TheHub #60935): in progress, re-dated to 2026-11-21.** The Concourse release
+> jobs are deleted. `release.yml` `authorize-release` is the only G5, and it refuses a run with
+> no recorded approval. It has never run, the `production` environment refused tags until this
+> date, and forks sync `main`, not tags. Closure evidence: the first tagged release, observed
+> waiting for approval and recording its approver. See the 2026-10-22 note above.
 
 **Closed before the change that opened it ever merged.** Release authorization was moved
 back to GitHub Actions rather than accepted as a weakening; `release.yml` is the live G5

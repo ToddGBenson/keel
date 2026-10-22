@@ -101,7 +101,7 @@ info "can_approve_pull_request_reviews=false — an Actions-approved PR would de
 say "3. Environments (G5 human authorization)"
 REVIEWER_ID="$(gh api user --jq .id 2>/dev/null || echo '')"
 if [ "$DRY" = "1" ]; then
-  info "would create 'staging' (no reviewers) and 'production' (required reviewer: you)"
+  info "would create 'staging' (no reviewers) and 'production' (required reviewer: you; deploys from main and v* tags)"
 else
   if gh api -X PUT "repos/$REPO/environments/staging" >/dev/null 2>&1; then
     info "staging environment created"
@@ -112,11 +112,30 @@ else
   if [ -n "$REVIEWER_ID" ]; then
     # The deploy job physically cannot start until a human approves in the GitHub UI.
     # That approval record — identity and timestamp — IS the CM-3 evidence.
+    #
+    # CUSTOM policy, not `protected_branches` (TheHub #60935). release.yml runs
+    # against the TAG being released, and an environment limited to protected
+    # branches refuses every tag ref -- so with the old setting no release could
+    # ever reach this gate. Allowed: `main` and tags matching `v*`. Nothing else.
     if gh api -X PUT "repos/$REPO/environments/production" \
          -F "reviewers[][type]=User" -F "reviewers[][id]=$REVIEWER_ID" \
-         -F "deployment_branch_policy[protected_branches]=true" \
-         -F "deployment_branch_policy[custom_branch_policies]=false" >/dev/null 2>&1; then
+         -F "deployment_branch_policy[protected_branches]=false" \
+         -F "deployment_branch_policy[custom_branch_policies]=true" >/dev/null 2>&1; then
       info "production environment created with YOU as required reviewer"
+      # POST is not idempotent: an existing identical policy answers 303/422.
+      # So read first, and add only what is missing.
+      have="$(gh api "repos/$REPO/environments/production/deployment-branch-policies" \
+                --jq '.branch_policies[] | "\(.type):\(.name)"' 2>/dev/null || true)"
+      for want in "branch:main" "tag:v*"; do
+        if printf '%s\n' "$have" | grep -qxF "$want"; then
+          info "production deploy policy present: $want"
+        elif gh api -X POST "repos/$REPO/environments/production/deployment-branch-policies" \
+               -f "name=${want#*:}" -f "type=${want%%:*}" >/dev/null 2>&1; then
+          info "production deploy policy added: $want"
+        else
+          bad "production deploy policy $want -- release.yml cannot reach G5 without it"
+        fi
+      done
     else
       bad "production environment (required reviewers may need a paid plan on private repos)"
       warn "Without required reviewers, G5 is NOT enforced. Verify in Settings > Environments."

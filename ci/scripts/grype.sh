@@ -18,18 +18,28 @@ case "${GATE}" in
   *) echo "ERROR: GATE must be 'true' or 'false', got '${GATE}'" >&2; exit 2 ;;
 esac
 
-# The pin is checked after the manifest-presence test below, not before it. A
-# repository with nothing to scan must not go red over a tool version it was
-# never going to use.
+# The pin is checked after the manifest-presence test below, not before it, so
+# a run with nothing to scan fails for THAT reason and says so, rather than over
+# a tool version it was never going to use.
 
-# Same "nothing to scan" case as the IaC lane. A repo with no dependency manifest
-# is legitimate; the scan must say so rather than fail on plumbing or, worse,
-# report green as though it had checked something. (L0008 — this defect existed
-# in BOTH jobs; fixing one was not fixing the class.)
+# NOTHING TO SCAN IS A FAILURE (operator decision, TheHub #60935, 2026-10-22).
+# The same rule the 2026-09-23 decision applied to `iac`, and for the same
+# reason: a lane that exits 0 when it checked nothing is a green build that
+# asserts nothing, and the NOT-A-PASS banner it printed went unread in a log
+# while the job status said "passed". See ci/lane-audit-2026-10-11.md.
+#
+# It applies in BOTH modes. GATE=false means "findings do not fail the step";
+# it never meant "not scanning is fine". With no manifest there is no SARIF,
+# so the upload lane has nothing true to record either.
+#
+# A repository with no dependency manifest is still legitimate. The fix for a
+# red `sca` there is to remove the lane from that fork's pipeline on purpose,
+# with a reason, not to let it pass by default.
+#
 # `-print -quit` and no pipe: `find ... | grep -q .` inverts under `set -o
 # pipefail` once find's output outruns the pipe buffer, because grep closes the
-# pipe and find exits 141. That renders as "nothing to scan", exit 0, on exactly
-# the large repositories where scanning matters. See the long note in
+# pipe and find exits 141. That renders as "nothing to scan" on exactly the
+# large repositories where scanning matters. See the long note in
 # ci/scripts/codeql.sh.
 if [ -z "$(find repo -path repo/.git -prune -o \
      \( -name 'package.json' -o -name 'package-lock.json' -o -name 'yarn.lock' \
@@ -37,17 +47,19 @@ if [ -z "$(find repo -path repo/.git -prune -o \
         -o -name 'go.mod' -o -name 'Cargo.toml' -o -name 'Gemfile.lock' \
         -o -name 'pom.xml' -o -name 'build.gradle*' -o -name 'composer.json' \) \
      -print -quit 2>/dev/null)" ]; then
-  cat <<'EOF'
+  cat >&2 <<'EOF'
 
 ================================================================================
-SCA: no dependency manifests found
+SCA: no dependency manifests found -- FAILING
 
-Nothing to scan. THIS IS NOT A PASS for RA-5/SR-3 — the control is not yet
-applicable. It applies the moment you add a manifest.
+Nothing was scanned, so RA-5/SR-3 has no evidence from this run. A no-subject
+scan is a failure, not a pass (TheHub #60935; the rule `iac` follows since
+2026-09-23). If this repository genuinely has no dependencies, remove the `sca`
+lane from its pipeline deliberately and record why.
 ================================================================================
 
 EOF
-  exit 0
+  exit 1
 fi
 
 # Manifests are present, so the pin is genuinely required now.

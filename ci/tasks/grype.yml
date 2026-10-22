@@ -5,9 +5,10 @@
 # vulnerability scanner fetched over the wire without verification is the wrong
 # thing to trust. Pin them in ci/vars.yml.
 #
-# Detects the input and skips LOUDLY when it is absent. A repo with no dependency
-# manifest is legitimate; the scan must say so rather than fail on plumbing or,
-# worse, report green as though it had checked something.
+# Detects the input and FAILS when it is absent (TheHub #60935): a run with no
+# dependency manifest scanned nothing, and a green build that asserts nothing is
+# the outcome this lane exists to prevent. It says why, so it is not mistaken
+# for a plumbing failure.
 platform: linux
 
 image_resource:

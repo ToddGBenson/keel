@@ -12,7 +12,9 @@ decisions:
     the SARIF is still written for the upload, and `--fail-on` is not passed;
   * GATE="false" and grype itself errors: the step still FAILS. A broken scanner
     must not read as a clean one;
-  * GATE set to anything else fails, so a typo cannot switch the gate off.
+  * GATE set to anything else fails, so a typo cannot switch the gate off;
+  * NO dependency manifest fails in both modes, and grype is never run: a scan
+    of nothing is not a pass (TheHub #60935, the rule `iac` follows).
 
     python test/grype-gate.test.py
 """
@@ -38,14 +40,21 @@ def check(name, cond, detail=""):
         failures.append(name)
 
 
-def run(n_findings, gate=None, grype_errors=False):
+def run(n_findings, gate=None, grype_errors=False, manifest=True):
     """Run grype.sh. The stub grype behaves like the real one: it writes the SARIF
     to --file, exits 1 when --fail-on is given and there are findings, and exits 1
     WITHOUT a SARIF when told to simulate a tool error."""
     tmp = Path(tempfile.mkdtemp(prefix="grype-gate-"))
     try:
         (tmp / "repo").mkdir()
-        (tmp / "repo" / "requirements.txt").write_text("pyyaml==6.0.3\n")
+        if manifest:
+            (tmp / "repo" / "requirements.txt").write_text("pyyaml==6.0.3\n")
+        else:
+            # Something to find that is NOT a manifest, and a manifest-named file
+            # under .git, which the find prunes.
+            (tmp / "repo" / "README.md").write_text("no dependencies\n")
+            (tmp / "repo" / ".git").mkdir()
+            (tmp / "repo" / ".git" / "package.json").write_text("{}\n")
         (tmp / "sca-results").mkdir()
         stubs = tmp / "stubs"
         stubs.mkdir()
@@ -119,6 +128,17 @@ rc, out, argv, sarif = run(0, gate="false", grype_errors=True)
 check("GATE=false: a grype error still FAILS the step (no vacuous pass)", rc != 0, f"rc={rc}")
 check("GATE=false: and says it was a scan failure, not findings",
       "scan failure" in out, out[-400:])
+
+# ── Nothing to scan is a FAILURE (TheHub #60935) ─────────────────────────────
+rc, out, argv, sarif = run(0, manifest=False)
+check("no manifest, GATE unset: the lane FAILS", rc != 0, f"rc={rc}\n{out[-400:]}")
+check("no manifest: grype is never run", not argv, f"argv={argv}")
+check("no manifest: says nothing was scanned, not a plumbing error",
+      "no dependency manifests found" in out and "FAILING" in out, out[-400:])
+check("no manifest: no SARIF is fabricated", not sarif)
+
+rc, out, argv, _ = run(0, gate="false", manifest=False)
+check("no manifest, GATE=false: the upload lane FAILS too", rc != 0, f"rc={rc}")
 
 # ── A typo must not disable the gate ────────────────────────────────────────
 rc, out, argv, _ = run(3, gate="flase")

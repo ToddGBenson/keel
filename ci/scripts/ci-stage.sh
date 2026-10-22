@@ -124,6 +124,9 @@ PY
     echo "── SCA lane gate tests: gate by default, report-only for upload (#133) ─"
     python test/grype-gate.test.py
 
+    echo "── container-scan lane: no image is a failure, not a pass (#60935) ────"
+    python test/trivy-gate.test.py
+
     echo "── JUnit wrapper tests (unit results to MyKronos) ─────────────────────"
     python test/junit-suite.test.py
 

@@ -26,27 +26,38 @@ claim read the artefact backwards.
 | build, lint, test, full-suite | repo (+daily) | ci-stage.sh, shellcheck.sh | — | n/a |
 | sast | repo, daily | codeql.sh (gating) | — | inverted-`grep -q` vacuous pass fixed earlier (codeql.sh:57-63); not re-measured here |
 | secrets | repo, daily | gitleaks-gate.sh | — | n/a |
-| **sca** | repo, daily | grype.sh | — | **exits 0** ("NOT A PASS for RA-5/SR-3") — same shape as iac before this change |
+| **sca** | repo, daily | grype.sh | — | **FAILS** since 2026-10-22 (operator decision, TheHub #60935); was exit 0 with a NOT-A-PASS banner |
 | **iac** | repo, daily | checkov.sh | iac | **now FAILS** (operator decision 2026-09-23); SARIF still marked `no_applicable_targets` |
-| **container-scan** | **manual** | trivy.sh | — | **exits 0** ("not yet in service") — by design inert until an image exists |
+| **container-scan** | **manual** | trivy.sh | — | **FAILS** with no `IMAGE_REF` since 2026-10-22 (TheHub #60935); was exit 0. Still manual and inert until an image exists |
 | suppression-audit | repo, daily | suppression-audit.sh | — | n/a |
 | mykronos-sast / -secrets / -atlas | repo, weekly | codeql / gitleaks / atlas + osv | sast, secrets, atlas | osv records an EMPTY RESULT (osv-scan.sh:98) |
 | platform-integrity | repo, daily | platform-integrity.sh | — | n/a |
 | ai-evals, ai-guardrails, agent-assurance | weekly (+repo) | ai.sh | — | not measured |
 | compliance-daily/-weekly/-monthly, metrics-snapshot | daily/weekly | compliance.sh | — | n/a |
 | build-and-attest, verify-artifact | repo | sbom-check.sh, supply-chain.sh | — | inert until an artifact exists (README) |
-| **release-preflight** | **manual** | release.sh preflight | — | n/a |
-| **authorize-release** | **manual**, `passed: [release-preflight]` | release.sh release | — | n/a |
+| ~~release-preflight~~ | **deleted 2026-10-22** (POAM-016) | moved to `release.yml` `preflight` | — | n/a |
+| ~~authorize-release~~ | **deleted 2026-10-22** (POAM-010/016) | G5 is `release.yml` `authorize-release`, `production` environment | — | n/a |
 
 **Only 4 of 26 lanes upload** (`iac`, `mykronos-sast`, `mykronos-secrets`,
 `mykronos-atlas`). keel's own `sca`, `secrets` and `sast` gate the build but send
 nothing to the platform. "Only four upload" and "only three are real" are different
 claims; only the first is true.
 
-**Open, for the operator — not decided here:** `sca` and `container-scan` still turn a
-no-subject run green (exit 0 with a NOT-A-PASS banner), which is the exact shape the
-2026-09-23 decision ruled out for `iac`. Applying the same rule to them would make
-`container-scan` red on every run until keel ships an image. Decide per lane.
+**Decided 2026-10-22 (TheHub #60935, PO recommendation accepted): a no-subject run FAILS in
+`sca` and `container-scan`, as in `iac`.** They used to exit 0 with a NOT-A-PASS banner.
+- `sca` (`ci/scripts/grype.sh`): no dependency manifest → exit 1, grype is not run, and no
+  SARIF is written. It applies with `GATE=false` too: "findings do not fail the step" never
+  meant "not scanning is fine". **Effect on keel today: none.** keel has
+  `ci/requirements.txt`, so the branch is not reached. `sca` stays in the commit chain. A
+  fork with no manifest gets a red `sca` and a red `Concourse / keel` until it removes the
+  lane on purpose.
+- `container-scan` (`ci/scripts/trivy.sh`): no `IMAGE_REF` → exit 1, trivy is not
+  downloaded. **Effect on keel:** the lane has no trigger and is not in the commit chain, so
+  nothing turns red unless someone starts it by hand. Then it is red until keel ships an
+  image. That is the intended reading.
+- Tests: `test/grype-gate.test.py` (two no-manifest cases added) and the new
+  `test/trivy-gate.test.py`. Both fail against the previous scripts (checked by reverting
+  them).
 
 ## iac: the chosen option and its effect (#60071 AC1, AC2, AC3)
 
@@ -70,6 +81,12 @@ no-subject run green (exit 0 with a NOT-A-PASS banner), which is the exact shape
   the log as suppressed.
 
 ## container-scan, release-preflight, authorize-release (#60013)
+
+> **Superseded in part 2026-10-22 (TheHub #60935).** `release-preflight` and
+> `authorize-release` are deleted. The one release path is `.github/workflows/release.yml`
+> (POAM-016 closed, POAM-010 re-dated). `container-scan`'s first build was the vacuous pass
+> predicted below: build 1, 2026-10-11, green, nothing scanned. It now fails without an image.
+> The text below is kept as written.
 
 - **The intended trigger is manual, for all three. None is deleted.**
   - `container-scan`: inert until keel ships an image (pipeline comment, README "Inert
