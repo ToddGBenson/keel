@@ -27,5 +27,6 @@ test/test-manifest.test.py          test         this list: an unlisted test fil
 test/hook-bypass-corpus.test.py     test,quick   guard hook bypass corpus (TheHub #60818)
 # scripts/selfreview-check.js is loaded only by .github/workflows/pr-governance.yml.
 # Concourse's Python image has no node, so there this entry says it did not run;
-# the GitHub Actions test job and ./keel check run it (keel check fails without node).
+# GitHub Actions 'Unit suites' (unit-results.yml, every PR) and ./keel check run it
+# (keel check fails without node).
 test/selfreview-check.test.js       test         self-review check tests (POAM-008)

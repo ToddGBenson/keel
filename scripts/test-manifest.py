@@ -37,7 +37,7 @@ run
 ---
 Runs each selected entry: .py with this interpreter, .js with node. A failure
 does not stop the files after it; the summary names every failure and the exit
-is 1. With no node, `--node-missing skip` (CI's Python image) says so and goes
+is 1. With no node, `--node-missing skip` (Concourse's Python image) says so and goes
 on; `--node-missing fail` (`./keel check`) prints `warn: node missing, skipped
 <file>` and fails, because a local mirror that skips a test is not green.
 `--quiet` prints one ok/warn line per file instead of each file's output.
@@ -149,7 +149,7 @@ def run(root: Path, chosen: list[Entry], node_missing: str, quiet: bool) -> int:
             else:
                 print(f"── {e.desc} ──")
                 print(f"node is not installed here: {e.path} NOT RUN in this stage. It "
-                      f"runs where node is (the GitHub Actions test job, ./keel check).")
+                      f"runs where node is: GitHub Actions 'Unit suites' (unit-results.yml) and ./keel check.")
                 not_run.append(e.path)
             continue
         argv = [node, e.path] if js else [sys.executable, e.path]

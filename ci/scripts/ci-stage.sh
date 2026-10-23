@@ -123,8 +123,8 @@ PY
     # the manifest names every test file. A failure does not stop the files
     # after it, and the summary names each one. The .js entry needs node, which
     # this Python image does not have: it says so and is not counted as a pass.
-    # scripts/selfreview-check.js is loaded only by pr-governance.yml on GitHub
-    # Actions, whose test job runs it with node, as `./keel check` does.
+    # GitHub Actions 'Unit suites' (unit-results.yml, on every PR) runs it with
+    # node, as `./keel check` does.
     python scripts/test-manifest.py run --stage test --node-missing skip
 
     echo "── guard hook self-test ───────────────────────────────────────────────"
