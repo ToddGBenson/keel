@@ -117,7 +117,7 @@ scan_timezone: America/Phoenix
 #
 # This repository does not build or ship a deployable artifact yet: the build
 # step in ci/scripts/ci-stage.sh is an ADAPT stub, container-scan has no trigger,
-# and the supply-chain and release lanes are stubs around real cosign calls.
+# and the supply-chain lanes sign and verify the platform release, not an image (#144).
 # Filling these in with plausible values would make four inert lanes look
 # configured. Set them in the same change that makes the build real.
 registry: ""
