@@ -268,8 +268,17 @@ Concourse, because keyless signing needs an identity the public Sigstore CA trus
 and Concourse has none. `sign-and-attest` signs a manifest of platform-owned files
 with cosign (keyless) and attests its provenance; Concourse `build-and-attest`
 writes the same manifest for each commit, and `verify-artifact` verifies the latest
-release with `scripts/platform-release.sh verify` and **fails** when there is no
-signed release. A fork that ships an image signs and verifies that image instead.
+release with `scripts/platform-release.sh verify`. It **fails** when the latest release
+is unsigned, when the signature does not verify, and when the release's tag is on a
+commit that is not on `main`: the signer identity `release.yml@refs/tags/<tag>` names a
+file on a tag, and whoever pushes the tag chooses that file, so the verifier also pins
+the certificate to the tag's commit and requires that commit on `main`.
+
+Before the first release exists (the releases API answers 404), `verify-artifact` is
+**advisory**: it exits 0 and prints `ADVISORY: ... nothing was verified`. The first
+published release ends that by itself. A 403/429 from the API is a rate limit, not "no
+release", and fails as "could not check"; set `GITHUB_API_TOKEN` on the task to
+authenticate the call. A fork that ships an image signs and verifies that image instead.
 
 ### `Concourse / keel`: the commit chain's verdict, on GitHub (#107)
 

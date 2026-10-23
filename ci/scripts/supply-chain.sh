@@ -78,20 +78,59 @@ case "${STAGE}" in
     # This stage exists because a signature nobody verifies is decoration.
     #
     # It verifies the LATEST RELEASE. Commits on main are not releases and are
-    # never signed. It FAILS when there is no release, when the release carries
-    # no signature, and when the signature is not release.yml's on that tag. No
-    # release is not a pass: there is nothing a fork could verify (the
-    # 2026-10-22 rule: nothing to check is a failure). (#144, POAM-011)
+    # never signed. Once a release exists it FAILS when the release carries no
+    # signature, when the signature is not release.yml's on that tag, and when
+    # the tag is on a commit that is not on main (repo/ is Concourse's checkout
+    # of main, with tags). (#144, POAM-011; review of #145, finding 1)
+    #
+    # NO RELEASE YET is ADVISORY (exit 0), and says nothing was verified. The
+    # one exception to "nothing to check is a failure" (2026-10-22), made by
+    # the HubOps review of #145 (finding 2): keel had no release when this
+    # shipped, and cutting one needs operator steps (configure-github.sh lets
+    # `production` accept v* tags). A lane red on every main commit until then
+    # turns `Concourse / keel` red for a reason no commit can fix, and a check
+    # that is always red is read as noise. It stops applying by itself: the
+    # first published release makes every later failure red.
+    #
+    # The API answering 403/429 is NOT "no release": unauthenticated calls
+    # share 60/h per address, and a rate limit used to be reported as "no
+    # published release" (finding 4). It fails as "could not check". Set
+    # GITHUB_API_TOKEN (read-only, optional) to authenticate the call.
     : "${REPO_SLUG:?REPO_SLUG is required (owner/repo): it is the signer identity}"
-    install_cosign
 
     rel="$(mktemp -d)"
-    if ! curl -sSfL -H "Accept: application/vnd.github+json" \
-          -o "${rel}/latest.json" "https://api.github.com/repos/${REPO_SLUG}/releases/latest"; then
-      echo "ERROR: ${REPO_SLUG} has no published release, so nothing signed exists to verify." >&2
-      echo "This is not a pass. Cut a release through .github/workflows/release.yml." >&2
-      exit 1
+    hdr="${rel}/api-headers"
+    ( umask 077; printf 'Accept: application/vnd.github+json\n' > "$hdr" )
+    if [ -n "${GITHUB_API_TOKEN:-}" ]; then
+      # A header file, not -H on the command line: argv is readable by every
+      # process in the container.
+      ( umask 077; printf 'Authorization: Bearer %s\n' "$GITHUB_API_TOKEN" >> "$hdr" )
     fi
+    code="$(curl -sSL -H "@${hdr}" -o "${rel}/latest.json" -w '%{http_code}' \
+              "https://api.github.com/repos/${REPO_SLUG}/releases/latest")" || code="000"
+    rm -f "$hdr"
+    case "$code" in
+      200) ;;
+      404)
+        echo "ADVISORY: ${REPO_SLUG} has no release yet (HTTP 404), so nothing was verified."
+        echo "ADVISORY: this passes only until the first release: once one is published, an"
+        echo "ADVISORY: unsigned or unverifiable latest release fails this job. Cut one through"
+        echo "ADVISORY: .github/workflows/release.yml (operator steps: docs/compliance/poam.md, POAM-011)."
+        exit 0
+        ;;
+      403|429)
+        echo "ERROR: the GitHub API refused the releases call (HTTP ${code}): most likely the" >&2
+        echo "unauthenticated rate limit (60 an hour per address, shared with everything on this" >&2
+        echo "host). Could not check, so this is not a pass, and not 'no release' either." >&2
+        echo "Re-run later, or set GITHUB_API_TOKEN for an authenticated limit." >&2
+        exit 1
+        ;;
+      *)
+        echo "ERROR: the GitHub releases API answered HTTP ${code} for ${REPO_SLUG}. Could not check." >&2
+        exit 1
+        ;;
+    esac
+    install_cosign
     # Three lines: the tag, then each asset's URL (empty when it is missing).
     mapfile -t meta < <(python - "${rel}/latest.json" <<'PY'
 import json, sys
@@ -121,8 +160,9 @@ PY
     bash repo/scripts/platform-release.sh verify \
       --manifest "${rel}/platform-manifest.txt" \
       --bundle "${rel}/platform-manifest.sigstore.json" \
-      --repo "${REPO_SLUG}" --tag "${tag}"
-    echo "verified: ${REPO_SLUG}@${tag} was signed by its own release workflow on that tag."
+      --repo "${REPO_SLUG}" --tag "${tag}" \
+      --git repo --trusted-ref HEAD
+    echo "verified: ${REPO_SLUG}@${tag} was signed by its own release workflow on that tag, at a commit on main."
     ;;
 
   *)

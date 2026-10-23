@@ -255,7 +255,9 @@ try:
     rc, log = bash([RELEASE_SH.as_posix(), "verify", "--manifest", out.as_posix(),
                     "--bundle", bundle.as_posix(), "--repo", "owner/keel", "--tag", "v1.2.0",
                     "--git", tree.as_posix(), "--trusted-ref", "main"],
-                   cwd=tmp, env_extra={"PATH": f"{stubs}{os.pathsep}/usr/bin{os.pathsep}/bin"})
+                   # git stays reachable (it resolves the tag); cosign does not.
+                   cwd=tmp, env_extra={"PATH": os.pathsep.join(
+                       [str(stubs), str(Path(shutil.which("git")).parent), "/usr/bin", "/bin"])})
     check("verify: no cosign installed -> refused, not passed",
           rc == 1 and "cosign is not installed" in log, log)
 

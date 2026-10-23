@@ -83,6 +83,24 @@ jobs:
           exit 1
 
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0             # origin/main, for the check below
+          persist-credentials: false
+
+      - name: The tagged commit must be on main
+        # A courtesy, not the control: whoever pushes a tag also chooses the
+        # release.yml that runs, and can delete this step. The control is the
+        # verifier (scripts/platform-release.sh verify --trusted-ref), which
+        # Concourse and every fork run from main and which refuses a signature
+        # made on a commit that is not on main. This step only stops an honest
+        # mistake before a human is asked to approve it. (Review of #145, finding 1)
+        run: |
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::Tag commit $GITHUB_SHA is not on main. Release only a commit that is on main:"
+            echo "::error::verify-artifact and every fork refuse a signature made anywhere else."
+            exit 1
+          fi
+          echo "tag commit $GITHUB_SHA is on origin/main"
 
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
@@ -213,6 +231,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
+          fetch-depth: 0  # the tag and origin/main, which the verifier checks it against
           persist-credentials: false
 
       - name: Install cosign (pinned and checksummed)
@@ -244,7 +263,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ github.ref_name }}
         run: |
-          verify() { bash scripts/platform-release.sh verify --repo "$GITHUB_REPOSITORY" "$@"; }
+          verify() {
+            bash scripts/platform-release.sh verify --repo "$GITHUB_REPOSITORY" \
+              --git . --trusted-ref origin/main "$@"
+          }
           verify --manifest platform-manifest.txt --bundle platform-manifest.sigstore.json \
                  --tag "$VERSION" --tree .
 
@@ -275,5 +297,5 @@ jobs:
           VERSION: ${{ github.ref_name }}
         run: |
           gh release create "$VERSION" --verify-tag --title "$VERSION" \
-            --notes "Platform release $VERSION. Verify before syncing: scripts/platform-release.sh verify --manifest platform-manifest.txt --bundle platform-manifest.sigstore.json --repo $GITHUB_REPOSITORY --tag $VERSION --tree ." \
+            --notes "Platform release $VERSION. Verify before syncing: scripts/platform-release.sh verify --manifest platform-manifest.txt --bundle platform-manifest.sigstore.json --repo $GITHUB_REPOSITORY --tag $VERSION --git <a clone of $GITHUB_REPOSITORY with tags> --trusted-ref <its main, e.g. upstream/main> --tree ." \
             platform-manifest.txt platform-manifest.sigstore.json

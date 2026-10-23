@@ -46,6 +46,10 @@ params:
   COSIGN_SHA256: ""
   REGISTRY: ""
   REPO_SLUG: ""
+  # Optional, read-only. Authenticates verify's releases API call; without it
+  # the call shares the unauthenticated 60/h limit, and a rate limit fails as
+  # "could not check" (never as "no release"). keel's pipeline does not set it.
+  GITHUB_API_TOKEN: ""
 
 run:
   path: bash
