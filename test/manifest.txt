@@ -1,0 +1,32 @@
+# Every test file in this repository, and the CI stage that runs it. Refs: TheHub #60980
+#
+# The ONE list. ci/scripts/ci-stage.sh runs the `lint` entries in its lint stage
+# and the `test` entries in its test stage; `./keel check` runs all of them, and
+# `./keel check --quick` only those tagged `quick`. Neither keeps a list of its own.
+#
+# A test/*.test.py or test/*.test.js missing from here fails CI (the lint stage
+# runs `python scripts/test-manifest.py check`), and so does an entry whose file
+# does not exist. Adding a test file means adding its line here, in the same change.
+#
+#   <path>                            <stage>[,quick]  <description: the header CI prints>
+#
+# lint: these need PyYAML, which the lint stage installs from ci/requirements.txt.
+test/check-run.test.py              lint         Concourse / keel check-run wiring (#107)
+test/validate-pipeline.test.py      lint         pipeline validator: script references resolve (#111)
+test/validate-manifest.test.py      lint         manifest validator refuses a vacuous pass (#111)
+# test
+test/dashboard.test.py              test,quick   dashboard generator tests
+test/checkov-gate.test.py           test         IaC lane gate tests (#59989 / #60071)
+test/grype-gate.test.py             test         SCA lane gate tests: gate by default, report-only for upload (#133)
+test/trivy-gate.test.py             test         container-scan lane: no image is a failure, not a pass (#60935)
+test/junit-suite.test.py            test         JUnit wrapper tests (unit results to MyKronos)
+test/mykronos-preflight.test.py     test         Mykronos preflight retries transient failures, never a 401
+test/test-manifest.test.py          test         this list: an unlisted test file or a missing entry fails CI (TheHub #60980)
+# selftest.sh was green while the keel#93 bypasses worked. This replays every
+# previously fixed bypass through the real hooks, in both parser modes.
+test/hook-bypass-corpus.test.py     test,quick   guard hook bypass corpus (TheHub #60818)
+# scripts/selfreview-check.js is loaded only by .github/workflows/pr-governance.yml.
+# Concourse's Python image has no node, so there this entry says it did not run;
+# GitHub Actions 'Unit suites' (unit-results.yml, every PR) and ./keel check run it
+# (keel check fails without node).
+test/selfreview-check.test.js       test         self-review check tests (POAM-008)
