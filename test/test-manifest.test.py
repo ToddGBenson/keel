@@ -39,6 +39,8 @@ TOOL = ROOT / "scripts" / "test-manifest.py"
 # System32 first, and System32ash.exe is WSL, not the shell keel runs under.
 BASH = shutil.which("bash") or "bash"
 failures = []
+# keel prints a check mark; a Windows console's cp1252 cannot encode it.
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 
 def check(name, cond, detail=""):
@@ -194,9 +196,9 @@ stage_sh = (ROOT / "ci" / "scripts" / "ci-stage.sh").read_text(encoding="utf-8")
 keel_sh = (ROOT / "keel").read_text(encoding="utf-8")
 code = lambda s: "\n".join(l for l in s.splitlines() if not l.lstrip().startswith("#"))
 check("ci-stage.sh names no test file itself",
-      named.search(code(stage_sh)) is None, str(named.findall(code(stage_sh))))
+      named.search(code(stage_sh)) is None, str([m.group(0) for m in named.finditer(code(stage_sh))]))
 check("keel names no test file itself",
-      named.search(code(keel_sh)) is None, str(named.findall(code(keel_sh))))
+      named.search(code(keel_sh)) is None, str([m.group(0) for m in named.finditer(code(keel_sh))]))
 check("ci-stage.sh lint stage checks the manifest and runs its lint entries",
       "scripts/test-manifest.py check" in stage_sh
       and re.search(r"scripts/test-manifest\.py run --stage lint", stage_sh) is not None)
@@ -218,6 +220,11 @@ def keel_copy():
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(src, dst)
     (tmp / "test").mkdir()
+    # The guard self-test is not what is under test here, and it takes minutes
+    # on Windows. It runs for real in CI and in keel check on the real tree.
+    (tmp / ".claude" / "hooks" / "selftest.sh").write_text("#!/usr/bin/env bash
+exit 0
+")
     return tmp
 
 
