@@ -222,9 +222,7 @@ def keel_copy():
     (tmp / "test").mkdir()
     # The guard self-test is not what is under test here, and it takes minutes
     # on Windows. It runs for real in CI and in keel check on the real tree.
-    (tmp / ".claude" / "hooks" / "selftest.sh").write_text("#!/usr/bin/env bash
-exit 0
-")
+    (tmp / ".claude" / "hooks" / "selftest.sh").write_text("#!/usr/bin/env bash\nexit 0\n")
     return tmp
 
 
