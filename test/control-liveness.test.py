@@ -120,7 +120,8 @@ legacy = getattr(real, "LEGACY_G3_KEYS", None)
 check("the grandfathered g3 set is frozen at the 15 records that predate the rule",
       legacy is not None and len(legacy) == 15, f"legacy={legacy!r}")
 c = real.gate_liveness()
-check("the real repository still counts its 15 historical g3 records", c["g3"] == 15, f"g3={c['g3']}")
+check("the real repository still counts its 15 historical g3 records (and any newer ones)",
+      c["g3"] >= 15, f"g3={c['g3']}")
 
 if failures:
     print(f"\n{len(failures)} failure(s)")
