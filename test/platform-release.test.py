@@ -179,7 +179,7 @@ try:
           "--certificate-oidc-issuer" in called
           and called[called.index("--certificate-oidc-issuer") + 1] == ISSUER, str(called))
     check("verify: the bundle and the manifest are what cosign checks",
-          called[-1] == out.as_posix() and bundle.as_posix() in called, str(called))
+          bool(called) and called[-1] == out.as_posix() and bundle.as_posix() in called, str(called))
 
     rc, log = bash([RELEASE_SH.as_posix(), "verify", "--manifest", out.as_posix(),
                     "--bundle", bundle.as_posix(), "--repo", "owner/keel"], cwd=tmp, stubs=stubs)
