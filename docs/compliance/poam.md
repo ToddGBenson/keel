@@ -594,8 +594,9 @@ exception by itself. A 403/429 is a rate limit and fails as "could not check".
 1. Run `scripts/configure-github.sh` so the `production` environment accepts `v*` tags
    (#143). Until then no tag can reach the G5 gate.
 2. Create two repository rulesets. The binding above is only as strong as `main`:
-   - **`main`**: require a pull request and the `Concourse / keel` check; block force pushes
-     and deletion.
+   - **`main`**: require a pull request and signed commits; block force pushes and
+     deletion. Do **not** require `Concourse / keel` yet: it lands on `main` commits only,
+     so requiring it would block every pull request (POAM-014, TheHub #60580).
    - **tags `v*`**: restrict creation, update and deletion to the operator (no bypass for
      agents or apps); block force pushes. A moved tag would otherwise re-point a published
      release at a different commit.
