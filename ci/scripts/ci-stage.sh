@@ -148,6 +148,10 @@ PY
     echo "── platform release: signed, and an unsigned one is refused (#144) ─────"
     # After the pip install above: the release.yml checks need PyYAML.
     python test/platform-release.test.py
+    # keel's own lanes (supply-chain.sh, release.yml). Project-owned and
+    # separate from the platform-owned test above, because a fork adapts
+    # these files and must be able to edit the test that asserts on them.
+    python test/supply-chain.test.py
 
     echo "── agent assurance (AIC-12 structural) ────────────────────────────────"
     bash evals/run-agent-evals.sh

@@ -2,31 +2,30 @@
 """
 Tests for signing and verifying the platform release. Refs: #144, TheHub #60936, POAM-011
 
-Runs the REAL scripts under bash. Only cosign (and, for the Concourse stage,
-the network and the cosign download plumbing) is stubbed on PATH, so what is
-tested is each script's own decisions:
+Runs the REAL scripts/platform-release.sh under bash. Only cosign is stubbed on
+PATH, so what is tested is the script's own decisions:
 
-scripts/platform-release.sh
   * manifest: every TRACKED platform-owned file, hashed and sorted; untracked
     and project-owned files are not in it;
   * verify refuses an unsigned release (no bundle, empty bundle) without
     calling cosign, refuses when cosign rejects the signature, and passes the
     EXACT signer identity (release.yml on refs/tags/<tag>) and GitHub's issuer;
+  * verify binds the signature to a KNOWN-GOOD workflow, not just to a tag
+    name: the tag must resolve to a commit reachable from a trusted ref
+    (main), and cosign must see that commit as the certificate's workflow sha.
+    A tag pushed on a commit whose release.yml was rewritten (drops the G5
+    approval) is refused, though its signature is otherwise valid (HubOps
+    review of #145, finding 1);
   * verify --tree refuses a tree whose platform files were changed or added to.
 
-ci/scripts/supply-chain.sh (Concourse build-and-attest / verify-artifact)
-  * verify FAILS when there is no release, when the latest release carries no
-    signature, and when the signature does not verify; it passes only when it
-    does. It used to print "ADAPT: cosign verify" and exit 0 in every case;
-  * build-and-attest writes the manifest that release.yml signs.
-
-.github/workflows/release.yml
-  * signing runs after the G5 approval, keyless (id-token: write), and with
-    the same cosign pin Concourse verifies with.
+PLATFORM-OWNED (platform/MANIFEST.yml), so it reads only platform-owned files.
+The tests of ci/scripts/supply-chain.sh and .github/workflows/release.yml,
+which are merge-required and which a fork adapts, are in
+test/supply-chain.test.py (project-owned). A fork that adapts those must be
+able to edit the test that asserts on them (review of #145, finding 3).
 
     python test/platform-release.test.py
 """
-import json
 import os
 import re
 import shutil
@@ -38,9 +37,6 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 RELEASE_SH = ROOT / "scripts" / "platform-release.sh"
-SUPPLY_SH = ROOT / "ci" / "scripts" / "supply-chain.sh"
-RELEASE_YML = ROOT / ".github" / "workflows" / "release.yml"
-VARS = ROOT / "ci" / "vars.example.yml"
 ISSUER = "https://token.actions.githubusercontent.com"
 failures = []
 
@@ -89,8 +85,18 @@ project_owned:
 """
 
 
+def git_cmd(tree: Path):
+    return ["git", "-C", str(tree), "-c", "user.email=t@example.invalid", "-c", "user.name=t",
+            "-c", "core.autocrlf=false", "-c", "commit.gpgsign=false", "-c", "tag.gpgsign=false"]
+
+
 def make_tree(tmp: Path) -> Path:
-    """A small git repository with platform-owned, project-owned and untracked files."""
+    """A small git repository with platform-owned, project-owned and untracked files.
+
+    Branch `main` carries the reviewed history and the tag v1.2.0 (annotated).
+    Branch `evil` is one commit off main, never merged, tagged v6.6.6: the
+    shape of a tag pushed on a commit whose release.yml was rewritten.
+    """
     tree = tmp / "tree"
     for rel, body in {
         "platform/MANIFEST.yml": MANIFEST_YML,
@@ -105,13 +111,33 @@ def make_tree(tmp: Path) -> Path:
         f = tree / rel
         f.parent.mkdir(parents=True, exist_ok=True)
         f.write_bytes(body.encode("utf-8"))
-    git = ["git", "-C", str(tree), "-c", "user.email=t@example.invalid", "-c", "user.name=t",
-           "-c", "core.autocrlf=false", "-c", "commit.gpgsign=false"]
-    subprocess.run([*git, "init", "-q"], check=True)
+    git = git_cmd(tree)
+    subprocess.run([*git, "init", "-q", "-b", "main"], check=True)
     subprocess.run([*git, "add", "-A"], check=True)
     subprocess.run([*git, "commit", "-q", "-m", "fixture"], check=True)
+    subprocess.run([*git, "tag", "-a", "-m", "release", "v1.2.0"], check=True)
+    subprocess.run([*git, "checkout", "-q", "-b", "evil"], check=True)
+    (tree / ".github" / "workflows").mkdir(parents=True)
+    (tree / ".github" / "workflows" / "release.yml").write_text("# no G5 gate\n", encoding="utf-8")
+    subprocess.run([*git, "add", "-A"], check=True)
+    subprocess.run([*git, "commit", "-q", "-m", "release.yml without authorize-release"], check=True)
+    subprocess.run([*git, "tag", "v6.6.6"], check=True)
+    subprocess.run([*git, "checkout", "-q", "main"], check=True)
     (tree / "scripts" / "untracked.sh").write_text("echo untracked\n", encoding="utf-8")
     return tree
+
+
+def rev(tree: Path, ref: str) -> str:
+    return subprocess.run(["git", "-C", str(tree), "rev-parse", ref], check=True,
+                          capture_output=True, text=True).stdout.strip()
+
+
+def flag(called, name):
+    """The value cosign received for `name`, or None."""
+    called = called or []
+    if name not in called or called.index(name) + 1 >= len(called):
+        return None
+    return called[called.index(name) + 1]
 
 
 # ── scripts/platform-release.sh manifest ────────────────────────────────────
@@ -138,13 +164,20 @@ try:
     stubs = tmp / "stubs"
     stubs.mkdir()
     argv = tmp / "cosign-argv.txt"
+    main_sha = rev(tree, "v1.2.0^{commit}")
+    evil_sha = rev(tree, "v6.6.6^{commit}")
 
-    def verify(bundle, cosign_rc=0, tag="v1.2.0", tree_dir=None, manifest=out):
+    def verify(bundle, cosign_rc=0, tag="v1.2.0", tree_dir=None, manifest=out,
+               git_dir=tree, trusted="main", omit=()):
         if argv.exists():
             argv.unlink()
         cosign_stub(stubs, argv, cosign_rc)
         args = [RELEASE_SH.as_posix(), "verify", "--manifest", manifest.as_posix(),
                 "--bundle", bundle, "--repo", "owner/keel", "--tag", tag]
+        if "--git" not in omit:
+            args += ["--git", git_dir.as_posix()]
+        if "--trusted-ref" not in omit:
+            args += ["--trusted-ref", trusted]
         if tree_dir is not None:
             args += ["--tree", tree_dir.as_posix()]
         rc, log = bash(args, cwd=tmp, stubs=stubs)
@@ -172,23 +205,56 @@ try:
     want_id = "https://github.com/owner/keel/.github/workflows/release.yml@refs/tags/v1.2.0"
     check("verify: cosign verify-blob is what runs", called[:1] == ["verify-blob"], str(called))
     check("verify: the identity is EXACT (release.yml on that tag), not a regexp",
-          "--certificate-identity" in called
-          and called[called.index("--certificate-identity") + 1] == want_id
+          flag(called, "--certificate-identity") == want_id
           and not any("regexp" in a for a in called), str(called))
     check("verify: the issuer is GitHub's OIDC provider",
-          "--certificate-oidc-issuer" in called
-          and called[called.index("--certificate-oidc-issuer") + 1] == ISSUER, str(called))
+          flag(called, "--certificate-oidc-issuer") == ISSUER, str(called))
     check("verify: the bundle and the manifest are what cosign checks",
           bool(called) and called[-1] == out.as_posix() and bundle.as_posix() in called, str(called))
 
+    # ── finding 1: bound to a known-good workflow, not to a tag name ────────
+    check("verify: cosign must see the tag's COMMIT as the certificate's workflow sha",
+          flag(called, "--certificate-github-workflow-sha") == main_sha, str(called))
+    check("verify: ... from this repository, dispatched (release.yml's only trigger), on the tag",
+          flag(called, "--certificate-github-workflow-repository") == "owner/keel"
+          and flag(called, "--certificate-github-workflow-trigger") == "workflow_dispatch"
+          and flag(called, "--certificate-github-workflow-ref") == "refs/tags/v1.2.0", str(called))
+
+    rc, log, called = verify(bundle.as_posix(), tag="v6.6.6")
+    check("verify: a tag on a commit NOT on the trusted ref -> refused (rewritten release.yml)",
+          rc == 1 and "not reachable from" in log, log)
+    check("verify: ... and refused before cosign, whatever the signature says", called is None, str(called))
+    check("verify: ... naming the commit it refused", evil_sha[:12] in log, log)
+
+    rc, log, called = verify(bundle.as_posix(), tag="v9.9.9")
+    check("verify: a tag the repository does not have -> refused",
+          rc == 1 and "v9.9.9" in log and called is None, log)
+
+    rc, log, called = verify(bundle.as_posix(), omit=("--git",))
+    check("verify: no --git -> refused (nothing to resolve the tag in)",
+          rc == 1 and "--git" in log and called is None, log)
+
+    rc, log, called = verify(bundle.as_posix(), omit=("--trusted-ref",))
+    check("verify: no --trusted-ref -> refused (no default: HEAD may BE the tag)",
+          rc == 1 and "--trusted-ref" in log and called is None, log)
+
+    rc, log, called = verify(bundle.as_posix(), trusted="no-such-branch")
+    check("verify: a trusted ref that does not exist -> refused", rc == 1 and called is None, log)
+
+    rc, log, called = verify(bundle.as_posix(), tag="v6.6.6", trusted="evil")
+    check("verify: the same tag passes when its commit IS on the trusted ref (guard)",
+          rc == 0 and flag(called, "--certificate-github-workflow-sha") == evil_sha, log)
+
     rc, log = bash([RELEASE_SH.as_posix(), "verify", "--manifest", out.as_posix(),
-                    "--bundle", bundle.as_posix(), "--repo", "owner/keel"], cwd=tmp, stubs=stubs)
+                    "--bundle", bundle.as_posix(), "--repo", "owner/keel",
+                    "--git", tree.as_posix(), "--trusted-ref", "main"], cwd=tmp, stubs=stubs)
     check("verify: no --tag -> refused (a signature is bound to its tag)", rc == 1, log)
 
     shutil.rmtree(stubs)
     stubs.mkdir()
     rc, log = bash([RELEASE_SH.as_posix(), "verify", "--manifest", out.as_posix(),
-                    "--bundle", bundle.as_posix(), "--repo", "owner/keel", "--tag", "v1"],
+                    "--bundle", bundle.as_posix(), "--repo", "owner/keel", "--tag", "v1.2.0",
+                    "--git", tree.as_posix(), "--trusted-ref", "main"],
                    cwd=tmp, env_extra={"PATH": f"{stubs}{os.pathsep}/usr/bin{os.pathsep}/bin"})
     check("verify: no cosign installed -> refused, not passed",
           rc == 1 and "cosign is not installed" in log, log)
@@ -207,147 +273,6 @@ try:
     check("verify --tree: an added platform file -> refused", rc == 1 and "not the signed release" in log, log)
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
-
-
-# ── ci/scripts/supply-chain.sh STAGE=verify (Concourse verify-artifact) ──────
-print("supply-chain.sh STAGE=verify")
-
-
-def run_verify_stage(release, cosign_rc=0):
-    """`release`: None = no release (404); else the latest-release JSON body."""
-    tmp = Path(tempfile.mkdtemp(prefix="verify-stage-"))
-    try:
-        (tmp / "repo" / "scripts").mkdir(parents=True)
-        (tmp / "repo" / "ci" / "scripts").mkdir(parents=True)
-        shutil.copy(RELEASE_SH, tmp / "repo" / "scripts" / "platform-release.sh")
-        shutil.copy(SUPPLY_SH, tmp / "repo" / "ci" / "scripts" / "supply-chain.sh")
-        (tmp / "artifact").mkdir()
-        fixtures = tmp / "fixtures"
-        fixtures.mkdir()
-        if release is not None:
-            (fixtures / "latest.json").write_text(json.dumps(release), encoding="utf-8")
-        (fixtures / "platform-manifest.txt").write_text("0" * 64 + "  scripts/a.sh\n", encoding="utf-8")
-        (fixtures / "platform-manifest.sigstore.json").write_text('{"stub": 1}\n', encoding="utf-8")
-        stubs = tmp / "stubs"
-        stubs.mkdir()
-        argv = tmp / "cosign-argv.txt"
-        cosign_stub(stubs, argv, cosign_rc)
-        # curl: the cosign download is a no-op (cosign is the stub above);
-        # the releases API answers from fixtures, or 404s (curl -f exits 22).
-        write_exec(stubs / "curl",
-                   "#!/usr/bin/env bash\n"
-                   'out=""; url=""\n'
-                   'while [ $# -gt 0 ]; do case "$1" in -o) out="$2"; shift 2;; -H) shift 2;; -*) shift;; *) url="$1"; shift;; esac; done\n'
-                   'case "$url" in\n'
-                   '  */sigstore/cosign/*) exit 0 ;;\n'
-                   f'  */releases/latest) [ -f "{fixtures.as_posix()}/latest.json" ] || exit 22; cp "{fixtures.as_posix()}/latest.json" "$out" ;;\n'
-                   f'  https://assets.invalid/*) cp "{fixtures.as_posix()}/${{url##*/}}" "$out" ;;\n'
-                   '  *) echo "unexpected url $url" >&2; exit 99 ;;\n'
-                   'esac\n')
-        write_exec(stubs / "sha256sum", "#!/usr/bin/env bash\ncat >/dev/null; exit 0\n")
-        write_exec(stubs / "chmod", "#!/usr/bin/env bash\nexit 0\n")
-        rc, log = bash([(tmp / "repo" / "ci" / "scripts" / "supply-chain.sh").as_posix()], cwd=tmp, stubs=stubs,
-                       env_extra={"STAGE": "verify", "COSIGN_VERSION": "3.1.3", "COSIGN_SHA256": "0" * 64,
-                                  "REGISTRY": "", "REPO_SLUG": "owner/keel"})
-        called = argv.read_text(encoding="utf-8").splitlines() if argv.exists() else None
-        return rc, log, called
-    finally:
-        shutil.rmtree(tmp, ignore_errors=True)
-
-
-def asset(name):
-    return {"name": name, "browser_download_url": f"https://assets.invalid/{name}"}
-
-
-signed = {"tag_name": "v1.2.0", "assets": [asset("platform-manifest.txt"),
-                                           asset("platform-manifest.sigstore.json")]}
-
-rc, log, called = run_verify_stage(None)
-check("verify-artifact: no release at all -> FAILS (nothing signed exists)",
-      rc != 0 and "no published release" in log, log)
-
-rc, log, called = run_verify_stage({"tag_name": "v1.2.0", "assets": []})
-check("verify-artifact: latest release has no signature -> FAILS as UNSIGNED",
-      rc != 0 and "UNSIGNED" in log, log)
-check("verify-artifact: unsigned -> cosign verify-blob never reached", called is None, str(called))
-
-rc, log, called = run_verify_stage({"tag_name": "v1.2.0", "assets": [asset("platform-manifest.txt")]})
-check("verify-artifact: manifest without its bundle -> FAILS as UNSIGNED",
-      rc != 0 and "UNSIGNED" in log, log)
-
-rc, log, called = run_verify_stage(signed, cosign_rc=1)
-check("verify-artifact: a signature that does not verify -> FAILS", rc != 0, log)
-
-rc, log, called = run_verify_stage(signed, cosign_rc=0)
-check("verify-artifact: a verifying signature -> passes", rc == 0 and "verified:" in log, log)
-check("verify-artifact: checks release.yml's identity on the RELEASED tag",
-      called is not None and
-      "https://github.com/owner/keel/.github/workflows/release.yml@refs/tags/v1.2.0" in called, str(called))
-
-rc, log = bash([SUPPLY_SH.as_posix()], cwd=ROOT,
-                  env_extra={"STAGE": "verify", "COSIGN_VERSION": "x", "COSIGN_SHA256": "y", "REPO_SLUG": ""})
-check("verify-artifact: no REPO_SLUG -> FAILS before anything is fetched", rc != 0 and "REPO_SLUG" in log, log)
-
-check("supply-chain.sh: no ADAPT echo stands in for a cosign call",
-      not re.search(r'echo\s+"ADAPT: cosign', SUPPLY_SH.read_text(encoding="utf-8")))
-
-
-# ── ci/scripts/supply-chain.sh STAGE=build-and-attest ───────────────────────
-print("supply-chain.sh STAGE=build-and-attest")
-tmp = Path(tempfile.mkdtemp(prefix="build-stage-"))
-try:
-    work = tmp / "work"
-    work.mkdir()
-    repo = make_tree(tmp)
-    shutil.move(str(repo), str(work / "repo"))
-    (work / "repo" / "scripts").mkdir(exist_ok=True)
-    shutil.copy(RELEASE_SH, work / "repo" / "scripts" / "platform-release.sh")
-    subprocess.run(["git", "-C", str(work / "repo"), "add", "scripts/platform-release.sh"], check=True)
-    (work / "sbom").mkdir()
-    (work / "sbom" / "sbom.json").write_text("{}", encoding="utf-8")
-    (work / "artifact").mkdir()
-    stubs = tmp / "stubs"
-    stubs.mkdir()
-    cosign_stub(stubs, tmp / "argv.txt", 0)
-    write_exec(stubs / "curl", "#!/usr/bin/env bash\nexit 0\n")
-    write_exec(stubs / "chmod", "#!/usr/bin/env bash\nexit 0\n")
-    rc, log = bash([SUPPLY_SH.as_posix()], cwd=work, stubs=stubs,
-                   env_extra={"STAGE": "build-and-attest", "COSIGN_VERSION": "3.1.3",
-                              "COSIGN_SHA256": "0" * 64, "REGISTRY": ""})
-    produced = work / "artifact" / "platform-manifest.txt"
-    check("build-and-attest: exits 0", rc == 0, log)
-    check("build-and-attest: writes the manifest release.yml signs",
-          produced.exists() and "scripts/platform-release.sh" in produced.read_text(encoding="utf-8"), log)
-finally:
-    shutil.rmtree(tmp, ignore_errors=True)
-
-
-# ── .github/workflows/release.yml ───────────────────────────────────────────
-print("release.yml sign-and-attest")
-try:
-    import yaml  # PyYAML, from ci/requirements.txt
-    wf = yaml.safe_load(RELEASE_YML.read_text(encoding="utf-8"))
-    job = (wf.get("jobs") or {}).get("sign-and-attest") or {}
-    check("release.yml: a sign-and-attest job exists", bool(job))
-    check("release.yml: it runs only after the G5 approval", job.get("needs") == "authorize-release",
-          str(job.get("needs")))
-    perms = job.get("permissions") or {}
-    check("release.yml: keyless (id-token: write) and attesting (attestations: write)",
-          perms.get("id-token") == "write" and perms.get("attestations") == "write", str(perms))
-    steps = "\n".join(str(s.get("run", "")) + str(s.get("uses", "")) for s in job.get("steps", []))
-    check("release.yml: cosign sign-blob writes a bundle", "cosign sign-blob --yes --bundle" in steps)
-    check("release.yml: provenance is attested", "actions/attest-build-provenance@" in steps)
-    check("release.yml: the verifier runs, and must refuse an unsigned release",
-          "platform-release.sh verify" in steps and "a release with no signature" in steps)
-    env = job.get("env") or {}
-    vars_text = VARS.read_text(encoding="utf-8")
-    vv = re.search(r"^cosign_version:\s*(\S+)", vars_text, re.M)
-    vs = re.search(r"^cosign_sha256:\s*(\S+)", vars_text, re.M)
-    check("release.yml: signs with the same cosign pin Concourse verifies with",
-          vv and vs and str(env.get("COSIGN_VERSION")) == vv.group(1)
-          and str(env.get("COSIGN_SHA256")) == vs.group(1), f"{env} vs vars.example.yml")
-except ImportError:
-    check("PyYAML is installed (pip install -r ci/requirements.txt)", False)
 
 print()
 if failures:
