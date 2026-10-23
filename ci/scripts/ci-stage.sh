@@ -145,6 +145,10 @@ PY
     python -m pip install --quiet --disable-pip-version-check       --require-hashes -r ci/requirements.txt
     python test/hook-bypass-corpus.test.py
 
+    echo "── platform release: signed, and an unsigned one is refused (#144) ─────"
+    # After the pip install above: the release.yml checks need PyYAML.
+    python test/platform-release.test.py
+
     echo "── agent assurance (AIC-12 structural) ────────────────────────────────"
     bash evals/run-agent-evals.sh
 

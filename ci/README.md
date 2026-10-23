@@ -263,10 +263,13 @@ This lane was built in Concourse first and accepted as POAM-010, a High finding.
 It was then moved back, because accepting it would have reopened POAM-006 — the
 same gap, closed five days earlier — to save a split pipeline. See ADR-0003 § D2.
 
-**Consequence to act on:** the artifact is now built by Concourse, so
-`release.yml`'s `cosign verify` must match Concourse's signing identity, and
-`gh attestation verify` will not work at all (POAM-011). Adapt those steps before
-the first real release.
+**Signing (POAM-011, #144):** keel's release is signed in `release.yml`, not in
+Concourse, because keyless signing needs an identity the public Sigstore CA trusts
+and Concourse has none. `sign-and-attest` signs a manifest of platform-owned files
+with cosign (keyless) and attests its provenance; Concourse `build-and-attest`
+writes the same manifest for each commit, and `verify-artifact` verifies the latest
+release with `scripts/platform-release.sh verify` and **fails** when there is no
+signed release. A fork that ships an image signs and verifies that image instead.
 
 ### `Concourse / keel`: the commit chain's verdict, on GitHub (#107)
 

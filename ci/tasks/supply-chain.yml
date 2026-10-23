@@ -2,15 +2,13 @@
 #
 # STAGE selects: build-and-attest | verify.
 #
-# ── A CAPABILITY THAT DID NOT SURVIVE THE PORT ────────────────────────────────
-# The Actions version used actions/attest-build-provenance and actions/attest-sbom,
-# which write to GitHub's attestation store and are verifiable with
-# `gh attestation verify`. There is no Concourse equivalent and no way to write to
-# that store from outside Actions.
-#
-# cosign keyless signing carries over and is the stronger half. The GitHub
-# attestation store does not. This is recorded in docs/compliance/poam.md rather
-# than quietly dropped.
+# ── WHERE SIGNING HAPPENS (#144, POAM-011) ───────────────────────────────────
+# Not here. Keyless signing needs an OIDC identity the public Sigstore CA
+# trusts, which a self-hosted Concourse does not have. The platform release is
+# signed (cosign, keyless) and its provenance attested
+# (actions/attest-build-provenance) by .github/workflows/release.yml. This task
+# produces the manifest that is signed (build-and-attest) and verifies the
+# latest signed release (verify), failing when it is unsigned.
 platform: linux
 
 image_resource:
@@ -47,6 +45,7 @@ params:
   COSIGN_VERSION: ""
   COSIGN_SHA256: ""
   REGISTRY: ""
+  REPO_SLUG: ""
 
 run:
   path: bash

@@ -1075,6 +1075,9 @@ jobs:
           COSIGN_VERSION: ((cosign_version))
           COSIGN_SHA256: ((cosign_sha256))
           REGISTRY: ((registry))
+          # The signer identity: release.yml of THIS repository, on the tag
+          # (#144). Verifies the latest release and fails when it is unsigned.
+          REPO_SLUG: ((github_owner))/((github_repo))
       # Last, so it runs only once the whole chain has passed on this commit:
       # this is the step that turns `Concourse / keel` green.
       - task: check-run

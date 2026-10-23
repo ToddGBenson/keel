@@ -24,6 +24,11 @@
 # local edits by design. So a bad release reaches every fork, and the
 # authorisation matters more here than it would for one deploy, not less.
 #
+# What a release carries: `sign-and-attest` (below) signs a manifest of every
+# platform-owned file keylessly and attests its provenance, and publishes both
+# on the GitHub release. Concourse `verify-artifact` verifies the latest one
+# and fails when it is unsigned (#144, POAM-011).
+#
 # A fork that DOES deploy a service adds its staging and production jobs after
 # `authorize-release` (`needs: authorize-release`), deploying by digest. See
 # docs/07-release-and-change.md. The template does not ship them as `echo`
@@ -179,3 +184,96 @@ jobs:
             echo "::warning::Approver and dispatcher are the same identity ($approver). AC-5 is not met for this release; see POAM-008."
           fi
           echo "authorized: $VERSION by $approver"
+
+  # ── SR-4(3) / CM-14: the release is signed and attested (#144, POAM-011) ─────
+  # After the gate, never before: what is signed is what a named human
+  # authorised. The subject is a checksum manifest of every platform-owned file
+  # at this tag (scripts/platform-release.sh), because that is what forks
+  # receive. keel ships no image (ADR-0004).
+  #
+  # Keyless. The signing identity is this workflow on this tag, issued by
+  # GitHub's OIDC provider and recorded in Sigstore's transparency log. There
+  # is no signing key to store, rotate or leak (IA-5), and nothing the operator
+  # has to provision. Concourse cannot do this: the public Sigstore CA does not
+  # trust a self-hosted Concourse's identity.
+  sign-and-attest:
+    name: Sign and attest the platform release (SR-4(3), CM-14)
+    needs: authorize-release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write      # publish the GitHub release and its two assets
+      id-token: write      # the OIDC token IS the signing identity
+      attestations: write  # SLSA build provenance in GitHub's attestation store
+    env:
+      # The same pin as ci/vars.example.yml, so the cosign that signs is the
+      # cosign that verifies in Concourse. test/platform-release.test.py
+      # fails if the two drift.
+      COSIGN_VERSION: "3.1.3"
+      COSIGN_SHA256: "4629c757b7618056f8ddd7e2625ae9fdd94c0372a65049520bc7d9df9efc7f71"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Install cosign (pinned and checksummed)
+        run: |
+          curl -sSfL -o "$RUNNER_TEMP/cosign" \
+            "https://github.com/sigstore/cosign/releases/download/v${COSIGN_VERSION}/cosign-linux-amd64"
+          echo "${COSIGN_SHA256}  $RUNNER_TEMP/cosign" | sha256sum -c -
+          chmod +x "$RUNNER_TEMP/cosign"
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+
+      - name: Write the platform manifest
+        run: |
+          bash scripts/platform-release.sh manifest platform-manifest.txt
+          echo "$(wc -l < platform-manifest.txt) platform-owned files"
+
+      - name: Sign it (cosign, keyless)
+        run: cosign sign-blob --yes --bundle platform-manifest.sigstore.json platform-manifest.txt
+
+      - name: Attest its build provenance (SLSA)
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
+        with:
+          subject-path: platform-manifest.txt
+
+      - name: Verify it, and prove an unsigned or altered release is refused
+        # The same verifier Concourse's verify-artifact runs. Positive first,
+        # against the tagged tree; then three cases that MUST be refused, so a
+        # verifier that accepts everything cannot publish a release.
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ github.ref_name }}
+        run: |
+          verify() { bash scripts/platform-release.sh verify --repo "$GITHUB_REPOSITORY" "$@"; }
+          verify --manifest platform-manifest.txt --bundle platform-manifest.sigstore.json \
+                 --tag "$VERSION" --tree .
+
+          refused() { # description, then verify arguments
+            local what="$1"; shift
+            if verify "$@"; then
+              echo "::error::the verifier ACCEPTED $what"; exit 1
+            fi
+            echo "refused, as it must be: $what"
+          }
+          refused "a release with no signature" \
+            --manifest platform-manifest.txt --bundle "$RUNNER_TEMP/absent.json" --tag "$VERSION"
+          # One hex digit of the first file's hash changed; nothing else.
+          sed '1s/^0/1/;t;1s/^./0/' platform-manifest.txt > "$RUNNER_TEMP/altered.txt"
+          refused "an altered manifest" \
+            --manifest "$RUNNER_TEMP/altered.txt" --bundle platform-manifest.sigstore.json --tag "$VERSION"
+          refused "a signature checked against another tag" \
+            --manifest platform-manifest.txt --bundle platform-manifest.sigstore.json --tag "${VERSION}-other"
+
+          gh attestation verify platform-manifest.txt --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml"
+
+      - name: Publish the release with its manifest and signature
+        # Concourse verify-artifact checks the LATEST release for these two
+        # assets and fails when they are missing.
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ github.ref_name }}
+        run: |
+          gh release create "$VERSION" --verify-tag --title "$VERSION" \
+            --notes "Platform release $VERSION. Verify before syncing: scripts/platform-release.sh verify --manifest platform-manifest.txt --bundle platform-manifest.sigstore.json --repo $GITHUB_REPOSITORY --tag $VERSION --tree ." \
+            platform-manifest.txt platform-manifest.sigstore.json
