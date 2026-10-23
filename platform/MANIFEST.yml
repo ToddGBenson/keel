@@ -37,6 +37,12 @@ platform_owned:
   # too: a fork that receives a hook without the corpus can regress it silently.
   - test/hook-bypass-corpus.test.py
   - test/hook-bypass-corpus.yml
+  # The gate-evidence contract (TheHub #60981): the record writer, the counter
+  # and the validator rule are all platform-owned scripts, and the fork's
+  # platform-integrity job runs control-liveness --check against them.
+  - test/control-liveness.test.py
+  - test/gate-record.test.py
+  - test/validate-platform.test.py
   - docs/00-overview.md
   - docs/01-roles.md
   - docs/02-intake-and-discovery.md

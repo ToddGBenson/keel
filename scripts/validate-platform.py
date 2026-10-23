@@ -128,6 +128,29 @@ def check_definitions() -> None:
         ok(f"all {len(on_disk)} skills registered in CLAUDE.md")
 
 
+# ── 2b. Every gate command names where its record goes (POAM-018) ────────────
+# /idea and /ready named no evidence/ path, so scripts/control-liveness.py could
+# never count G0 or G1, however often they ran (TheHub #60981). A gate whose
+# record has nowhere to go is a gate that reads as never having fired.
+GATE_COMMANDS = ("idea", "ready", "design", "self-review", "qa-gate", "security-gate",
+                 "ai-gate", "release")
+
+
+def check_gate_evidence_paths() -> None:
+    print("\nGate commands name an evidence/ path (POAM-018)")
+    bad = 0
+    for name in GATE_COMMANDS:
+        f = f".claude/commands/{name}.md"
+        if not os.path.exists(f):
+            fail(f"{f} missing; gate command '{name}' writes no evidence/ record")
+            bad += 1
+        elif "evidence/" not in open(f, encoding="utf-8").read():
+            fail(f"{f} names no evidence/ path; control-liveness can never count this gate")
+            bad += 1
+    if bad == 0:
+        ok(f"{len(GATE_COMMANDS)} gate commands name their evidence/ path")
+
+
 # ── 3. Tool-grant drift vs. the AI inventory (AIC-3) ─────────────────────────
 # This is the check docs/compliance/ai-inventory.md promises. Drift between the documented
 # grant and the actual one IS enforceable and IS a genuine control failure — unlike
@@ -274,6 +297,7 @@ def main() -> int:
     print("=" * 62)
     check_config()
     check_definitions()
+    check_gate_evidence_paths()
     check_tool_grants()
     check_evidence()
     check_workflows()

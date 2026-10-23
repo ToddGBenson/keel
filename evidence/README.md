@@ -10,8 +10,9 @@ Governed by `docs/compliance/evidence-model.md`. Method: the `evidence-writing` 
 
 ```
 evidence/
-  <issue-number>/
-    g1/  dor-checklist.md
+  <key>/                 GitHub issue number (^[0-9]+$) or tracker id (^[a-z]+-[0-9]+$)
+    g0/  intake.md      (scripts/gate-record.py, from /idea)
+    g1/  ready.md       (scripts/gate-record.py, from /ready)
     g2/  design-note.md  threat-model.md  control-allocation.md  ai-impact-assessment.md
     g3/  review-record.md  ci-run.json  sast.sarif  sca-report.json
     g4/

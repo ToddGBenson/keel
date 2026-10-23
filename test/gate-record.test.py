@@ -97,6 +97,17 @@ with Tree() as t:
                   re.search(rf"^- {re.escape(item)}: satisfied$", rec, re.M) is not None, rec)
 
 with Tree() as t:
+    items = [a for i in G1_ALL_YES for a in ("--item", i)]
+    rc, out = t.run("--gate", "g1", "--key", "3", "--verdict", "pass", "--role", "product-owner",
+                    "--recorded-by", "developer agent (Claude Opus 5.5)", *items)
+    rec = (t.root / "evidence/3/g1/ready.md").read_text(encoding="utf-8") if rc == 0 else out
+    check("record names its producer", "recorded by: developer agent (Claude Opus 5.5)" in rec, rec[-300:])
+    rc, out = t.run("--gate", "g1", "--key", "4", "--verdict", "pass", "--role", "product-owner",
+                    "--recorded-by", "x\nverdict: fail", *items)
+    check("a producer that would forge a verdict line is refused",
+          rc == 2 and not (t.root / "evidence/4").exists(), f"rc={rc}\n{out[-200:]}")
+
+with Tree() as t:
     rc, out = g1(t, "hub-60944")
     check("a tracker id (hub-60944) is accepted",
           rc == 0 and t.written() == ["evidence/hub-60944/g1/ready.md"], f"rc={rc} {t.written()}\n{out[-300:]}")
@@ -120,7 +131,8 @@ with Tree() as t:
         check("and the unsatisfied item with its gap",
               "- ac-binary: NOT satisfied - gap: AC are not in Given/When/Then" in rec, rec)
     rc, out = g1(t, "7")
-    rec = (t.root / "evidence/7/g1/ready.md").read_text(encoding="utf-8")
+    f = t.root / "evidence/7/g1/ready.md"
+    rec = f.read_text(encoding="utf-8") if f.exists() else ""
     check("a re-run appends; the earlier rejection is kept",
           rc == 0 and re.search(r"^verdict: fail$", rec, re.M) and re.search(r"^verdict: pass$", rec, re.M),
           rec)
@@ -132,36 +144,36 @@ BAD_KEYS = ["", "..", "../x", "../../etc", "42/..", "a/b", "hub-1/../../x", "42\
 for key in BAD_KEYS:
     with Tree() as t:
         rc, out = g1(t, key)
-        check(f"key {key!r} is refused with an error and nothing is written",
-              rc != 0 and t.written() == [] and not t.escaped() and "key" in out.lower(),
+        check(f"key {key!a} is refused with an error and nothing is written",
+              rc == 2 and t.written() == [] and not t.escaped() and "key" in out.lower(),
               f"rc={rc} written={t.written()} escaped={t.escaped()}\n{out[-200:]}")
 
 print("\nrecords that would be false are refused")
 with Tree() as t:
     rc, out = g1(t, "8", verdict="pass",
                  items=["ac-binary=no:not G/W/T", "sized=yes", "flags=yes", "no-open-question=yes"])
-    check("pass with an unsatisfied item is refused", rc != 0 and t.written() == [], f"rc={rc}\n{out[-200:]}")
+    check("pass with an unsatisfied item is refused", rc == 2 and t.written() == [], f"rc={rc}\n{out[-200:]}")
 with Tree() as t:
     rc, out = g1(t, "8", items=["ac-binary=yes", "sized=yes", "flags=yes"])
-    check("a checklist item left unassessed is refused", rc != 0 and t.written() == [], f"rc={rc}\n{out[-200:]}")
+    check("a checklist item left unassessed is refused", rc == 2 and t.written() == [], f"rc={rc}\n{out[-200:]}")
 with Tree() as t:
     rc, out = g1(t, "8", items=G1_ALL_YES + ["made-up=yes"])
-    check("an item not in .sdlc/process.yaml is refused", rc != 0 and t.written() == [], f"rc={rc}\n{out[-200:]}")
+    check("an item not in .sdlc/process.yaml is refused", rc == 2 and t.written() == [], f"rc={rc}\n{out[-200:]}")
 with Tree() as t:
     rc, out = g1(t, "8", verdict="fail", items=["ac-binary=no", "sized=yes", "flags=yes", "no-open-question=yes"])
-    check("an unsatisfied item with no gap is refused", rc != 0 and t.written() == [], f"rc={rc}\n{out[-200:]}")
+    check("an unsatisfied item with no gap is refused", rc == 2 and t.written() == [], f"rc={rc}\n{out[-200:]}")
 with Tree() as t:
     rc, out = g1(t, "8", verdict="fail",
                  items=["ac-binary=no:x\nverdict: pass", "sized=yes", "flags=yes", "no-open-question=yes"])
-    check("a gap that would forge a second verdict line is refused", rc != 0 and t.written() == [],
+    check("a gap that would forge a second verdict line is refused", rc == 2 and t.written() == [],
           f"rc={rc}\n{out[-200:]}")
 with Tree() as t:
     rc, out = g1(t, "8", role="product-owner\nverdict: pass")
-    check("a role that would forge a verdict line is refused", rc != 0 and t.written() == [],
+    check("a role that would forge a verdict line is refused", rc == 2 and t.written() == [],
           f"rc={rc}\n{out[-200:]}")
 with Tree() as t:
     rc, out = t.run("--gate", "g2", "--key", "8", "--verdict", "pass", "--role", "architect")
-    check("a gate other than g0/g1 is refused", rc != 0 and t.written() == [], f"rc={rc}\n{out[-200:]}")
+    check("a gate other than g0/g1 is refused", rc == 2 and t.written() == [], f"rc={rc}\n{out[-200:]}")
 
 if failures:
     print(f"\n{len(failures)} failure(s)")

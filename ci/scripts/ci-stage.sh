@@ -110,6 +110,13 @@ PY
     echo "── manifest validator refuses a vacuous pass (#111) ───────────────────"
     python test/validate-manifest.test.py
 
+    echo "── gate records: key validation, failed gates recorded (TheHub #60981) ─"
+    # Needs PyYAML: the writer reads the checklist ids from .sdlc/process.yaml.
+    python test/gate-record.test.py
+
+    echo "── platform validator: gate commands name evidence/ (TheHub #60981) ───"
+    python test/validate-platform.test.py
+
     # ADAPT: your formatter and type checker.
     echo "ADAPT: formatter --check, type checker"
     ;;
@@ -117,6 +124,9 @@ PY
   test)
     echo "── dashboard generator tests ──────────────────────────────────────────"
     python test/dashboard.test.py
+
+    echo "── control liveness counts records, not directories (TheHub #60981) ───"
+    python test/control-liveness.test.py
 
     echo "── IaC lane gate tests (#59989 / #60071) ───────────────────────────────"
     python test/checkov-gate.test.py
