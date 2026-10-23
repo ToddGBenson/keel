@@ -39,6 +39,8 @@ asks for — complete, not tidy:
 11. Verification plan — post-deploy checks and who runs them
 12. Communications
 13. Authorization — to be completed by the human approver
+14. A `verdict: pass` or `verdict: fail` line on a line of its own. `scripts/control-liveness.py`
+    counts G5 from `evidence/releases/<version>/change-record.md` carrying that line (POAM-018)
 
 ## 3. Readiness review
 

@@ -75,4 +75,6 @@ Not verified: screen-reader pass (no environment available) — stated, not clai
 
 ## Then
 
+The record carries a `verdict: pass` or `verdict: fail` line on a line of its own; `scripts/control-liveness.py` counts the gate from that line and nothing else (POAM-018).
+
 Write to `evidence/<issue>/g4/qa/`. Hand defects to `developer` — you do not fix what you find.

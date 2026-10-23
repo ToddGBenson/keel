@@ -63,7 +63,7 @@ review*; POAM-005 and POAM-006 closed later the same day when the repository was
 | POAM-013 | Monthly monitoring cadence approximated by a weekly trigger | CA-7 | Low | Todd Benson | 2026-11-11 | Open — accepted, detection is loud |
 | POAM-014 | **The merge gate verifies process, not code.** Tests and scans run in Concourse *after* merge (re-scoped 2026-08-14 from "no merge gate exists") | CM-3, CM-5, AC-5, SA-11 | **High** | Todd Benson | ~~2026-09-14~~ **2026-11-21** (extended once, 2026-10-22) | Open — measured 2026-10-22: `Concourse / keel` lands on `main` commits only and no check is required. PR heads do run `Unit results`, `Mykronos sast` and `Mykronos secrets` on Actions, none required. Closes when the check arrives on PR heads and is required (TheHub #60580) |
 | POAM-015 | Manifest coverage was checked per top-level directory, so six platform docs were never delivered to forks | CM-2, SA-10 | Medium | Todd Benson | 2026-08-14 | **Closed** — check now per file; six docs classified; both directions proven (#58) |
-| POAM-018 | **14 controls were marked satisfied on gates that have never run.** Five of six gates have produced zero evidence records; keel runs a one-gate lifecycle while documenting a six-gate one | SA-3, CA-2, CM-3, AC-3, AU-2, CP-10 +8 | **High** | Todd Benson | 2026-11-15 | Open — claims downgraded and measured; the gates remain unexercised |
+| POAM-018 | **14 controls were marked satisfied on gates that have never run.** Five of six gates have produced zero evidence records; keel runs a one-gate lifecycle while documenting a six-gate one | SA-3, CA-2, CM-3, AC-3, AU-2, CP-10 +8 | **High** | Todd Benson | 2026-11-15 | Open — claims downgraded and measured. **G1 has fired once (2026-10-23, TheHub #60981): `evidence/hub-60981/g1/ready.md`, `verdict: fail`.** G0, G1 and G5 now have a record path liveness can count; G0, G2, G4 and G5 remain unexercised |
 | POAM-017 | **Separation of duties is now agent-enforced, not human-enforced.** `delivery-lead` approves every gate; the control is a prompt boundary and a tool grant rather than a second person | AC-5, CM-5, SA-3 | **High** | Todd Benson | 2026-11-15 | Open — accepted by the system owner (ADR-0005) |
 | POAM-016 | **Two release paths that disagree.** `release.yml` still has `staging` and `authorize-and-deploy` jobs with a `PRODUCTION_URL`, describing a service deploy ADR-0004 says does not exist; Concourse has `release-preflight` → `authorize-release` | CM-3, CM-4, SA-10 | Medium | Todd Benson | 2026-09-14 | **Closed 2026-10-22** (TheHub #60935, 38 days late) — one path, `release.yml`: Concourse release jobs, task and script deleted; staging/deploy stubs and `PRODUCTION_URL` removed. Evidence: `evidence/143/` |
 
@@ -75,6 +75,11 @@ review*; POAM-005 and POAM-006 closed later the same day when the repository was
 |---|---|
 | G0 Intake · G1 Ready · G2 Design · G4 Verified · G5 Release | **0** |
 | G3 Code Complete | 12 |
+
+**Re-measured 2026-10-23 (TheHub #60981)**, after `scripts/control-liveness.py` began counting
+records (a file with a `verdict:` line) rather than directories, and G0/G1/G5 were given record
+paths: G0 0 · **G1 1** (`evidence/hub-60981/g1/ready.md`, NOT READY) · G2 0 · G3 15 · G4 0 · G5 0.
+The fifteen G3 records predate the verdict line and are named, frozen, in `LEGACY_G3_KEYS`.
 
 **keel runs a one-gate lifecycle while documenting a six-gate one.** Every change in this
 repository has gone idea → code → self-review → merge. Design review, threat modelling,
