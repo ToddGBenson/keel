@@ -231,7 +231,8 @@ def keel(root, *args, path=None):
     stubs.mkdir(exist_ok=True)
     # Never start a container from a test: docker here reports "not running",
     # so the gitleaks-allowlist step skips (a warning) instead of pulling an
-    # image. gitleaks itself is hidden for the same reason, by path_without.
+    # image. A stub, not path_without: on ubuntu-latest docker shares /usr/bin
+    # with bash. gitleaks, where installed, is hidden by path_without.
     (stubs / "docker").write_text("#!/usr/bin/env bash\nexit 1\n")
     (stubs / "docker").chmod(0o755)
     env = dict(os.environ, PATH=stubs.as_posix() + os.pathsep + (path or os.environ["PATH"]))
@@ -241,9 +242,10 @@ def keel(root, *args, path=None):
     return p.returncode, p.stdout + p.stderr
 
 
-base_path = path_without("gitleaks", "docker")
+base_path = path_without("gitleaks") if shutil.which("gitleaks") else os.environ["PATH"]
 if base_path is None:
-    check("can run ./keel check without docker or gitleaks", False)
+    print("  [skip] keel check cases: cannot hide gitleaks on this host without "
+          "hiding bash/python (it would scan a copy with no .git)")
 else:
     k = keel_copy()
     try:
@@ -274,7 +276,7 @@ else:
         (t / "manifest.txt").write_text("test/pass.test.py  test,quick  passing\n"
                                         "test/js.test.js  test  js\n", encoding="utf-8")
         (t / "js.test.js").write_text(PASS_JS, encoding="utf-8")
-        nn = path_without("gitleaks", "docker", "node")
+        nn = path_without("gitleaks", "node")
         if nn is None:
             print("  [skip] cannot hide node on this host without hiding bash/python")
         else:
