@@ -17,8 +17,8 @@ name and on an entry with no file behind it.
   Unlisted failing file: lint rc=1, naming it. Listed under `test`: lint rc=0, test rc=1,
   `FAILED: test/zz-deliberate.test.py`. Listed locally: `./keel check` red with
   `! warn: test/zz-deliberate.test.py FAILED`.
-- `test/test-manifest.test.py`: 11 of 28 checks fail against the old scripts; 28/28 pass on
-  this branch, locally (Windows) and on ubuntu-latest (`Unit suites`).
+- `test/test-manifest.test.py` against the old scripts: 11 checks FAIL (the script it drives
+  is missing, so its 15 own-tool cases cannot run at all); 28/28 pass on this branch, locally (Windows) and on ubuntu-latest (`Unit suites`).
 - Wall clock on the operator's Windows host, docker hidden: `./keel check` 3m58s,
   `./keel check --quick` 3m12s. The guard self-test is 2m41s of each.
 
