@@ -41,6 +41,10 @@ BRIEF = ROOT / ".claude" / "hooks" / "session-brief.sh"
 AF878F1 = ROOT / "test" / "fixtures" / "poam-af878f1.md"
 BASH = shutil.which("bash") or "bash"
 failures = []
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+except AttributeError:
+    pass
 
 
 def check(name, cond, detail=""):

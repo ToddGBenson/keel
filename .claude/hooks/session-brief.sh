@@ -36,5 +36,25 @@ if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
   fi
 fi
 
+# Surface POA&M items past their due date (TheHub #60977). POAM-010, POAM-014
+# and POAM-016 went 38-40 days overdue with nothing saying so. Silent when none
+# are overdue; skipped where scripts/poam.py does not exist (binnacle ships this
+# same hook without it). POAM_TODAY pins the date for test/poam.test.py.
+root="${CLAUDE_PROJECT_DIR:-$(cd "$(dirname "$0")/../.." && pwd)}"
+py="$(command -v python3 || command -v python || true)"
+if [ -n "$py" ] && [ -f "$root/scripts/poam.py" ] && [ -f "$root/docs/compliance/poam.md" ]; then
+  if late="$("$py" "$root/scripts/poam.py" --file "$root/docs/compliance/poam.md" \
+               --overdue ${POAM_TODAY:+--today "$POAM_TODAY"} 2>/dev/null)"; then
+    if [ -n "$late" ]; then
+      echo ""
+      echo "── POA&M items past due (docs/compliance/poam.md) ──"
+      printf '%s\n' "$late" | sed 's/^/  /'
+    fi
+  else
+    echo ""
+    echo "── POA&M register could not be parsed: run python scripts/poam.py ──"
+  fi
+fi
+
 echo ""
 exit 0

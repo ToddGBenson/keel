@@ -127,6 +127,9 @@ PY
     echo "── container-scan lane: no image is a failure, not a pass (#60935) ────"
     python test/trivy-gate.test.py
 
+    echo "── POA&M due dates: parse, count, overdue, --check (#60977) ───────────"
+    python test/poam.test.py
+
     echo "── JUnit wrapper tests (unit results to MyKronos) ─────────────────────"
     python test/junit-suite.test.py
 
