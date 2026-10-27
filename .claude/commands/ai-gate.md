@@ -96,6 +96,8 @@ Findings: HIGH — retrieved document content is passed to the renderer unescape
 
 ## Then
 
+The record carries a `verdict: pass` or `verdict: fail` line on a line of its own; `scripts/control-liveness.py` counts the gate from that line and nothing else (POAM-018).
+
 Write to `evidence/<issue>/g4/ai/`. Update `docs/compliance/ai-inventory.md`. Escalate any
 Critical or High to a human immediately.
 

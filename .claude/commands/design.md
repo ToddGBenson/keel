@@ -64,5 +64,7 @@ Approvers required: architect + security-engineer  [+ ai-risk-officer if AI-rele
 
 ## Then
 
+The record carries a `verdict: pass` or `verdict: fail` line on a line of its own; `scripts/control-liveness.py` counts the gate from that line and nothing else (POAM-018).
+
 Write artifacts to `evidence/<issue>/g2/`. **Architect and Security co-approve; a human
 records it.** Neither approves alone, and the architect does not approve their own design.

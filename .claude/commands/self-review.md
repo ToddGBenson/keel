@@ -60,13 +60,14 @@ Ask the two questions only you can:
 
 ## The artifact
 
-Write `evidence/<issue>/g3/self-review.md`:
+Write `evidence/<issue>/g3/self-review.md`. Its `verdict: pass|fail` line is what `scripts/control-liveness.py` counts; a record without one does not count (POAM-018):
 
 ```markdown
 # Self-review — #142
 
 Mode: solo (POAM-008)
 PR: #17   Author: <you>   Date: 2026-08-09
+verdict: pass
 Opened: 2026-08-08 16:40   Reviewed: 2026-08-09 09:15   Cooling-off: 16h ✅
 
 ## Verified independently

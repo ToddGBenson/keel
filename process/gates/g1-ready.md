@@ -1,7 +1,8 @@
 # G1 — Ready (Definition of Ready)
 
 **Recommends:** Product Owner (content) + UX (usability & accessibility criteria) · **Approves:** Delivery Lead (ADR-0005)
-**Command:** `/ready` · **Reference:** `docs/03-refinement.md`
+**Command:** `/ready` · **Evidence:** `evidence/<key>/g1/ready.md`, written by
+`scripts/gate-record.py` on every run (READY or NOT READY) · **Reference:** `docs/03-refinement.md`
 **Controls:** SA-3, SA-4(3), SA-8, SA-15, PL-8, AI RMF MAP 2.3
 
 A story that passes this gate can be started **today** without asking a question whose

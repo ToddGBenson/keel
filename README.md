@@ -41,7 +41,8 @@ five commands you type daily, the two speeds (fast lane vs. full flow), and the 
 that never bend. The rest of the docs are reference.
 
 ```bash
-./keel check          # fast local mirror of CI — run constantly
+./keel check          # every test CI runs (test/manifest.txt) — before every push
+./keel check --quick  # the fast subset for the inner loop — not a CI mirror
 ./keel fast "docs: …" # trivial change, no ceremony (docs/config only)
 ./keel ship           # check, then push
 ./keel help           # everything else

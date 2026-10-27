@@ -8,7 +8,8 @@ If you read nothing else, read this.
 One command, `./keel`. Learn these five:
 
 ```bash
-./keel check          # run constantly — mirrors CI locally in seconds
+./keel check          # before every push — runs every test CI runs (test/manifest.txt)
+./keel check --quick  # the inner loop — parse, integrity, self-test, `quick` tests
 ./keel fast "msg"     # trivial change (docs/config): commit, no ceremony
 ./keel ship           # check, then push the current branch
 ./keel status         # open PRs, their state, open findings
