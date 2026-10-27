@@ -22,6 +22,7 @@ test/trivy-gate.test.py             test         container-scan lane: no image i
 test/junit-suite.test.py            test         JUnit wrapper tests (unit results to MyKronos)
 test/mykronos-preflight.test.py     test         Mykronos preflight retries transient failures, never a 401
 test/test-manifest.test.py          test         this list: an unlisted test file or a missing entry fails CI (TheHub #60980)
+test/gitleaks-allowlist.test.py     test         gitleaks allowlist check caps its containers (keel #147 review)
 # selftest.sh was green while the keel#93 bypasses worked. This replays every
 # previously fixed bypass through the real hooks, in both parser modes.
 test/hook-bypass-corpus.test.py     test,quick   guard hook bypass corpus (TheHub #60818)
