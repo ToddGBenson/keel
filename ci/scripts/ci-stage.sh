@@ -110,38 +110,15 @@ PY
     # has just installed from ci/requirements.txt.
     python scripts/test-manifest.py run --stage lint --node-missing skip
 
-    echo "── gate records: key validation, failed gates recorded (TheHub #60981) ─"
-    # Needs PyYAML: the writer reads the checklist ids from .sdlc/process.yaml.
-    python test/gate-record.test.py
-
-    echo "── platform validator: gate commands name evidence/ (TheHub #60981) ───"
-    python test/validate-platform.test.py
-
     # ADAPT: your formatter and type checker.
     echo "ADAPT: formatter --check, type checker"
     ;;
 
   test)
-    echo "── dashboard generator tests ──────────────────────────────────────────"
-    python test/dashboard.test.py
-
-    echo "── control liveness counts records, not directories (TheHub #60981) ───"
-    python test/control-liveness.test.py
-
-    echo "── IaC lane gate tests (#59989 / #60071) ───────────────────────────────"
-    python test/checkov-gate.test.py
-
-    echo "── SCA lane gate tests: gate by default, report-only for upload (#133) ─"
-    python test/grype-gate.test.py
-
-    echo "── container-scan lane: no image is a failure, not a pass (#60935) ────"
-    python test/trivy-gate.test.py
-
-    echo "── POA&M due dates: parse, count, overdue, --check (#60977) ───────────"
-    python test/poam.test.py
-
-    echo "── JUnit wrapper tests (unit results to MyKronos) ─────────────────────"
-    python test/junit-suite.test.py
+    # Several test-stage entries need PyYAML (hook-bypass-corpus,
+    # platform-release, supply-chain), so install it before running any of them.
+    python -m pip install --quiet --disable-pip-version-check \
+      --require-hashes -r ci/requirements.txt
 
     echo "── test-stage test files (test/manifest.txt: test) ────────────────────"
     # Every entry the manifest tags `test`, in its order; the lint stage checks
@@ -156,21 +133,6 @@ PY
     # TEST beats EXAMINE. Three real defects in these guards were found only by
     # exercising them (POAM-002/003/004).
     bash .claude/hooks/selftest.sh
-
-    echo "── guard hook bypass corpus (TheHub #60818) ───────────────────────────"
-    # selftest.sh was green while the keel#93 bypasses worked. This replays every
-    # previously fixed bypass through the real hooks, in both parser modes, and
-    # fails if any is allowed again. Needs PyYAML, so install it here as lint does.
-    python -m pip install --quiet --disable-pip-version-check       --require-hashes -r ci/requirements.txt
-    python test/hook-bypass-corpus.test.py
-
-    echo "── platform release: signed, and an unsigned one is refused (#144) ─────"
-    # After the pip install above: the release.yml checks need PyYAML.
-    python test/platform-release.test.py
-    # keel's own lanes (supply-chain.sh, release.yml). Project-owned and
-    # separate from the platform-owned test above, because a fork adapts
-    # these files and must be able to edit the test that asserts on them.
-    python test/supply-chain.test.py
 
     echo "── agent assurance (AIC-12 structural) ────────────────────────────────"
     bash evals/run-agent-evals.sh
