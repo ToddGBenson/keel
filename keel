@@ -9,7 +9,8 @@
 #   ./keel ship           check, then push the current branch
 #   ./keel secure         guard self-test + platform integrity + gaps
 #   ./keel evals          agent structural assurance (AIC-12, automated part)
-#   ./keel status         where everything sits: PRs, checks, findings
+#   ./keel status         where everything sits: PRs, findings, overdue POA&M
+#                         --today YYYY-MM-DD (default: today, UTC)
 #   ./keel dash           generate + open a visual dashboard (backlog, CI, controls)
 #   ./keel batch <epic>   may this epic be verified as one batch? (ADR-0002)
 #   ./keel sprint         describe an idea in sprint/inbox -> tested PR (you merge)
@@ -221,12 +222,29 @@ cmd_sync()   { [ "${1:-}" = "--apply" ] && bash scripts/sync-platform.sh || bash
 cmd_setup()  { bash scripts/install-hooks.sh; }
 
 cmd_status() {
+  # --today YYYY-MM-DD is handed to scripts/poam.py, so the date is testable.
+  local poam_args=()
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --today) [ $# -ge 2 ] || die "--today needs YYYY-MM-DD"; poam_args+=(--today "$2"); shift 2 ;;
+      *) die "unknown status option '$1'" ;;
+    esac
+  done
   have gh || die "gh CLI not found"
   say "keel status"
   gh pr list --json number,title,mergeStateStatus \
     --jq '.[] | "  PR #\(.number)  \(.mergeStateStatus)  \(.title)"' 2>/dev/null || warn "no open PRs / not a gh repo"
-  local open; open="$(grep -c '| POAM-[0-9]* .* Open' docs/compliance/poam.md 2>/dev/null || echo 0)"
-  printf '  open POA&M findings: %s  (docs/compliance/poam.md)\n' "$open"
+  # The register is parsed, not grepped (TheHub #60977). `grep -c '... Open'`
+  # reported 7 of 8 (it missed POAM-010, 'In progress') and never read a date,
+  # so three items went 38-40 days past due with nothing saying so.
+  local out rc
+  out="$("$PY" scripts/poam.py ${poam_args[@]+"${poam_args[@]}"} 2>&1)"; rc=$?
+  if [ "$rc" -ne 0 ]; then
+    warn "POA&M register could not be read (scripts/poam.py exit $rc):"
+    printf '%s\n' "$out" | sed 's/^/    /'
+    return "$rc"
+  fi
+  printf '%s\n' "$out" | sed '1s|$|  (docs/compliance/poam.md)|; s/^/  /'
 }
 
 cmd_help() {
