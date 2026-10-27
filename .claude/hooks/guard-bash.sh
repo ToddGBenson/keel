@@ -134,6 +134,16 @@ g 'continue-on-error:[[:space:]]*true' \
 # explicit GET turns the fields into query parameters. So an invocation with a
 # body flag and no method is a write. Judged per invocation, not per command
 # line: a `-X GET` earlier in a && chain must not exempt a later POST.
+# TheHub #61038 -- operator decision 2026-10-26: agents never approve an environment
+# deployment. The agent's gh CLI is authenticated as the same account that is the
+# production environment's required reviewer, so to GitHub an agent's approval IS
+# the human's. Two REST endpoints review a waiting run: pending_deployments (the
+# environment's required reviewers) and deployment_protection_rule (custom gates).
+# A GET of pending_deployments lists what is waiting and stays allowed. gh 2.86 has
+# no `gh run` subcommand that approves (cancel, delete, download, list, rerun, view,
+# watch), so there is no named subcommand to block -- only these routes, and curl.
+DEPLOY_REVIEW='/actions/runs/[^|;&/]+/(pending_deployments|deployment_protection_rule)([^A-Za-z0-9_-]|$)'
+
 gh_api_write() { # true if this is a gh api call carrying a write method
   g "$B"'gh[[:space:]]+api\b' || return 1
   printf '%s' "$cmd" | grep -qE '(-X[[:space:]]*|--method[[:space:]]*=?[[:space:]]*)(POST|PUT|PATCH|DELETE)\b' && return 0
@@ -158,6 +168,9 @@ if gh_api_write; then
     && block "writing a secret through gh api. Agents never touch secrets; escalate to a human." "AIC-5, IA-5"
   g "$B"'gh[[:space:]]+api[^|;&]*/environments([^A-Za-z0-9_-]|$)' \
     && block "changing a deployment environment. Its reviewers ARE the G5 authorization gate." "CM-3, AC-5, AIC-1"
+  # TheHub #61038: approving the deployment is the gate itself, not its configuration.
+  g "$B"'gh[[:space:]]+api[^|;&]*'"$DEPLOY_REVIEW" \
+    && block "approving or rejecting an environment deployment through gh api. Only a human reviews a deployment; the environment's reviewers ARE the G5 authorization gate." "CM-3, AC-5, AIC-1, AIC-2"
   # #127: the push-to-main rule knew one spelling, git push. These three reach main
   # through the REST API instead.
   g "$B"'gh[[:space:]]+api[^|;&]*/git/refs/heads/(main|master)'"$E" \
@@ -207,6 +220,8 @@ $(cat -- "$f")"
       && block "changing branch protection or a ruleset through GraphQL. This enforces separation of duties." "AC-5, CM-5"
     m '(create|update|delete)Environment' \
       && block "changing a deployment environment through GraphQL. Its reviewers ARE the G5 authorization gate." "CM-3, AC-5, AIC-1"
+    m '(approve|reject)Deployments' \
+      && block "approving or rejecting an environment deployment through GraphQL. Only a human reviews a deployment; the environment's reviewers ARE the G5 authorization gate." "CM-3, AC-5, AIC-1, AIC-2"
     # #127: moving a ref is a push. A ref id is opaque -- it may be main -- so any
     # GraphQL ref move is refused; a commit is refused when main appears anywhere in
     # the call (inline, or as a variable: -f b=main) or its branch is named only by
@@ -219,6 +234,26 @@ $(cat -- "$f")"
         || ! printf '%s' "$gql" | grep -qE '(^|[^A-Za-z0-9_])branchName([^A-Za-z0-9_]|$)'; } \
         && block "a commit to main through GraphQL (or to a branch named only by id). All change goes through a reviewed PR." "AC-5, CM-5"
     fi
+  fi
+fi
+
+# TheHub #61038: curl reaches the same endpoints as gh api, with the token from
+# `gh auth token`, and no rule above reads curl. Judged per invocation (backslash-
+# continued lines rejoined first) and on the endpoint path, not the host, so a full
+# api.github.com URL and an Enterprise one are the same request. As with gh api, a
+# body makes it a write unless a GET was asked for (-G/--get, or -X GET); a GET of
+# pending_deployments lists what is waiting and stays allowed.
+if g "$B"'curl([[:space:]]|$)'; then
+  curl_segs=$(printf '%s' "${cmd//$'\\\n'/ }" | tr '|;&' '\n' | grep -E "$B"'curl[[:space:]]')
+  printf '%s' "$curl_segs" | grep -qE '(^|[^A-Za-z0-9_])(approve|reject)Deployments([^A-Za-z0-9_]|$)' \
+    && block "approving or rejecting an environment deployment through GraphQL over curl. Only a human reviews a deployment; the environment's reviewers ARE the G5 authorization gate." "CM-3, AC-5, AIC-1, AIC-2"
+  curl_dr=$(printf '%s\n' "$curl_segs" | grep -E "$DEPLOY_REVIEW")
+  if [ -n "$curl_dr" ]; then
+    curl_m='(-[a-zA-Z]*X[[:space:]]*|--request[[:space:]=]+)[\"'"'"']*'
+    { printf '%s\n' "$curl_dr" | grep -E "$curl_m"'[A-Za-z]' | grep -qvE "$curl_m"'(GET|HEAD|get|head)([^A-Za-z]|$)' \
+      || printf '%s\n' "$curl_dr" | grep -E '[[:space:]](-[a-zA-Z]*[dFT]|--data|--json|--form|--upload-file)' \
+           | grep -qvE "$curl_m"'[A-Za-z]|[[:space:]](-[a-zA-Z]*G|--get)([[:space:]]|$)'; } \
+      && block "approving or rejecting an environment deployment through curl. Only a human reviews a deployment; the environment's reviewers ARE the G5 authorization gate." "CM-3, AC-5, AIC-1, AIC-2"
   fi
 fi
 

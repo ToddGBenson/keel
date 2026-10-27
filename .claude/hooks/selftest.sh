@@ -29,6 +29,9 @@ payload() {
   # quoted case was malformed JSON: jq extracted nothing and the hook allowed it, so a
   # must-allow case with quotes passed without the hook ever seeing the command (#117).
   esc=$(printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g')
+  # And a newline, for the same reason: a raw one is not valid JSON, so a multi-line
+  # command reached no rule (TheHub #61038's backslash-continued curl case).
+  esc=${esc//$'\n'/\\n}
   printf '{"tool_input":{"command":"%s"}}' "$esc"
 }
 wpayload() {
@@ -232,6 +235,41 @@ check "contents write to a feature" allow "$(payload 'gh api -X PUT repos/O/R/co
 check "contents read"               allow "$(payload 'gh api repos/O/R/contents/README.md')"                             guard-bash.sh
 check "merge a branch into main"    block "$(payload 'gh api repos/O/R/merges -f base=main -f head=feat-x')"              guard-bash.sh
 check "merge main into a feature"   allow "$(payload 'gh api repos/O/R/merges -f base=feat-x -f head=main')"              guard-bash.sh
+# TheHub #61038 -- operator decision 2026-10-26: agents never approve an environment
+# deployment. The agent's gh is the production environment's required reviewer, so
+# GitHub would record an agent's approval as the human's. Every route is exercised:
+# gh api (explicit and implicit POST), curl, GraphQL, and the wrappers. The full set
+# of spellings is in test/hook-bypass-corpus.yml; reads of the same endpoints pass.
+PD='repos/O/R/actions/runs/123/pending_deployments'
+DPR='repos/O/R/actions/runs/123/deployment_protection_rule'
+check "approve deployment, --method" block "$(payload "gh api --method POST $PD -f state=approved -F 'environment_ids[]=1' -f comment=ok")" guard-bash.sh
+check "approve deployment, -XPOST"  block "$(payload "gh api -XPOST $PD --input approve.json")"                            guard-bash.sh
+check "approve deployment, implicit" block "$(payload "gh api $PD -f state=approved -F 'environment_ids[]=1'")"            guard-bash.sh
+check "protection rule review"      block "$(payload "gh api -X POST $DPR -f environment_name=production -f state=approved")" guard-bash.sh
+check "approve deployment in \$(...)" block "$(payload "x=\$(gh api $PD -f state=approved)")"                              guard-bash.sh
+check "approve deployment in sh -c" block "$(payload "sh -c 'gh api -X POST $PD -f state=approved'")"                      guard-bash.sh
+check "approve deployment, curl -X" block "$(payload "curl -X POST -H 'Authorization: Bearer x' https://api.github.com/$PD -d '{\"state\":\"approved\"}'")" guard-bash.sh
+check "approve deployment, curl -d" block "$(payload "curl -s https://api.github.com/$PD --data @approve.json")"           guard-bash.sh
+check "approve, curl over lines"    block "$(payload "curl -X POST \\
+  https://api.github.com/$PD \\
+  -d @approve.json")"                                                                                                      guard-bash.sh
+check "protection rule, curl"       block "$(payload "curl --request POST https://api.github.com/$DPR --json @rule.json")"  guard-bash.sh
+check "graphql approveDeployments"  block "$(payload "gh api graphql -f query='mutation { approveDeployments(input: {workflowRunId: \"X\", environmentIds: [\"E\"]}) { clientMutationId } }'")" guard-bash.sh
+check "graphql rejectDeployments"   block "$(payload "gh api graphql -f query='mutation { rejectDeployments(input: {workflowRunId: \"X\", environmentIds: [\"E\"]}) { clientMutationId } }'")" guard-bash.sh
+GQL_DEP=$(mktemp); printf '%s\n' 'mutation { approveDeployments(input: {workflowRunId: "X", environmentIds: ["E"]}) { clientMutationId } }' > "$GQL_DEP"
+check "approveDeployments from file" block "$(payload "gh api graphql -F query=@$GQL_DEP")"                                guard-bash.sh
+rm -f "$GQL_DEP"
+check "approveDeployments via curl" block "$(payload "curl -X POST https://api.github.com/graphql -d '{\"query\":\"mutation { approveDeployments(input: {workflowRunId: 1}) { clientMutationId } }\"}'")" guard-bash.sh
+check "list pending deployments"    allow "$(payload "gh api $PD")"                                                        guard-bash.sh
+check "-X GET pending deployments"  allow "$(payload "gh api -X GET $PD -f per_page=5")"                                   guard-bash.sh
+check "curl GET pending deployments" allow "$(payload "curl -s -H 'Authorization: Bearer x' https://api.github.com/$PD")" guard-bash.sh
+check "curl -X GET pending deployments" allow "$(payload "curl -s -X GET https://api.github.com/$PD")"                    guard-bash.sh
+check "curl -G with -d is a query"  allow "$(payload "curl -s -G https://api.github.com/$PD -d per_page=5")"               guard-bash.sh
+check "curl -o a pending list"      allow "$(payload "curl -sSL -o pd.json https://api.github.com/$PD")"                  guard-bash.sh
+check "curl POST elsewhere"         allow "$(payload "curl -X POST https://example.invalid/hook -d '{\"text\":\"pending_deployments\"}'")" guard-bash.sh
+check "gh run view / list"          allow "$(payload 'gh run view 123 --json jobs && gh run list --limit 5')"              guard-bash.sh
+check "gh run rerun"                allow "$(payload 'gh run rerun 123 --failed')"                                         guard-bash.sh
+check "graphql pending requests read" allow "$(payload "gh api graphql -f query='query { node(id: \"X\") { ... on WorkflowRun { pendingDeploymentRequests(first: 5) { nodes { environment { name } } } } } }'")" guard-bash.sh
 # #117 -- reads inside a substitution stay allowed, and the anchor still needs a word
 # boundary: a command that merely ends in "gh" is not gh.
 # shellcheck disable=SC2016  # literal $(...) / backticks: the unexpanded command text is the hook input under test

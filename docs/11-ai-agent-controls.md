@@ -82,6 +82,7 @@ The columns are not equally strong, and saying so is the point of this control s
 | Column | Enforcement | Strength |
 |---|---|---|
 | **May approve** | `guard-bash.sh` blocks `gh pr review --approve`; GitHub branch protection blocks self-approval | **Enforced** |
+| **May approve a deployment** (no agent, ever; operator decision 2026-10-26) | `guard-bash.sh` blocks reviewing a waiting run's environment deployment: `POST .../actions/runs/{id}/pending_deployments` or `.../deployment_protection_rule` via `gh api` (any method spelling, or a POST implied by `-f`/`-F`/`--input`) or `curl`, and the GraphQL `approveDeployments`/`rejectDeployments` mutations, also inside `$(...)`, backticks or `sh -c`. Listing pending deployments stays allowed; `gh` 2.86 has no `gh run` subcommand that approves. The agent's `gh` signs in as the environment's required reviewer, so GitHub cannot tell the two apart | ⚠️ **Hook-enforced** — a denylist over command text, until agents have their own GitHub identity (TheHub #61039) |
 | **May push/merge** | `guard-bash.sh` blocks `gh pr merge`, force-push, direct-to-`main`; branch protection backs it | **Enforced** |
 | **May run commands** | `settings.json` deny/ask rules + `guard-bash.sh` | **Enforced** |
 | **May write source** | The agent's role prompt, only | ⚠️ **Prompt-enforced — advisory** |
