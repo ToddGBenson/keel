@@ -16,6 +16,10 @@ PATH, so what is tested is the script's own decisions:
     A tag pushed on a commit whose release.yml was rewritten (drops the G5
     approval) is refused, though its signature is otherwise valid (HubOps
     review of #145, finding 1);
+  * verify refuses a tag whose commit does not DESCEND from the release floor,
+    a commit hard-coded in the script, even when that commit is on main: main's
+    own history holds release.yml versions that interpolated a free-text input
+    into `run:` while holding `id-token: write` (wave-2 review of #145);
   * verify --tree refuses a tree whose platform files were changed or added to.
 
 PLATFORM-OWNED (platform/MANIFEST.yml), so it reads only platform-owned files.
@@ -37,6 +41,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 RELEASE_SH = ROOT / "scripts" / "platform-release.sh"
+FLOOR_LINE = re.compile(r'^RELEASE_FLOOR="[0-9a-f]{40}"$', re.M)
 ISSUER = "https://token.actions.githubusercontent.com"
 failures = []
 
@@ -90,14 +95,40 @@ def git_cmd(tree: Path):
             "-c", "core.autocrlf=false", "-c", "commit.gpgsign=false", "-c", "tag.gpgsign=false"]
 
 
+def floored_script(tmp: Path, floor: str) -> Path:
+    """A copy of the real script whose hard-coded floor is the fixture's floor.
+
+    Exactly one RELEASE_FLOOR line must be replaced, so a script that loses
+    its floor constant cannot pass these tests by accident."""
+    text = RELEASE_SH.read_text(encoding="utf-8")
+    new, n = FLOOR_LINE.subn(f'RELEASE_FLOOR="{floor}"', text)
+    copy = tmp / "platform-release.floored.sh"
+    copy.write_text(new, encoding="utf-8", newline="\n")
+    return copy if n == 1 else RELEASE_SH
+
+
 def make_tree(tmp: Path) -> Path:
     """A small git repository with platform-owned, project-owned and untracked files.
 
-    Branch `main` carries the reviewed history and the tag v1.2.0 (annotated).
+    Branch `main` carries the reviewed history. Its first commit, tagged
+    v0.9.0, is BELOW the release floor: the shape of keel's pre-af878f1
+    release.yml, which interpolated a dispatch input into `run:` while the job
+    held `id-token: write`. The next commit is the floor, tagged v1.2.0
+    (annotated).
     Branch `evil` is one commit off main, never merged, tagged v6.6.6: the
     shape of a tag pushed on a commit whose release.yml was rewritten.
     """
     tree = tmp / "tree"
+    git = git_cmd(tree)
+    old = tree / ".github" / "workflows" / "release.yml"
+    old.parent.mkdir(parents=True)
+    old.write_text("permissions: {id-token: write}\nrun: echo ${{ inputs.change_record }}\n",
+                   encoding="utf-8")
+    subprocess.run([*git, "init", "-q", "-b", "main"], check=True)
+    subprocess.run([*git, "add", "-A"], check=True)
+    subprocess.run([*git, "commit", "-q", "-m", "release.yml before the floor (injectable)"], check=True)
+    subprocess.run([*git, "tag", "-a", "-m", "old release", "v0.9.0"], check=True)
+    old.write_text("# authorize-release, no inputs, no id-token\n", encoding="utf-8")
     for rel, body in {
         "platform/MANIFEST.yml": MANIFEST_YML,
         "scripts/b.sh": "echo b\n",
@@ -111,13 +142,11 @@ def make_tree(tmp: Path) -> Path:
         f = tree / rel
         f.parent.mkdir(parents=True, exist_ok=True)
         f.write_bytes(body.encode("utf-8"))
-    git = git_cmd(tree)
-    subprocess.run([*git, "init", "-q", "-b", "main"], check=True)
     subprocess.run([*git, "add", "-A"], check=True)
-    subprocess.run([*git, "commit", "-q", "-m", "fixture"], check=True)
+    subprocess.run([*git, "commit", "-q", "-m", "fixture: the release floor"], check=True)
     subprocess.run([*git, "tag", "-a", "-m", "release", "v1.2.0"], check=True)
     subprocess.run([*git, "checkout", "-q", "-b", "evil"], check=True)
-    (tree / ".github" / "workflows").mkdir(parents=True)
+    (tree / ".github" / "workflows").mkdir(parents=True, exist_ok=True)
     (tree / ".github" / "workflows" / "release.yml").write_text("# no G5 gate\n", encoding="utf-8")
     subprocess.run([*git, "add", "-A"], check=True)
     subprocess.run([*git, "commit", "-q", "-m", "release.yml without authorize-release"], check=True)
@@ -166,13 +195,17 @@ try:
     argv = tmp / "cosign-argv.txt"
     main_sha = rev(tree, "v1.2.0^{commit}")
     evil_sha = rev(tree, "v6.6.6^{commit}")
+    old_sha = rev(tree, "v0.9.0^{commit}")
+    script = floored_script(tmp, main_sha)
+    check("the script has exactly one hard-coded RELEASE_FLOOR=\"<40-hex sha>\" line",
+          len(FLOOR_LINE.findall(RELEASE_SH.read_text(encoding="utf-8"))) == 1)
 
     def verify(bundle, cosign_rc=0, tag="v1.2.0", tree_dir=None, manifest=out,
-               git_dir=tree, trusted="main", omit=()):
+               git_dir=tree, trusted="main", omit=(), sh=None):
         if argv.exists():
             argv.unlink()
         cosign_stub(stubs, argv, cosign_rc)
-        args = [RELEASE_SH.as_posix(), "verify", "--manifest", manifest.as_posix(),
+        args = [(sh or script).as_posix(), "verify", "--manifest", manifest.as_posix(),
                 "--bundle", bundle, "--repo", "owner/keel", "--tag", tag]
         if "--git" not in omit:
             args += ["--git", git_dir.as_posix()]
@@ -226,6 +259,17 @@ try:
     check("verify: ... and refused before cosign, whatever the signature says", called is None, str(called))
     check("verify: ... naming the commit it refused", evil_sha[:12] in log, log)
 
+    # ── wave-2 review: "on main" is not enough; main holds injectable versions ─
+    rc, log, called = verify(bundle.as_posix(), tag="v0.9.0")
+    check("verify: a tag on main BELOW the release floor -> refused (old, injectable release.yml)",
+          rc == 1 and "release floor" in log, log)
+    check("verify: ... refused before cosign, whatever the signature says", called is None, str(called))
+    check("verify: ... naming the commit it refused", old_sha[:12] in log, log)
+
+    rc, log, called = verify(bundle.as_posix(), sh=RELEASE_SH)
+    check("verify: a repository that does not hold the floor commit -> refused, not skipped",
+          rc == 1 and "release floor" in log and called is None, log)
+
     rc, log, called = verify(bundle.as_posix(), tag="v9.9.9")
     check("verify: a tag the repository does not have -> refused",
           rc == 1 and "v9.9.9" in log and called is None, log)
@@ -245,14 +289,14 @@ try:
     check("verify: the same tag passes when its commit IS on the trusted ref (guard)",
           rc == 0 and flag(called, "--certificate-github-workflow-sha") == evil_sha, log)
 
-    rc, log = bash([RELEASE_SH.as_posix(), "verify", "--manifest", out.as_posix(),
+    rc, log = bash([script.as_posix(), "verify", "--manifest", out.as_posix(),
                     "--bundle", bundle.as_posix(), "--repo", "owner/keel",
                     "--git", tree.as_posix(), "--trusted-ref", "main"], cwd=tmp, stubs=stubs)
     check("verify: no --tag -> refused (a signature is bound to its tag)", rc == 1, log)
 
     shutil.rmtree(stubs)
     stubs.mkdir()
-    rc, log = bash([RELEASE_SH.as_posix(), "verify", "--manifest", out.as_posix(),
+    rc, log = bash([script.as_posix(), "verify", "--manifest", out.as_posix(),
                     "--bundle", bundle.as_posix(), "--repo", "owner/keel", "--tag", "v1.2.0",
                     "--git", tree.as_posix(), "--trusted-ref", "main"],
                    # git stays reachable (it resolves the tag); cosign does not.

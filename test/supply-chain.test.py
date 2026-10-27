@@ -102,32 +102,61 @@ def git(repo: Path, *args, capture=False):
 print("supply-chain.sh STAGE=verify")
 
 
-def run_verify_stage(release, cosign_rc=0, status=None, env_extra=None):
+FLOOR_LINE = re.compile(r'^RELEASE_FLOOR="[0-9a-f]{40}"$', re.M)
+
+
+def run_verify_stage(release, cosign_rc=0, status=None, env_extra=None, manifest_text=None):
     """`release`: None = no body; else the latest-release JSON body.
     `status`: the releases API's HTTP status (default 200 with a body, else 404).
+    `manifest_text`: the release's platform-manifest.txt asset; by default the
+    true manifest of v1.2.0's tree (what release.yml would have signed).
 
-    repo/ is a git repository like Concourse's checkout of main: HEAD is main,
-    v1.2.0 is on it, v6.6.6 is on a commit that was never merged.
-    Returns (rc, log, cosign argv or None, curl log text)."""
+    repo/ is a git repository like Concourse's checkout of main: HEAD is main.
+    Its root commit, v0.9.0, is below the release floor (the floor is the next
+    commit, hard-coded into the copied platform-release.sh); v1.2.0 is on main
+    above it; v6.6.6 is on a commit that was never merged; and main has moved
+    on after v1.2.0, changing a platform file.
+    Returns (rc, log, cosign argv or None, curl log text, tag shas)."""
     tmp = Path(tempfile.mkdtemp(prefix="verify-stage-"))
     try:
         repo = tmp / "repo"
         (repo / "scripts").mkdir(parents=True)
         (repo / "ci" / "scripts").mkdir(parents=True)
-        shutil.copy(RELEASE_SH, repo / "scripts" / "platform-release.sh")
-        shutil.copy(SUPPLY_SH, repo / "ci" / "scripts" / "supply-chain.sh")
+        (repo / "platform").mkdir(parents=True)
         git(repo, "init", "-q", "-b", "main")
+        (repo / "old-release.yml").write_text("id-token: write; ${{ inputs.change_record }}\n",
+                                              encoding="utf-8")
+        git(repo, "add", "-A")
+        git(repo, "commit", "-q", "-m", "below the floor")
+        git(repo, "tag", "-a", "-m", "old release", "v0.9.0")
+        git(repo, "commit", "-q", "--allow-empty", "-m", "the release floor")
+        floor = git(repo, "rev-parse", "HEAD", capture=True)
+        (repo / "scripts" / "platform-release.sh").write_text(
+            FLOOR_LINE.sub(f'RELEASE_FLOOR="{floor}"', RELEASE_SH.read_text(encoding="utf-8")),
+            encoding="utf-8", newline="\n")
+        shutil.copy(SUPPLY_SH, repo / "ci" / "scripts" / "supply-chain.sh")
+        (repo / "platform" / "MANIFEST.yml").write_text(
+            "version: 1\nplatform_owned:\n  - scripts/\n  - platform/\nmerge_required:\n  - ci/\n",
+            encoding="utf-8", newline="\n")
         git(repo, "add", "-A")
         git(repo, "commit", "-q", "-m", "main")
         git(repo, "tag", "-a", "-m", "release", "v1.2.0")
+        true_manifest = tmp / "true-manifest.txt"
+        subprocess.run(["bash", (repo / "scripts" / "platform-release.sh").as_posix(), "manifest",
+                        true_manifest.as_posix()], cwd=repo, check=True, capture_output=True)
         git(repo, "checkout", "-q", "-b", "evil")
         (repo / "evil.txt").write_text("release.yml without its G5 gate\n", encoding="utf-8")
         git(repo, "add", "-A")
         git(repo, "commit", "-q", "-m", "evil")
         git(repo, "tag", "v6.6.6")
         git(repo, "checkout", "-q", "main")
-        git(repo, "commit", "-q", "--allow-empty", "-m", "a later main commit")
-        shas = {t: git(repo, "rev-parse", f"{t}^{{commit}}", capture=True) for t in ("v1.2.0", "v6.6.6")}
+        # main moves on after the release and changes a platform file: --tree
+        # must check the TAG's tree, not this checkout of main.
+        (repo / "scripts" / "later.sh").write_text("echo later\n", encoding="utf-8")
+        git(repo, "add", "-A")
+        git(repo, "commit", "-q", "-m", "a later main commit")
+        shas = {t: git(repo, "rev-parse", f"{t}^{{commit}}", capture=True)
+                for t in ("v0.9.0", "v1.2.0", "v6.6.6")}
         (tmp / "artifact").mkdir()
         fixtures = tmp / "fixtures"
         fixtures.mkdir()
@@ -136,7 +165,8 @@ def run_verify_stage(release, cosign_rc=0, status=None, env_extra=None):
         code = status if status is not None else (200 if release is not None else 404)
         if code != 200 and release is None:
             (fixtures / "latest.json").write_text('{"message": "stub"}', encoding="utf-8")
-        (fixtures / "platform-manifest.txt").write_text("0" * 64 + "  scripts/a.sh\n", encoding="utf-8")
+        (fixtures / "platform-manifest.txt").write_bytes(
+            manifest_text.encode("utf-8") if manifest_text is not None else true_manifest.read_bytes())
         (fixtures / "platform-manifest.sigstore.json").write_text('{"stub": 1}\n', encoding="utf-8")
         stubs = tmp / "stubs"
         stubs.mkdir()
@@ -237,6 +267,18 @@ check("verify-artifact: checks release.yml's identity on the RELEASED tag",
 check("verify-artifact: pins the certificate to the tag's commit on main (finding 1)",
       flag(called, "--certificate-github-workflow-sha") == shas["v1.2.0"], str(called))
 
+check("verify-artifact: --tree: the signed manifest is checked against the TAG's tree (Low, wave-2 review)",
+      "tree: ok" in log, log)
+
+rc, log, called, clog, _ = run_verify_stage(signed(), cosign_rc=0,
+                                            manifest_text="0" * 64 + "  scripts/a.sh\n")
+check("verify-artifact: --tree: a signed manifest that is not the tag's tree -> FAILS",
+      rc != 0 and "not the signed release" in log, log)
+
+rc, log, called, clog, _ = run_verify_stage(signed("v0.9.0"), cosign_rc=0)
+check("verify-artifact: a release tagged on main BELOW the release floor -> FAILS before cosign",
+      rc != 0 and "release floor" in log and called is None, log)
+
 rc, log, called, clog, _ = run_verify_stage(signed("v6.6.6"), cosign_rc=0)
 check("verify-artifact: a release tagged on a commit NOT on main -> FAILS, even with a valid signature",
       rc != 0 and "not reachable from" in log and called is None, log)
@@ -321,6 +363,58 @@ try:
           and str(env.get("COSIGN_SHA256")) == vs.group(1), f"{env} vs vars.example.yml")
 except ImportError:
     check("PyYAML is installed (pip install -r ci/requirements.txt)", False)
+
+
+# ── wave-2 review: the release floor is a commit whose release.yml is safe ──
+# platform-release.sh refuses any tag that does not descend from RELEASE_FLOOR.
+# That is only worth something if no release.yml from the floor to HEAD can
+# sign without the G5 gate: every job holding `id-token: write` must need
+# authorize-release, and no `${{ inputs.* }}` may reach the workflow (before
+# af878f1, preflight interpolated inputs.change_record into `run:` while
+# holding id-token: write). Checked on every revision of release.yml between
+# the floor and HEAD, so moving the floor back below an unsafe one fails here.
+print("release floor")
+fm = re.search(r'^RELEASE_FLOOR="([0-9a-f]{40})"$', RELEASE_SH.read_text(encoding="utf-8"), re.M)
+check("platform-release.sh: RELEASE_FLOOR is a hard-coded full sha", fm is not None)
+floor = fm.group(1) if fm else ""
+have = floor and subprocess.run(["git", "-C", str(ROOT), "cat-file", "-e", f"{floor}^{{commit}}"],
+                                capture_output=True).returncode == 0
+if not have:
+    # A template fork or a shallow clone does not hold keel's history. The
+    # verifier refuses in that case (tested in platform-release.test.py); this
+    # check of keel's own history can only run where the history is.
+    print(f"  [skip] floor {floor[:12]} is not in this clone's history")
+else:
+    floor_on_head = subprocess.run(["git", "-C", str(ROOT), "merge-base", "--is-ancestor", floor, "HEAD"],
+                                   capture_output=True).returncode == 0
+    check("release floor: HEAD descends from it (a release from HEAD is not refused)", floor_on_head)
+    revs = [floor] + subprocess.run(
+        ["git", "-C", str(ROOT), "log", "--format=%H", f"{floor}..HEAD", "--", ".github/workflows/release.yml"],
+        check=True, capture_output=True, text=True).stdout.split()
+    try:
+        import yaml
+        for sha in revs:
+            src = subprocess.run(["git", "-C", str(ROOT), "show", f"{sha}:.github/workflows/release.yml"],
+                                 capture_output=True, text=True, encoding="utf-8")
+            if src.returncode != 0:
+                check(f"release floor: release.yml exists at {sha[:12]}", False, src.stderr)
+                continue
+            text = src.stdout
+            check(f"release.yml@{sha[:12]}: no ${{{{ inputs.* }}}} reaches the workflow",
+                  re.search(r"\$\{\{\s*(github\.event\.)?inputs\.", text) is None)
+            wfd = yaml.safe_load(text) or {}
+            top = wfd.get("permissions") or {}
+            check(f"release.yml@{sha[:12]}: no top-level id-token: write",
+                  not (isinstance(top, dict) and top.get("id-token") == "write") and top != "write-all")
+            for name, j in (wfd.get("jobs") or {}).items():
+                perms = j.get("permissions") or {}
+                if (isinstance(perms, dict) and perms.get("id-token") == "write") or perms == "write-all":
+                    needs = j.get("needs")
+                    needs = [needs] if isinstance(needs, str) else list(needs or [])
+                    check(f"release.yml@{sha[:12]}: job {name} holds id-token: write only after authorize-release",
+                          "authorize-release" in needs, str(needs))
+    except ImportError:
+        check("PyYAML is installed (pip install -r ci/requirements.txt)", False)
 
 
 # ── finding 3: a platform-owned test reads only platform-owned files ─────────
