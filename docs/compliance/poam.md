@@ -58,7 +58,7 @@ review*; POAM-005 and POAM-006 closed later the same day when the repository was
 | POAM-008 | **Solo operation — AC-5 separation of duties cannot be satisfied** | AC-5, CM-5 | **High** | Todd Benson | on 2nd team member | Open — accepted with compensating controls |
 | POAM-009 | Commit signing not registered with GitHub — SI-7/CM-14 unsatisfied | SI-7, CM-14 | Medium | Todd Benson | 2026-08-08 | **Closed** — key registered; GitHub verifies commits; required_signatures enabled |
 | POAM-010 | **G5 release authorization weakened by the move to Concourse** — the GitHub-side dependency is restored, but the release path in use is Concourse, whose `authorize-release` **has never executed** | CM-3, AC-5 | **High** | Todd Benson | ~~2026-09-12~~ **2026-11-21** (extended once, 2026-10-22) | In progress — the Concourse job is **deleted**; G5 is `release.yml` `authorize-release` on the `production` environment, which refuses a run with no recorded approval. **Not closed: that job has never run either**, and the environment refused tags until the 2026-10-22 policy change. See the 2026-10-22 note |
-| POAM-011 | No provenance for what forks receive — cosign sign/attest are stubs (re-scoped 2026-08-14: the subject is the platform release, not an artifact) | SR-4(3), CM-14 | Medium | Todd Benson | 2026-11-11 | Open |
+| POAM-011 | No provenance for what forks receive — cosign sign/attest are stubs (re-scoped 2026-08-14: the subject is the platform release, not an artifact) | SR-4(3), CM-14 | Medium | Todd Benson | 2026-11-11 | Open — **remediation built** (#144, TheHub #60936): `release.yml` signs keylessly and attests a manifest of platform-owned files; `verify-artifact` verifies the latest release and fails an unsigned one, or one tagged off `main` (advisory only until the first release exists). Closes on evidence, not on merge: the first release signed by `release.yml` and verified by `verify-artifact` |
 | POAM-012 | CodeQL SARIF from Concourse does not reach GitHub code scanning | SA-11(1) | Low | Todd Benson | 2026-08-13 | **Closed** — the lane that discarded SARIF was deleted; SAST on main now ingests both languages to Mykronos |
 | POAM-013 | Monthly monitoring cadence approximated by a weekly trigger | CA-7 | Low | Todd Benson | 2026-11-11 | Open — accepted, detection is loud |
 | POAM-014 | **The merge gate verifies process, not code.** Tests and scans run in Concourse *after* merge (re-scoped 2026-08-14 from "no merge gate exists") | CM-3, CM-5, AC-5, SA-11 | **High** | Todd Benson | ~~2026-09-14~~ **2026-11-21** (extended once, 2026-10-22) | Open — measured 2026-10-22: `Concourse / keel` lands on `main` commits only and no check is required. PR heads do run `Unit results`, `Mykronos sast` and `Mykronos secrets` on Actions, none required. Closes when the check arrives on PR heads and is required (TheHub #60580) |
@@ -557,6 +557,67 @@ is a hard block" having verified nothing.
 produced at release and verifiable by `sync-platform.sh` before it overwrites anything.
 
 **Owner.** Todd Benson. **Due.** 2026-11-11.
+
+**Remediation built 2026-10-22 (#144, TheHub #60936). Not closed.**
+
+- **Subject.** `scripts/platform-release.sh manifest`: SHA-256 of every tracked
+  platform-owned file in `platform/MANIFEST.yml`, sorted, at the tag.
+- **Signed and attested.** `release.yml` job `sign-and-attest`, after the G5 approval:
+  `cosign sign-blob` keyless with GitHub's OIDC identity (no key to provision, store or leak),
+  and `actions/attest-build-provenance` (SLSA) over the same manifest. Both go on the GitHub
+  release as `platform-manifest.txt` and `platform-manifest.sigstore.json`.
+- **Verified, and refusing.** `scripts/platform-release.sh verify` requires the exact identity
+  `https://github.com/<repo>/.github/workflows/release.yml@refs/tags/<tag>` and GitHub's
+  issuer, and with `--tree` that the tree's platform files are the signed ones. The release
+  job refuses to publish unless it rejects three cases: no signature, an altered manifest,
+  another tag. Concourse `verify-artifact` verifies the latest release and **fails** when
+  it is unsigned or does not verify.
+- **Bound to a reviewed workflow, not a tag name** (HubOps review of #145). The identity
+  names `release.yml` *on the tag*, and the tagged commit decides what that file says: anyone
+  who can push a tag could push one whose `release.yml` drops `authorize-release` and get a
+  signature that verifies the same. So `verify` also takes `--git DIR --trusted-ref REF`,
+  refuses unless the tag's commit is reachable from REF (`main`), and pins cosign to that
+  commit (`--certificate-github-workflow-sha`, plus repository, ref and the
+  `workflow_dispatch` trigger). Concourse passes its checkout of `main`; `release.yml`
+  passes `origin/main`.
+- **At or above a release floor** (wave-2 review of #145). "On `main`" still admits old
+  `main` commits whose `release.yml` was unsafe: before `af878f1`, preflight held
+  `id-token: write` and pasted the free-text `inputs.change_record` into `run:`. So `verify`
+  also refuses a tag whose commit does not descend from `RELEASE_FLOOR`, a full sha
+  hard-coded in `scripts/platform-release.sh` (no flag, no environment override), and
+  refuses outright when the repository does not hold that commit (a shallow clone).
+  `af878f1` is the first commit with `authorize-release`, no dispatch input and no
+  `id-token: write`; from there the only job that can sign is `sign-and-attest`, which
+  needs `authorize-release`. `test/supply-chain.test.py` re-checks every `release.yml`
+  revision from the floor to HEAD for exactly that.
+- **The tag's tree, too.** Concourse `verify-artifact` passes `--tree` with a detached
+  checkout of the released tag, so a signed manifest that is not what the tag holds fails.
+- **Why not Concourse.** The public Sigstore CA trusts no identity a self-hosted Concourse can
+  present, and a key in a pipeline var is the long-lived secret this control exists to avoid.
+
+**Closes when** a release cut by `release.yml` is signed and a `verify-artifact` build
+verifies it. Until a release exists, `verify-artifact` is **advisory**: the releases API's
+404 exits 0 with `ADVISORY: ... nothing was verified`, so `Concourse / keel` is not red on
+every `main` commit for a reason no commit can fix. The first published release ends the
+exception by itself. A 403/429 is a rate limit and fails as "could not check".
+
+**Operator steps before the first release** (none can be done from a pull request):
+
+1. Run `scripts/configure-github.sh` so the `production` environment accepts `v*` tags
+   (#143). Until then no tag can reach the G5 gate.
+2. Create two repository rulesets. The binding above is only as strong as `main`:
+   - **`main`**: require a pull request and signed commits; block force pushes and
+     deletion. Do **not** require `Concourse / keel` yet: it lands on `main` commits only,
+     so requiring it would block every pull request (POAM-014, TheHub #60580).
+   - **tags `v*`**: restrict creation, update and deletion to the operator (no bypass for
+     agents or apps); block force pushes. A moved tag would otherwise re-point a published
+     release at a different commit.
+   keel had no rulesets on 2026-10-23.
+3. Cut the release: change record at `evidence/releases/<tag>/change-record.md` on `main`,
+   tag that commit, dispatch Release on the tag.
+
+**Not yet covered:** `sync-platform.sh` takes `upstream/main`, not tags, so a fork does not
+verify before it syncs. Making the sync verify a signed tag is a separate change.
 
 ---
 

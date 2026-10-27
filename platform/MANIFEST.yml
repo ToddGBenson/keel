@@ -37,9 +37,10 @@ platform_owned:
   # too: a fork that receives a hook without the corpus can regress it silently.
   - test/hook-bypass-corpus.test.py
   - test/hook-bypass-corpus.yml
-  # scripts/test-gitleaks-allowlist.sh must cap every container it starts
-  # (keel #147 review: uncapped test containers took TheHub prod down 2026-10-23).
-  - test/gitleaks-allowlist.test.py
+  # scripts/platform-release.sh is the verifier a fork runs before trusting a
+  # sync, so the test that proves it refuses an unsigned release travels with
+  # it (#144, POAM-011).
+  - test/platform-release.test.py
   - docs/00-overview.md
   - docs/01-roles.md
   - docs/02-intake-and-discovery.md

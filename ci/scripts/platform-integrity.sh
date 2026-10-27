@@ -40,6 +40,16 @@ python scripts/validate-platform.py
 echo "── control liveness (POAM-018) ────────────────────────────────────────────"
 python scripts/control-liveness.py --check
 
+# ── POA&M due dates (TheHub #60977) ───────────────────────────────────────────
+# POAM-010, POAM-014 and POAM-016 went 38-40 days past due and no lane noticed.
+# This job runs daily at 06:00, so an open High or Critical item past its due
+# date turns it red the morning after. Re-dating an item is an edit to
+# docs/compliance/poam.md (strike the old date, write the new one), which is
+# reviewed like any other change; it cannot be done quietly.
+# Overdue Medium/Low items are printed but do not fail the job.
+echo "── POA&M due dates (TheHub #60977) ────────────────────────────────────────"
+python scripts/poam.py --check
+
 # Per the control-assessment skill: TEST beats EXAMINE. Three real defects in
 # these guards were found only by exercising them (POAM-002/003/004), including
 # one that blocked edits REMOVING a secret. Four assertions in there are
