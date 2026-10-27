@@ -21,6 +21,9 @@ name: Supply Chain
 # half, but anything verifying with `gh attestation verify` must be repointed at
 # cosign. Tracked as POAM-011.
 #
+# keel's own release is signed and attested by release.yml's sign-and-attest job
+# (#144). This file remains the template for a fork that builds an image.
+#
 # Triggers reduced to workflow_dispatch. See ci/README.md §5 before re-enabling.
 on:
   workflow_dispatch:

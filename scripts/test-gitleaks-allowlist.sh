@@ -36,7 +36,9 @@ if command -v gitleaks >/dev/null 2>&1; then
 elif command -v docker >/dev/null 2>&1 && docker version >/dev/null 2>&1; then
   run_gl() {
     local src; src="$(cd "$1" && (pwd -W 2>/dev/null || pwd))"
-    MSYS_NO_PATHCONV=1 docker run --rm -v "$src":/repo -v "$(cd "$(dirname "$2")" && (pwd -W 2>/dev/null || pwd))":/out \
+    # Capped: uncapped test containers took TheHub production down on 2026-10-23,
+    # and ./keel check runs this on the same host as the services.
+    MSYS_NO_PATHCONV=1 docker run --rm --cpus 1 --memory 1g -v "$src":/repo -v "$(cd "$(dirname "$2")" && (pwd -W 2>/dev/null || pwd))":/out \
       "$GL_IMAGE" detect --source /repo --no-banner --report-format json \
       --report-path "/out/$(basename "$2")" >/dev/null 2>&1
   }

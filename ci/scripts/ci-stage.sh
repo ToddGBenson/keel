@@ -98,17 +98,17 @@ PY
     # no-third-party-resource-types rule this pipeline claims for itself.
     python scripts/validate-pipeline.py
 
-    echo "── Concourse / keel check-run wiring (#107) ───────────────────────────"
-    # Here rather than under `test` because it needs PyYAML, which this stage
+    echo "── test/manifest.txt names every test file (TheHub #60980) ────────────"
+    # The one list of test files. Fails on a test/*.test.py or test/*.test.js
+    # it does not name (that file would run nowhere) and on an entry with no
+    # file behind it. This stage and the test stage below run what it lists;
+    # neither names a test file itself.
+    python scripts/test-manifest.py check
+
+    echo "── lint-stage test files (test/manifest.txt: lint) ────────────────────"
+    # Here rather than under `test` because they need PyYAML, which this stage
     # has just installed from ci/requirements.txt.
-    python test/check-run.test.py
-
-    echo "── pipeline validator: script references resolve (#111) ───────────────"
-    # Same reason as above: needs PyYAML.
-    python test/validate-pipeline.test.py
-
-    echo "── manifest validator refuses a vacuous pass (#111) ───────────────────"
-    python test/validate-manifest.test.py
+    python scripts/test-manifest.py run --stage lint --node-missing skip
 
     echo "── gate records: key validation, failed gates recorded (TheHub #60981) ─"
     # Needs PyYAML: the writer reads the checklist ids from .sdlc/process.yaml.
@@ -137,11 +137,20 @@ PY
     echo "── container-scan lane: no image is a failure, not a pass (#60935) ────"
     python test/trivy-gate.test.py
 
+    echo "── POA&M due dates: parse, count, overdue, --check (#60977) ───────────"
+    python test/poam.test.py
+
     echo "── JUnit wrapper tests (unit results to MyKronos) ─────────────────────"
     python test/junit-suite.test.py
 
-    echo "── Mykronos preflight retries transient failures, never a 401 ─────────"
-    python test/mykronos-preflight.test.py
+    echo "── test-stage test files (test/manifest.txt: test) ────────────────────"
+    # Every entry the manifest tags `test`, in its order; the lint stage checks
+    # the manifest names every test file. A failure does not stop the files
+    # after it, and the summary names each one. The .js entry needs node, which
+    # this Python image does not have: it says so and is not counted as a pass.
+    # GitHub Actions 'Unit suites' (unit-results.yml, on every PR) runs it with
+    # node, as `./keel check` does.
+    python scripts/test-manifest.py run --stage test --node-missing skip
 
     echo "── guard hook self-test ───────────────────────────────────────────────"
     # TEST beats EXAMINE. Three real defects in these guards were found only by
@@ -155,21 +164,16 @@ PY
     python -m pip install --quiet --disable-pip-version-check       --require-hashes -r ci/requirements.txt
     python test/hook-bypass-corpus.test.py
 
+    echo "── platform release: signed, and an unsigned one is refused (#144) ─────"
+    # After the pip install above: the release.yml checks need PyYAML.
+    python test/platform-release.test.py
+    # keel's own lanes (supply-chain.sh, release.yml). Project-owned and
+    # separate from the platform-owned test above, because a fork adapts
+    # these files and must be able to edit the test that asserts on them.
+    python test/supply-chain.test.py
+
     echo "── agent assurance (AIC-12 structural) ────────────────────────────────"
     bash evals/run-agent-evals.sh
-
-    echo "── self-review check tests ────────────────────────────────────────────"
-    # Not a silent skip: scripts/selfreview-check.js is loaded only by
-    # .github/workflows/pr-governance.yml, which runs on GitHub Actions and
-    # nowhere else. Its 33 assertions run there, in the same job as the code they
-    # cover. Adding node to this image to exercise logic Concourse never executes
-    # would be ceremony.
-    if command -v node >/dev/null 2>&1; then
-      node test/selfreview-check.test.js
-    else
-      echo "Not applicable here — runs in the Actions platform-integrity job,"
-      echo "alongside the workflow that is the only consumer of that module."
-    fi
 
     # ADAPT (forks): unit and integration tests for application code, with a
     # coverage floor (80% is a sensible start) AND no drop against main — a drop
