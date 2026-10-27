@@ -360,11 +360,16 @@ check "gh alias list"                 allow "$(payload 'gh alias list')"        
 # Run-time values: the cheap partial steps. The rest stay open (TheHub #61039).
 check "approve, endpoint in a variable" block "$(payload "P=$PD; gh api -X POST \$P -f state=approved")"                      guard-bash.sh
 check "approve, endpoint through xargs" block "$(payload "echo $PD | xargs gh api -X POST -f state=approved")"                guard-bash.sh
+# shellcheck disable=SC2016  # literal $VAR / $(...): the unexpanded command text is the hook input under test
 check "approve, action in a variable" block "$(payload 'gh api -X POST repos/O/R/actions/runs/1/$E -f state=approved')"      guard-bash.sh
 check "approve, body from \$(...)"    block "$(payload "gh api $PD \$(printf -- '-f state=approved')")"                        guard-bash.sh
+# shellcheck disable=SC2016  # literal $VAR / $(...): the unexpanded command text is the hook input under test
 check "graphql, query=\"\$(cat file)\"" block "$(payload 'gh api graphql -f query="$(cat no-such-q.graphql)"')"              guard-bash.sh
+# shellcheck disable=SC2016  # literal $VAR / $(...): the unexpanded command text is the hook input under test
 check "curl graphql, -d \"\$(cat file)\"" block "$(payload 'curl -X POST https://api.github.com/graphql -d "$(cat no-such-q.json)"')" guard-bash.sh
+# shellcheck disable=SC2016  # literal $VAR / $(...): the unexpanded command text is the hook input under test
 check "rerun a run by variable id"    allow "$(payload 'gh api -X POST repos/O/R/actions/runs/$ID/rerun')"                   guard-bash.sh
+# shellcheck disable=SC2016  # literal $VAR / $(...): the unexpanded command text is the hook input under test
 check "jobs of a run by variable id"  allow "$(payload 'gh api repos/O/R/actions/runs/$ID/jobs --jq ".jobs[].name"')"        guard-bash.sh
 check "graphql with a \$(...) variable" allow "$(payload "gh api graphql -F owner=\"\$(gh repo view --json owner -q .owner.login)\" -f query='query(\$owner:String!){repositoryOwner(login:\$owner){id}}'")" guard-bash.sh
 # #117 -- reads inside a substitution stay allowed, and the anchor still needs a word

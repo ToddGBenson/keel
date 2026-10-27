@@ -59,14 +59,24 @@ cmd=${cmd//$'\\\n'/ }
 # "C:\Program Files\GitHub CLI\gh.exe" are the others. Each rule names gh, git or curl
 # after the $B boundary, so write those back to the bare name first. A path that
 # merely ends in /gh becomes "gh" too, which only matters if the rest of the line is
-# a blocked call. Upper-case names (CURL.EXE) are not folded: a known limit.
+# a blocked call.
+#
+# Second review: the name is matched in any case. Windows file names are not
+# case-sensitive, so GH, Gh.exe and CURL run gh and curl. And a gh alias body is a
+# gh command: `gh alias set ok 'api -X POST .../pending_deployments ...'` makes a plain
+# `gh ok` approve, so the body is rewritten to start with "gh" and every gh rule reads
+# it (`gh alias set m 'pr merge'` too). A --shell body that already starts with gh
+# becomes "gh gh ...", which the rules read the same way.
 norm=()
-for name in gh git curl; do
-  norm+=(-e 's#"([^"]*[/\\])?'"$name"'(\.[Ee][Xx][Ee])?"#'"$name"'#g'
-         -e "s#'([^']*[/\\\\])?$name(\\.[Ee][Xx][Ee])?'#$name#g"
-         -e 's#(^|[|;&[:space:](`"'"'"'])\\?([^[:space:]|;&()`"'"'"'<>]*[/\\])?'"$name"'(\.[Ee][Xx][Ee])?([[:space:])`"'"'"'|;&]|$)#\1'"$name"'\4#g')
+for pair in 'gh:[Gg][Hh]' 'git:[Gg][Ii][Tt]' 'curl:[Cc][Uu][Rr][Ll]'; do
+  name=${pair%%:*}; pat=${pair#*:}
+  norm+=(-e 's#"([^"]*[/\\])?'"$pat"'(\.[Ee][Xx][Ee])?"#'"$name"'#g'
+         -e "s#'([^']*[/\\\\])?$pat(\\.[Ee][Xx][Ee])?'#$name#g"
+         -e 's#(^|[|;&[:space:](`"'"'"'])\\?([^[:space:]|;&()`"'"'"'<>]*[/\\])?'"$pat"'(\.[Ee][Xx][Ee])?([[:space:])`"'"'"'|;&]|$)#\1'"$name"'\4#g')
 done
-cmd="$(printf '%s' "$cmd" | sed -E "${norm[@]}")"
+norm+=(-e 's#(gh[[:space:]]+alias[[:space:]]+set([[:space:]]+-[^[:space:]]+)*[[:space:]]+[^[:space:]-][^[:space:]]*[[:space:]]+)(["'"'"']?)#\1\3gh #g')
+normalize() { sed -E "${norm[@]}"; }
+cmd="$(printf '%s' "$cmd" | normalize)"
 
 # TheHub #61038 review: a | ; & or newline inside quotes is text, not a separator. The
 # rules cut a command into invocations on those characters ([^|;&]* and tr '|;&'), so
@@ -79,8 +89,9 @@ cmd="$(printf '%s' "$cmd" | sed -E "${norm[@]}")"
 # quotes, and heredoc bodies are copied unchanged.
 #
 # Quoted text can also BE a command (sh -c '...; ...'), and there the quoted separators
-# are real. So every rule runs twice, on the command as written and on this view, and
-# either can block. A deny rule is allowed to be judged on both readings.
+# are real. So every rule runs twice, on the command as written and on a second view
+# built from this one (dequote_awk, below), and either can block. A deny rule is
+# allowed to be judged on both readings.
 read -r -d '' mask_awk <<'AWK'
 { s = (NR > 1) ? s "\n" $0 : $0 }
 END {
@@ -154,6 +165,36 @@ END {
 }
 AWK
 masked_cmd="$(printf '%s' "$cmd" | LC_ALL=C awk "$mask_awk" 2>/dev/null)" || masked_cmd="$cmd"
+
+# TheHub #61038 second review: bash also removes quotes and backslashes INSIDE a word
+# before the program sees it. -X P""OST, -X PO\ST and -X $'POST' are POST;
+# pending"_"deployments and 'repos/.../'pending_deployments are the endpoint; g''h and
+# c\url are gh and curl. The rules matched the text as written and missed all of them,
+# in every rule (P""UT .../merge, --for''ce).
+#
+# So the second view is the masked one with the quoting removed: $'...' read as '...',
+# quote characters deleted, and \x read as x outside single quotes. It is the words
+# as bash passes them, joined by spaces, with only real separators left between them.
+# It keeps everything the masked view caught (a quote was only ever a boundary, and a
+# space is one too), so the rules run on the command as written and on this view.
+read -r -d '' dequote_awk <<'AWK'
+{ s = (NR > 1) ? s "\n" $0 : $0 }
+END {
+  n = length(s); q = ""; out = ""
+  for (i = 1; i <= n; i++) {
+    c = substr(s, i, 1)
+    if (q == "'") { if (c == "'") q = ""; else out = out c; continue }
+    if (c == "\\" && i < n) { out = out substr(s, ++i, 1); continue }
+    if (q == "$") { if (c == "'") q = ""; else out = out c; continue }
+    if (q == "" && c == "$" && substr(s, i + 1, 1) == "'") { q = "$"; i++; continue }
+    if (q == "" && c == "'") { q = "'"; continue }
+    if (c == "\"") { q = (q == "\"") ? "" : "\""; continue }
+    out = out c
+  }
+  printf "%s", out
+}
+AWK
+word_cmd="$(printf '%s' "$masked_cmd" | LC_ALL=C awk "$dequote_awk" 2>/dev/null | normalize)" || word_cmd="$masked_cmd"
 raw_cmd="$cmd"
 
 block() {
@@ -183,9 +224,10 @@ B='(^|[|;&[:space:](`"'"'"'])'
 E='([[:space:])`"'"'"']|$)'
 
 # Every rule below reads $cmd. guard() runs them all once per view of the command (see
-# masked_cmd above); the body is left at the top level's indentation so its history
+# word_cmd above); the body is left at the top level's indentation so its history
 # stays readable.
 guard() {
+
 # ── Hook bypass ─────────────────────────────────────────────────────────────
 # If a hook blocks you, the hook is working correctly. Bypassing it defeats the
 # pre-commit secret scan, which is the last cheap chance to stop a credential leak.
@@ -216,6 +258,20 @@ fi
 g() { # g <extended-regex> -> true if the command actually invokes this
   printf '%s' "$cmd" | grep -qE "$1"
 }
+
+# TheHub #61038 second review: `gh alias import FILE` defines aliases from a YAML file,
+# one `name: body` per line. Each body is a gh command (or `!gh ...` for a shell
+# alias), so it is read and judged with the rest; a file this hook cannot read (stdin,
+# a missing file) is refused. `gh alias set` is handled in normalize() above.
+if g "$B"'gh[[:space:]]+alias[[:space:]]+import\b'; then
+  af=$(printf '%s' "$cmd" | grep -oE "$B"'gh[[:space:]]+alias[[:space:]]+import([[:space:]]+--?[a-z-]+)*[[:space:]]+[^[:space:]|;&)`"'"'"'-][^[:space:]|;&)`"'"'"']*|'"$B"'gh[[:space:]]+alias[[:space:]]+import([[:space:]]+--?[a-z-]+)*[[:space:]]+-'"$E" \
+    | head -n1 | sed -E 's/[[:space:])`"'"'"']+$//; s/.*[[:space:]]//')
+  if [ -z "$af" ] || [ "$af" = "-" ] || [ ! -r "$af" ]; then
+    block "importing gh aliases this hook cannot read (${af:-no file}). An alias body is a gh command; define it with gh alias set, where it can be read." "AC-5, AIC-2"
+  fi
+  cmd="$cmd
+$(sed -E 's/^[[:space:]]*[^:#[:space:]]+:[[:space:]]*["'"'"']?!?/gh /' -- "$af" | normalize)"
+fi
 
 # Destructive git
 # #120: the flag may come straight after push. `push([[:space:]]|$)` used to eat the one
@@ -283,7 +339,9 @@ DEPLOY_REVIEW='/actions/runs/[^|;&/]+/(pending_deployments|deployment_protection
 # TheHub #61038 review: gh upper-cases the method before sending it, so `-X post` is a
 # POST, and pflag reads -X 'PUT', --method "delete" and -X=PUT as well. The method was
 # matched upper-case and unquoted only, for every rule below, not just this one.
-GH_M='(-X[[:space:]]*=?|--method[[:space:]]*=?)[[:space:]]*["'"'"']?'
+# Second review: pflag also unpacks -X from a group (-iXPOST), and gh sends the LAST
+# method given, so `-X GET -iXPOST` is a POST. Any write method anywhere counts.
+GH_M='(-[a-zA-Z]*X[[:space:]]*=?|--method[[:space:]]*=?)[[:space:]]*["'"'"']?'
 GH_WRITE='([Pp][Oo][Ss][Tt]|[Pp][Uu][Tt]|[Pp][Aa][Tt][Cc][Hh]|[Dd][Ee][Ll][Ee][Tt][Ee])\b'
 
 gh_api_write() { # true if this is a gh api call carrying a write method
@@ -294,6 +352,18 @@ gh_api_write() { # true if this is a gh api call carrying a write method
     | grep -E '[[:space:]](-i*[fF]|--(raw-)?field([=[:space:]]|$)|--input([=[:space:]]|$))' \
     | grep -qvE "$GH_M"'[A-Za-z]'
 }
+
+# Second review: a body flag supplied by $(...), backticks or an array expansion
+# (gh api .../pending_deployments $(printf -- '-f state=approved')) cannot be seen, so
+# a call to these endpoints that carries one and is not an explicit GET is refused.
+if g "$B"'gh[[:space:]]+api\b'; then
+  # The endpoint path itself is dropped first: a run id from $(gh run list ...) in a
+  # listing is still a read.
+  printf '%s' "$cmd" | tr '|;&' '\n' | grep -E "$B"'gh[[:space:]]+api\b' | grep -E "$DEPLOY_REVIEW" \
+    | sed -E 's#[^[:space:]]*/actions/runs/[^[:space:]]*/(pending_deployments|deployment_protection_rule)##' \
+    | grep -E '\$\(|`|\[[@*]\]' | grep -qvE "$GH_M"'[Gg][Ee][Tt]\b' \
+    && block "a gh api call to an environment deployment review whose arguments come from \$(...), backticks or an array. Its method cannot be read here; list pending deployments with a plain GET." "CM-3, AC-5, AIC-1, AIC-2"
+fi
 
 if gh_api_write; then
   g "$B"'gh[[:space:]]+api[^|;&]*/pulls/[^|;&/]+/merge([^A-Za-z0-9_-]|$)' \
@@ -313,6 +383,12 @@ if gh_api_write; then
   # TheHub #61038: approving the deployment is the gate itself, not its configuration.
   g "$B"'gh[[:space:]]+api[^|;&]*'"$DEPLOY_REVIEW" \
     && block "approving or rejecting an environment deployment through gh api. Only a human reviews a deployment; the environment's reviewers ARE the G5 authorization gate." "CM-3, AC-5, AIC-1, AIC-2"
+  # Second review, run-time values (the cheap part of TheHub #61039): the endpoint named
+  # anywhere in the command, not only in the gh api call (P=.../pending_deployments;
+  # gh api -X POST $P, or piped to xargs gh api), and an action segment that is a
+  # variable (.../runs/1/$E). A run id in a variable (.../runs/$ID/rerun) stays allowed.
+  { g "$DEPLOY_REVIEW" || g "$B"'gh[[:space:]]+api[^|;&]*/actions/runs/[^|;&/[:space:]]+/\$'; } \
+    && block "a gh api write in a command that names an environment deployment review, or whose action is a variable. Only a human reviews a deployment." "CM-3, AC-5, AIC-1, AIC-2"
   # #127: the push-to-main rule knew one spelling, git push. These three reach main
   # through the REST API instead.
   g "$B"'gh[[:space:]]+api[^|;&]*/git/refs/heads/(main|master)'"$E" \
@@ -339,11 +415,18 @@ fi
 # that -F query=@path or --input path names -- and block, by mutation name, the same
 # actions the REST rules block. A document that cannot be read (stdin) is refused:
 # its contents are unknowable here, and an inline query works just as well.
+# Second review: a document substituted from a file, "$(cat q.graphql)" or "$(< q)",
+# is read the same way; one produced by any other command stays open (TheHub #61039).
+cat_files() { # stdin: command text -> the files that $(cat FILE) / $(< FILE) read
+  grep -oE '\$\((cat[[:space:]]+(--[[:space:]]+)?|<[[:space:]]*)[^)[:space:]`"'"'"'|;&]+\)' \
+    | sed -E 's/^\$\((cat[[:space:]]+(--[[:space:]]+)?|<[[:space:]]*)//; s/\)$//'
+}
 if g "$B"'gh[[:space:]]+api[[:space:]]+([^|;&]*[[:space:]])?graphql'"$E"; then
   gql="$cmd"
   # Only -F/--field reads @path; with -f/--raw-field "@q.graphql" is a literal string.
   for f in $(printf '%s' "$cmd" | grep -oE '((-F[[:space:]]*|--field[[:space:]=]+)query=@|--input[[:space:]=]+)[^[:space:]|;&)`"'"'"']+' \
-               | sed -E 's/^((-F[[:space:]]*|--field[[:space:]=]+)query=@|--input[[:space:]=]+)//'); do
+               | sed -E 's/^((-F[[:space:]]*|--field[[:space:]=]+)query=@|--input[[:space:]=]+)//'
+             printf '%s' "$cmd" | cat_files); do
     if [ "$f" = "-" ] || [ ! -r "$f" ]; then
       block "a GraphQL document this hook cannot read ($f). Pass the query inline with -f query='...'." "AC-5, AIC-2"
     fi
@@ -404,17 +487,35 @@ if g "$B"'curl([[:space:]]|$)'; then
 $(cat -- "$f")"
     done < <(printf '%s\n' "$curl_gql" \
       | grep -oE '(^|[[:space:]])((-[a-zA-Z]*d[[:space:]]*|--(data|data-ascii|data-binary|json)[[:space:]]+)["'"'"']?@|(-[a-zA-Z]*[TK][[:space:]]*|--(upload-file|config)[[:space:]]+)["'"'"']?)[^[:space:]"'"'"'`)]+' \
-      | sed -E 's/^[[:space:]]*(-[a-zA-Z]*[dTK][[:space:]]*|--[a-z-]+[[:space:]]+)["'"'"']?@?//')
+      | sed -E 's/^[[:space:]]*(-[a-zA-Z]*[dTK][[:space:]]*|--[a-z-]+[[:space:]]+)["'"'"']?@?//'
+      printf '%s\n' "$curl_gql" | cat_files)
   fi
   printf '%s' "$curl_text" | grep -qE '(^|[^A-Za-z0-9_])(approve|reject)Deployments([^A-Za-z0-9_]|$)' \
     && block "approving or rejecting an environment deployment through GraphQL over curl. Only a human reviews a deployment; the environment's reviewers ARE the G5 authorization gate." "CM-3, AC-5, AIC-1, AIC-2"
-  curl_dr=$(printf '%s\n' "$curl_segs" | grep -E "$DEPLOY_REVIEW")
+  # Second review: curl rewrites the URL before sending it. It removes dot segments
+  # (runs/1/x/../pending_deployments is runs/1/pending_deployments) and expands {} and
+  # [] globs (pending_deployment{s}). So dot segments are removed first, and a glob
+  # anywhere after a run id counts as these endpoints. (-g and --path-as-is turn the
+  # rewriting off; matching as if they were absent can only add a block.)
+  curl_dr=$(printf '%s\n' "$curl_segs" | sed -E ':a
+s#/\./#/#g
+s#/[^/[:space:]]+/\.\./#/#
+ta' | grep -E "$DEPLOY_REVIEW"'|/actions/runs/[^|;&/[:space:]]+/[^[:space:]]*[][{}]')
   if [ -n "$curl_dr" ]; then
+    # Second review: curl, like gh, sends the LAST -X it is given (curl -XGET -XPOST
+    # is a POST). So a call is a write if ANY -X/--request on it is not GET or HEAD,
+    # or if it carries a body and gives no -X and no -G.
     curl_m='(-[a-zA-Z]*X[[:space:]]*|--request[[:space:]=]+)[\"'"'"']*'
-    { printf '%s\n' "$curl_dr" | grep -E "$curl_m"'[A-Za-z]' | grep -qvE "$curl_m"'([Gg][Ee][Tt]|[Hh][Ee][Aa][Dd])([^A-Za-z]|$)' \
-      || printf '%s\n' "$curl_dr" | grep -E '[[:space:]](-[a-zA-Z]*[dFTK]|--data|--json|--form|--upload-file|--config)' \
-           | grep -qvE "$curl_m"'[A-Za-z]|[[:space:]](-[a-zA-Z]*G|--get)([[:space:]]|$)'; } \
-      && block "approving or rejecting an environment deployment through curl. Only a human reviews a deployment; the environment's reviewers ARE the G5 authorization gate." "CM-3, AC-5, AIC-1, AIC-2"
+    while IFS= read -r seg; do
+      ms=$(printf '%s' "$seg" | grep -oE "$curl_m"'[A-Za-z]+' | sed -E "s/^$curl_m//")
+      if [ -n "$ms" ]; then
+        printf '%s\n' "$ms" | grep -qvxE '[Gg][Ee][Tt]|[Hh][Ee][Aa][Dd]' || continue
+      else
+        printf '%s' "$seg" | grep -qE '[[:space:]](-[a-zA-Z]*[dFTK]|--data|--json|--form|--upload-file|--config)' || continue
+        printf '%s' "$seg" | grep -qE '[[:space:]](-[a-zA-Z]*G|--get)([[:space:]]|$)' && continue
+      fi
+      block "approving or rejecting an environment deployment through curl. Only a human reviews a deployment; the environment's reviewers ARE the G5 authorization gate." "CM-3, AC-5, AIC-1, AIC-2"
+    done <<< "$curl_dr"
   fi
 fi
 
@@ -458,6 +559,6 @@ esac
 }
 
 cmd="$raw_cmd"; guard
-if [ "$masked_cmd" != "$raw_cmd" ]; then cmd="$masked_cmd"; guard; fi
+if [ "$word_cmd" != "$raw_cmd" ]; then cmd="$word_cmd"; guard; fi
 
 exit 0
