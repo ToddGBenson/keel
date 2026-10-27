@@ -29,6 +29,10 @@ platform_owned:
   # outcome #44 exists to prevent, shipped to every consumer at once.
   - test/selfreview-check.test.js
   - test/dashboard.test.py
+  # scripts/control-liveness.py's record rules (verdict line, G5 citation,
+  # legacy file). keel's own numbers are in the project-owned
+  # test/control-liveness-keel.test.py, so this one holds in any fork.
+  - test/control-liveness.test.py
   # scripts/junit-suite.py's guarantee that a suite which never ran cannot
   # report as passing. .github/workflows/unit-results.yml depends on it.
   - test/junit-suite.test.py
@@ -115,6 +119,10 @@ project_owned:
   # upstream's from its first commit, and shipping ours would hand every fork a
   # ratchet already set to somebody else's position (#67).
   - .control-liveness.json
+  # Your G3 records that predate the `verdict:` line, if any. Ours name our work
+  # items; scripts/control-liveness.py reads the list from here so the platform
+  # script names no project's issues (keel #148 review). bootstrap.sh deletes it.
+  - .control-liveness-legacy.json
   # Your reconciled merge strands. Ours reference our PR numbers, which mean
   # something entirely different in your repository (#69).
   - .merge-reconciled.json

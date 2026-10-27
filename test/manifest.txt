@@ -40,3 +40,6 @@ test/supply-chain.test.py           test         supply-chain lanes: verify-arti
 # GitHub Actions 'Unit suites' (unit-results.yml, every PR) and ./keel check run it
 # (keel check fails without node).
 test/selfreview-check.test.js       test         self-review check tests (POAM-008)
+# keel's own liveness numbers: the frozen G3 legacy list, POAM-018 states the baseline.
+# Project-owned; test/control-liveness.test.py (platform-owned) holds in any fork.
+test/control-liveness-keel.test.py  test         keel liveness: frozen legacy G3 list, POAM-018 = baseline (keel #148 review)

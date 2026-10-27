@@ -92,9 +92,40 @@ check("g0 counts independently of g1", c["g0"] == 1, f"g0={c['g0']}")
 c = counts({"evidence/9/g4/qa/traceability.md": "verdict: pass\n"})
 check("a record nested under the gate directory counts (g4/qa/)", c["g4"] == 1, f"g4={c['g4']}")
 
-print("\nrelease records (G5)")
-c = counts({"evidence/releases/1.2.0/change-record.md": "# Change record 1.2.0\n\nverdict: pass\n"})
-check("evidence/releases/<v>/change-record.md counts toward g5", c["g5"] == 1, f"g5={c['g5']}")
+print("\nrelease records (G5): a markdown file alone is not a release (keel #148 review)")
+RUN = "release-run: https://github.com/owner/repo/actions/runs/123456789\n"
+ATT = "attestation: https://github.com/owner/repo/attestations/4242\n"
+CR = "# Change record 1.2.0\n\nverdict: pass\n"
+
+c = counts({"evidence/releases/1.2.0/change-record.md": CR})
+check("a change-record.md with a verdict line but no release run or attestation does not count",
+      c["g5"] == 0, f"g5={c['g5']}")
+
+c = counts({"evidence/releases/1.2.0/change-record.md": CR + RUN})
+check("a change record citing its release run counts toward g5", c["g5"] == 1, f"g5={c['g5']}")
+
+c = counts({"evidence/releases/1.2.0/change-record.md": CR + ATT})
+check("a change record citing an attestation counts toward g5", c["g5"] == 1, f"g5={c['g5']}")
+
+c = counts({"evidence/releases/1.2.0/change-record.md": RUN})
+check("a citation without a verdict line does not count", c["g5"] == 0, f"g5={c['g5']}")
+
+for bad in ("release-run: evidence/releases/1.2.0/run.md\n",
+            "release-run: see the Actions tab\n",
+            "release-run: https://github.com/owner/repo/actions/runs/\n",
+            "release-run: https://evil.example/owner/repo/actions/runs/1\n",
+            "release-run: https://github.com/owner/repo/actions/runs/1/../../x.md\n",
+            "attestation: evidence/releases/1.2.0/attestation.intoto.jsonl\n",
+            "We will add release-run: https://github.com/o/r/actions/runs/1 later\n"):
+    c = counts({"evidence/releases/1.2.0/change-record.md": CR + bad})
+    check(f"not a citation: {bad.strip()!r}", c["g5"] == 0, f"g5={c['g5']}")
+
+c = counts({"evidence/7/g5/authorization.md": "verdict: pass\n"})
+check("an evidence/<key>/g5/ record without a run or attestation does not count",
+      c["g5"] == 0, f"g5={c['g5']}")
+
+c = counts({"evidence/7/g5/authorization.md": "verdict: pass\n" + RUN})
+check("an evidence/<key>/g5/ record citing a release run counts", c["g5"] == 1, f"g5={c['g5']}")
 
 c = counts({"evidence/releases/1.2.0/change-record.md": ""})
 check("an empty change-record.md does not count", c["g5"] == 0, f"g5={c['g5']}")
@@ -102,26 +133,60 @@ check("an empty change-record.md does not count", c["g5"] == 0, f"g5={c['g5']}")
 c = counts({}, dirs=("evidence/releases/1.3.0",))
 check("an empty release directory does not count", c["g5"] == 0, f"g5={c['g5']}")
 
-c = counts({"evidence/releases/1.2.0/sbom-notes.md": "verdict: pass\n"})
+c = counts({"evidence/releases/1.2.0/sbom-notes.md": "verdict: pass\n" + RUN})
 check("only change-record.md is the release record", c["g5"] == 0, f"g5={c['g5']}")
 
 print("\nG3 records written before verdict lines were required")
-c = counts({"evidence/999/g3/self-review.md": "# Self-review\n\nno verdict line\n"})
+LEGACY = ".control-liveness-legacy.json"
+OLD = "# Self-review\n\nno verdict line\n"
+
+c = counts({"evidence/999/g3/self-review.md": OLD})
 check("a NEW g3 record without a verdict line does not count", c["g3"] == 0, f"g3={c['g3']}")
 
 c = counts({"evidence/999/g3/self-review.md": "# Self-review\n\nverdict: pass\n"})
 check("a NEW g3 record with a verdict line counts", c["g3"] == 1, f"g3={c['g3']}")
 
-c = counts({"evidence/143/g3/.keep": ""}, dirs=("evidence/143/g3",))
+src = SCRIPT.read_text(encoding="utf-8")
+check("the platform script names no project's work items (no LEGACY_G3_KEYS constant)",
+      "LEGACY_G3_KEYS" not in src and '"143"' not in src)
+
+c = counts({"evidence/13/g3/self-review.md": OLD})
+check("with no legacy file nothing is grandfathered (a fork's default)", c["g3"] == 0, f"g3={c['g3']}")
+
+c = counts({"evidence/999/g3/self-review.md": OLD, "evidence/998/g3/self-review.md": OLD,
+            LEGACY: '{"g3": ["999"]}'})
+check("a key named in the project's legacy file counts without a verdict line",
+      c["g3"] == 1, f"g3={c['g3']}")
+
+c = counts({"evidence/143/g3/.keep": "", LEGACY: '{"g3": ["143"]}'}, dirs=("evidence/143/g3",))
 check("a grandfathered key with only an empty file does not count", c["g3"] == 0, f"g3={c['g3']}")
 
-real = load(ROOT)
-legacy = getattr(real, "LEGACY_G3_KEYS", None)
-check("the grandfathered g3 set is frozen at the 15 records that predate the rule",
-      legacy is not None and len(legacy) == 15, f"legacy={legacy!r}")
-c = real.gate_liveness()
-check("the real repository still counts its 15 historical g3 records (and any newer ones)",
-      c["g3"] >= 15, f"g3={c['g3']}")
+
+def refused(text: str) -> bool:
+    try:
+        counts({"evidence/1/g3/self-review.md": OLD, LEGACY: text})
+    except SystemExit as e:
+        return e.code not in (0, None)
+    return False
+
+
+for bad, why in (("not json", "not JSON"),
+                 ('["1"]', "not an object"),
+                 ('{"g3": "1"}', "g3 is not a list"),
+                 ('{"g3": [1]}', "a key that is not a string"),
+                 ('{"g3": ["../1"]}', "a key that is a path"),
+                 ('{"g3": ["1\\n"]}', "a key with a newline"),
+                 ('{"g5": ["1"]}', "G5 cannot be grandfathered"),
+                 ('{"g3": ["1"], "g1": ["2"]}', "only G3 has legacy records")):
+    check(f"a malformed legacy file is refused, not ignored: {why}", refused(bad))
+
+boot = (ROOT / "scripts" / "bootstrap.sh").read_text(encoding="utf-8")
+check("bootstrap.sh removes the inherited legacy file (a fork grandfathers none of ours)",
+      "rm -f .control-liveness-legacy.json" in boot)
+
+# keel's own numbers (its 15 legacy keys, its real G3 count) are asserted in the
+# project-owned test/control-liveness-keel.test.py. This file is platform-owned
+# and runs in every fork, whose evidence is not keel's.
 
 if failures:
     print(f"\n{len(failures)} failure(s)")
