@@ -36,12 +36,30 @@
 #       a v* tag are repository rulesets, which the operator owns
 #       (docs/compliance/poam.md, POAM-011).
 #
+#       And "on main" is not enough on its own (wave-2 review of #145): main's
+#       history holds release.yml versions that are unsafe to sign from. Before
+#       af878f1, preflight held `id-token: write` and interpolated the free-text
+#       input inputs.change_record into `run:`, so a tag on an old main commit
+#       could mint release.yml's OIDC identity from injected code. So the tag's
+#       commit must also DESCEND from RELEASE_FLOOR, hard-coded below. A
+#       repository that does not hold the floor commit is refused, not skipped.
+#
 # Every refusal exits 1 and says which check refused. There is no warn-only
 # mode: a signature nobody is made to fail on is decoration.
 set -euo pipefail
 
 ISSUER="https://token.actions.githubusercontent.com"
 WORKFLOW_PATH=".github/workflows/release.yml"
+
+# The release floor: af878f1 (#143, TheHub #60935), the first commit on main
+# whose release.yml has authorize-release (G5, refusing a run with no recorded
+# approval), no workflow_dispatch input, and no `id-token: write` anywhere.
+# From here on the only job that can mint the signing identity is
+# sign-and-attest, which needs authorize-release (#144).
+# test/supply-chain.test.py re-checks every release.yml from this commit to
+# HEAD. Not a parameter, and no environment override: whoever runs the
+# verifier must not be able to lower it. Move it forward, never back.
+RELEASE_FLOOR="af878f1517fe8352192e5f5213d3260d914d4a78"
 
 die() { echo "REFUSED: $*" >&2; exit 1; }
 
@@ -116,7 +134,12 @@ verify() {
   if ! git -C "$gitdir" merge-base --is-ancestor "$commit" "$trusted_sha"; then
     die "tag ${tag} is on commit ${commit}, which is not reachable from ${trusted} (${trusted_sha}): its release.yml was never on ${trusted}, so its signature says nothing about the G5 gate"
   fi
-  echo "tag: ${tag} -> ${commit}, on ${trusted}"
+  git -C "$gitdir" cat-file -e "${RELEASE_FLOOR}^{commit}" 2>/dev/null \
+    || die "the release floor ${RELEASE_FLOOR} is not in the repository at ${gitdir}; fetch the full history of the release repository (no shallow clone) and retry"
+  if ! git -C "$gitdir" merge-base --is-ancestor "$RELEASE_FLOOR" "$commit"; then
+    die "tag ${tag} is on commit ${commit}, which does not descend from the release floor ${RELEASE_FLOOR}: its release.yml predates the G5 gate and could sign from injected input"
+  fi
+  echo "tag: ${tag} -> ${commit}, on ${trusted}, at or above the release floor ${RELEASE_FLOOR:0:12}"
 
   command -v cosign >/dev/null 2>&1 || die "cosign is not installed; cannot verify, so this is not a pass"
 

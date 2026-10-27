@@ -157,12 +157,30 @@ PY
     curl -sSfL -o "${rel}/platform-manifest.txt" "$manifest_url"
     curl -sSfL -o "${rel}/platform-manifest.sigstore.json" "$bundle_url"
 
+    # --tree: the signed manifest must also be what the tag actually holds,
+    # byte for byte. Checked against a detached checkout of the TAG, not of
+    # main: main moves on after a release, and a platform file changed since
+    # is not a mismatch. (Wave-2 review of #145, Low.) A tag this checkout does
+    # not have is left to the verifier, which refuses it by name.
+    # core.autocrlf=false: the checkout must hold the committed bytes, as the
+    # Linux runner that signed saw them; a host-wide autocrlf=true (Windows)
+    # would otherwise rewrite every line ending and fail every file.
+    tree_args=()
+    if git -C repo rev-parse --verify --quiet "refs/tags/${tag}^{commit}" >/dev/null; then
+      git -C repo -c core.autocrlf=false worktree add --quiet --detach "${rel}/tree" "refs/tags/${tag}^{commit}"
+      tree_args=(--tree "${rel}/tree")
+    fi
+    rc=0
     bash repo/scripts/platform-release.sh verify \
       --manifest "${rel}/platform-manifest.txt" \
       --bundle "${rel}/platform-manifest.sigstore.json" \
       --repo "${REPO_SLUG}" --tag "${tag}" \
-      --git repo --trusted-ref HEAD
-    echo "verified: ${REPO_SLUG}@${tag} was signed by its own release workflow on that tag, at a commit on main."
+      --git repo --trusted-ref HEAD ${tree_args[@]+"${tree_args[@]}"} || rc=$?
+    if [ "${#tree_args[@]}" -gt 0 ]; then
+      git -C repo worktree remove --force "${rel}/tree" || true
+    fi
+    [ "$rc" -eq 0 ] || exit "$rc"
+    echo "verified: ${REPO_SLUG}@${tag} was signed by its own release workflow on that tag, at a commit on main at or above the release floor, and the tag's platform files are the signed ones."
     ;;
 
   *)

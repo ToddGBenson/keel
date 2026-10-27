@@ -580,6 +580,18 @@ produced at release and verifiable by `sync-platform.sh` before it overwrites an
   commit (`--certificate-github-workflow-sha`, plus repository, ref and the
   `workflow_dispatch` trigger). Concourse passes its checkout of `main`; `release.yml`
   passes `origin/main`.
+- **At or above a release floor** (wave-2 review of #145). "On `main`" still admits old
+  `main` commits whose `release.yml` was unsafe: before `af878f1`, preflight held
+  `id-token: write` and pasted the free-text `inputs.change_record` into `run:`. So `verify`
+  also refuses a tag whose commit does not descend from `RELEASE_FLOOR`, a full sha
+  hard-coded in `scripts/platform-release.sh` (no flag, no environment override), and
+  refuses outright when the repository does not hold that commit (a shallow clone).
+  `af878f1` is the first commit with `authorize-release`, no dispatch input and no
+  `id-token: write`; from there the only job that can sign is `sign-and-attest`, which
+  needs `authorize-release`. `test/supply-chain.test.py` re-checks every `release.yml`
+  revision from the floor to HEAD for exactly that.
+- **The tag's tree, too.** Concourse `verify-artifact` passes `--tree` with a detached
+  checkout of the released tag, so a signed manifest that is not what the tag holds fails.
 - **Why not Concourse.** The public Sigstore CA trusts no identity a self-hosted Concourse can
   present, and a key in a pipeline var is the long-lived secret this control exists to avoid.
 
