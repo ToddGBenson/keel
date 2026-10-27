@@ -44,6 +44,9 @@ classes:
   curl-route:           "the blocked request sent with curl and the gh token instead of gh api (TheHub #61038)"
   quoted-separator:     "a | ; & or newline inside a quoted argument split the invocation before the rules saw it (TheHub #61038 review)"
   binary-spelling:      "the command named another way: curl.exe, /usr/bin/curl, \\curl, gh.exe (TheHub #61038 review)"
+  word-quoting:         "quotes or a backslash inside a word, which bash removes: P\"\"OST, pending\\_deployments, g''h (TheHub #61038 second review)"
+  gh-alias:             "a gh alias whose body is a blocked gh command (TheHub #61038 second review)"
+  runtime-value:        "the endpoint, method or body supplied at run time: a variable, xargs, $(...) (partly open; TheHub #61039)"
   other-client:         "an HTTP client no rule reads -- wget, httpie, Invoke-RestMethod, a language client (open; TheHub #61039)"
 
 entries:
@@ -783,3 +786,291 @@ entries:
     why: "approve with curl, the URL, method and body all in a config file"
     open_in: [jq, no-jq]
     gap: "the URL is only in the config file, so nothing on the command line names the endpoint; reading every curl config is not done. TheHub #61039"
+
+  # ── TheHub #61038 second review (2026-10-27): six more routes, red on ce77e6f before the fix ──
+  - id: KB-102
+    hook: guard-bash.sh
+    class: word-quoting
+    source: TheHub#61038
+    command: "gh api -X P\"\"OST repos/O/R/actions/runs/1/pending_deployments -f state=approved"
+    expect: block
+    why: "approve; bash joins P\"\"OST into POST"
+  - id: KB-103
+    hook: guard-bash.sh
+    class: word-quoting
+    source: TheHub#61038
+    command: "gh api -X PO\\ST repos/O/R/actions/runs/1/pending_deployments -f state=approved"
+    expect: block
+    why: "approve; bash turns PO\\ST into POST"
+  - id: KB-104
+    hook: guard-bash.sh
+    class: word-quoting
+    source: TheHub#61038
+    command: "gh api -X GET -X $'POST' repos/O/R/actions/runs/1/pending_deployments -f state=approved"
+    expect: block
+    why: "approve; pflag takes the last -X, written as $'POST'"
+  - id: KB-105
+    hook: guard-bash.sh
+    class: word-quoting
+    source: TheHub#61038
+    command: "gh api -X POST repos/O/R/actions/runs/1/pending\"_\"deployments -f state=approved"
+    expect: block
+    why: "approve; quotes inside the endpoint"
+  - id: KB-106
+    hook: guard-bash.sh
+    class: word-quoting
+    source: TheHub#61038
+    command: "gh api -X POST repos/O/R/actions/runs/1/pending''_deployments -f state=approved"
+    expect: block
+    why: "approve; empty quotes inside the endpoint"
+  - id: KB-107
+    hook: guard-bash.sh
+    class: word-quoting
+    source: TheHub#61038
+    command: "gh api -X POST repos/O/R/actions/runs/1/pending\\_deployments -f state=approved"
+    expect: block
+    why: "approve; a backslash inside the endpoint"
+  - id: KB-108
+    hook: guard-bash.sh
+    class: word-quoting
+    source: TheHub#61038
+    command: "gh api -X POST 'repos/O/R/actions/runs/1/'pending_deployments -f state=approved"
+    expect: block
+    why: "approve; the endpoint half quoted"
+  - id: KB-109
+    hook: guard-bash.sh
+    class: word-quoting
+    source: TheHub#61038
+    command: "g\\h api -X POST repos/O/R/actions/runs/1/pending_deployments -f state=approved"
+    expect: block
+    why: "approve; g\\h is gh"
+  - id: KB-110
+    hook: guard-bash.sh
+    class: word-quoting
+    source: TheHub#61038
+    command: "g''h api -X POST repos/O/R/actions/runs/1/pending_deployments -f state=approved"
+    expect: block
+    why: "approve; g''h is gh"
+  - id: KB-111
+    hook: guard-bash.sh
+    class: word-quoting
+    source: TheHub#61038
+    command: "\"g\"h api -X POST repos/O/R/actions/runs/1/pending_deployments -f state=approved"
+    expect: block
+    why: "approve; \"g\"h is gh"
+  - id: KB-112
+    hook: guard-bash.sh
+    class: word-quoting
+    source: TheHub#61038
+    command: "c\\url -X POST https://api.github.com/repos/O/R/actions/runs/1/pending_deployments -d @a.json"
+    expect: block
+    why: "approve; c\\url is curl"
+  - id: KB-113
+    hook: guard-bash.sh
+    class: word-quoting
+    source: TheHub#61038
+    command: "gh api graphql -f query='mutation{appro''veDeployments(input:{workflowRunId:\"x\",environmentIds:[\"y\"]}){clientMutationId}}'"
+    expect: block
+    why: "approveDeployments split by an empty quote pair"
+  - id: KB-114
+    hook: guard-bash.sh
+    class: word-quoting
+    source: TheHub#61038
+    command: "eval \"gh api -X POST repos/O/R/actions/runs/1/pending_\"\"deployments -f state=approved\""
+    expect: block
+    why: "approve inside eval, the endpoint split by quotes"
+  - id: KB-115
+    hook: guard-bash.sh
+    class: word-quoting
+    source: TheHub#61038
+    command: "gh api -X P\"\"UT repos/O/R/pulls/12/merge"
+    expect: block
+    why: "self-merge; the same gap in every gh api rule"
+  - id: KB-116
+    hook: guard-bash.sh
+    class: word-quoting
+    source: TheHub#61038
+    command: "git push --for''ce origin feat"
+    expect: block
+    why: "force push; the flag split by quotes"
+  - id: KB-117
+    hook: guard-bash.sh
+    class: binary-spelling
+    source: TheHub#61038
+    command: "GH api -X POST repos/O/R/actions/runs/1/pending_deployments -f state=approved"
+    expect: block
+    why: "approve with GH, which runs gh on Windows"
+  - id: KB-118
+    hook: guard-bash.sh
+    class: binary-spelling
+    source: TheHub#61038
+    command: "Gh.exe api -X POST repos/O/R/actions/runs/1/pending_deployments -f state=approved"
+    expect: block
+    why: "approve with Gh.exe"
+  - id: KB-119
+    hook: guard-bash.sh
+    class: binary-spelling
+    source: TheHub#61038
+    command: "CURL -X POST https://api.github.com/repos/O/R/actions/runs/1/pending_deployments -d @a.json"
+    expect: block
+    why: "approve with CURL"
+  - id: KB-120
+    hook: guard-bash.sh
+    class: binary-spelling
+    source: TheHub#61038
+    command: "Curl.exe -X POST https://api.github.com/repos/O/R/actions/runs/1/pending_deployments -d @a.json"
+    expect: block
+    why: "approve with Curl.exe"
+  - id: KB-121
+    hook: guard-bash.sh
+    class: binary-spelling
+    source: TheHub#61038
+    command: "GH pr merge 12"
+    expect: block
+    why: "self-merge with GH"
+  - id: KB-122
+    hook: guard-bash.sh
+    class: flag-spelling
+    source: TheHub#61038
+    command: "gh api -X GET -iXPOST repos/O/R/actions/runs/1/pending_deployments -f state=approved"
+    expect: block
+    why: "approve; a packed -iXPOST after a decoy GET, and gh uses the last method"
+  - id: KB-123
+    hook: guard-bash.sh
+    class: flag-spelling
+    source: TheHub#61038
+    command: "curl -X GET -X POST https://api.github.com/repos/O/R/actions/runs/1/pending_deployments -d @a.json"
+    expect: block
+    why: "approve; curl uses the last -X"
+  - id: KB-124
+    hook: guard-bash.sh
+    class: flag-spelling
+    source: TheHub#61038
+    command: "curl -XGET -XPOST -d @a.json https://api.github.com/repos/O/R/actions/runs/1/pending_deployments"
+    expect: block
+    why: "approve; curl uses the last -X, packed"
+  - id: KB-125
+    hook: guard-bash.sh
+    class: curl-route
+    source: TheHub#61038
+    command: "curl -X POST https://api.github.com/repos/O/R/actions/runs/1/x/../pending_deployments -d @a.json"
+    expect: block
+    why: "approve; curl removes the x/../ dot segment"
+  - id: KB-126
+    hook: guard-bash.sh
+    class: curl-route
+    source: TheHub#61038
+    command: "curl -X POST https://api.github.com/repos/O/R/actions/runs/1/./pending_deployments -d @a.json"
+    expect: block
+    why: "approve; curl removes the ./ dot segment"
+  - id: KB-127
+    hook: guard-bash.sh
+    class: curl-route
+    source: TheHub#61038
+    command: "curl -X POST 'https://api.github.com/repos/O/R/actions/runs/1/pending_deployment{s}' -d @a.json"
+    expect: block
+    why: "approve; curl expands the {s} glob"
+  - id: KB-128
+    hook: guard-bash.sh
+    class: curl-route
+    source: TheHub#61038
+    command: "curl -X POST 'https://api.github.com/repos/O/R/actions/runs/1/pending_deployment[s-s]' -d @a.json"
+    expect: block
+    why: "approve; curl expands the [s-s] glob"
+  - id: KB-129
+    hook: guard-bash.sh
+    class: gh-alias
+    source: TheHub#61038
+    command: "gh alias set ok 'api -X POST repos/O/R/actions/runs/1/pending_deployments -f state=approved'"
+    expect: block
+    why: "define an alias that approves; a plain `gh ok` then runs it"
+  - id: KB-130
+    hook: guard-bash.sh
+    class: gh-alias
+    source: TheHub#61038
+    command: "gh alias set m 'pr merge'"
+    expect: block
+    why: "define an alias that self-merges"
+  - id: KB-131
+    hook: guard-bash.sh
+    class: gh-alias
+    source: TheHub#61038
+    command: "gh alias import -"
+    expect: block
+    why: "import aliases from stdin, which the hook cannot read"
+  - id: KB-132
+    hook: guard-bash.sh
+    class: gh-alias
+    source: TheHub#61038
+    command: "gh alias import no-such-aliases.yml"
+    expect: block
+    why: "import aliases from a file the hook cannot read"
+  - id: KB-133
+    hook: guard-bash.sh
+    class: runtime-value
+    source: TheHub#61038
+    command: "P=repos/O/R/actions/runs/1/pending_deployments; gh api -X POST $P -f state=approved"
+    expect: block
+    why: "approve; the endpoint is named earlier in the same command"
+  - id: KB-134
+    hook: guard-bash.sh
+    class: runtime-value
+    source: TheHub#61038
+    command: "echo repos/O/R/actions/runs/1/pending_deployments | xargs gh api -X POST -f state=approved"
+    expect: block
+    why: "approve; the endpoint reaches gh through xargs"
+  - id: KB-135
+    hook: guard-bash.sh
+    class: runtime-value
+    source: TheHub#61038
+    command: "gh api -X POST repos/O/R/actions/runs/1/$E -f state=approved"
+    expect: block
+    why: "approve; the action segment is a variable"
+  - id: KB-136
+    hook: guard-bash.sh
+    class: runtime-value
+    source: TheHub#61038
+    command: "gh api repos/O/R/actions/runs/1/pending_deployments $(printf -- '-f state=approved')"
+    expect: block
+    why: "approve; the body flag comes from $(...)"
+  - id: KB-137
+    hook: guard-bash.sh
+    class: runtime-value
+    source: TheHub#61038
+    command: "gh api graphql -f query=\"$(cat no-such-q.graphql)\""
+    expect: block
+    why: "a GraphQL document from $(cat file) the hook cannot read"
+  - id: KB-138
+    hook: guard-bash.sh
+    class: runtime-value
+    source: TheHub#61038
+    command: "curl -X POST https://api.github.com/graphql -d \"$(cat no-such-q.json)\""
+    expect: block
+    why: "the same over curl"
+  - id: KB-139
+    hook: guard-bash.sh
+    class: runtime-value
+    source: TheHub#61038
+    command: "gh api -X POST $P -f state=approved"
+    expect: block
+    why: "approve; the endpoint was set in an earlier command"
+    open_in: [jq, no-jq]
+    gap: "supplied at run time with nothing on this command line that names it; a denylist over command text cannot see it (TheHub #61039)"
+  - id: KB-140
+    hook: guard-bash.sh
+    class: runtime-value
+    source: TheHub#61038
+    command: "xargs -a args.txt gh api"
+    expect: block
+    why: "approve; every argument is in a file xargs reads"
+    open_in: [jq, no-jq]
+    gap: "supplied at run time with nothing on this command line that names it; a denylist over command text cannot see it (TheHub #61039)"
+  - id: KB-141
+    hook: guard-bash.sh
+    class: runtime-value
+    source: TheHub#61038
+    command: "gh api graphql -f query=\"$(jq -r .q q.json)\""
+    expect: block
+    why: "a GraphQL document produced by a command other than cat"
+    open_in: [jq, no-jq]
+    gap: "supplied at run time with nothing on this command line that names it; a denylist over command text cannot see it (TheHub #61039)"

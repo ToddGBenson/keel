@@ -314,6 +314,59 @@ check "curl.exe GET pending deployments" allow "$(payload "curl.exe -s https://a
 check "ls a path ending in curl"      allow "$(payload 'ls /usr/bin/curl /usr/bin/gh')"                                      guard-bash.sh
 # And curl -K: a config file can carry the method and body, so to these endpoints it is a write.
 check "approve, curl -K config"       block "$(payload "curl -K approve.cfg https://api.github.com/$PD")"                     guard-bash.sh
+# TheHub #61038 second review: six more routes, each allowed by the first rework.
+# 1. Quotes and backslashes inside a word: bash joins P""OST into POST.
+check "approve, -X P\"\"OST"          block "$(payload "gh api -X P\"\"OST $PD -f state=approved")"                            guard-bash.sh
+check "approve, -X PO\\ST"            block "$(payload "gh api -X PO\\ST $PD -f state=approved")"                              guard-bash.sh
+check "approve, -X GET -X \$'POST'"   block "$(payload "gh api -X GET -X \$'POST' $PD -f state=approved")"                    guard-bash.sh
+check "approve, pending\"_\"deployments" block "$(payload 'gh api -X POST repos/O/R/actions/runs/1/pending"_"deployments -f state=approved')" guard-bash.sh
+check "approve, pending\\_deployments" block "$(payload 'gh api -X POST repos/O/R/actions/runs/1/pending\_deployments -f state=approved')" guard-bash.sh
+check "approve, g''h api"             block "$(payload "g''h api -X POST $PD -f state=approved")"                              guard-bash.sh
+check "approve, c\\url"               block "$(payload "c\\url -X POST https://api.github.com/$PD -d @a.json")"               guard-bash.sh
+check "approveDeployments split by ''" block "$(payload "gh api graphql -f query='mutation{appro''veDeployments(input:{workflowRunId:\"x\",environmentIds:[\"y\"]}){clientMutationId}}'")" guard-bash.sh
+check "merge, gh api -X P\"\"UT"      block "$(payload 'gh api -X P""UT repos/O/R/pulls/12/merge')"                           guard-bash.sh
+check "force push, --for''ce"         block "$(payload "git push --for''ce origin feat")"                                      guard-bash.sh
+check "issue body quoting the call"   allow "$(payload "gh issue create --title 'pending_deployments is blocked' --body 'see gh api -X POST .../pending_deployments'")" guard-bash.sh
+# 2. Upper- or mixed-case binary names run on Windows.
+check "approve, GH api"               block "$(payload "GH api -X POST $PD -f state=approved")"                                guard-bash.sh
+check "approve, Gh.exe api"           block "$(payload "Gh.exe api -X POST $PD -f state=approved")"                            guard-bash.sh
+check "approve, CURL"                 block "$(payload "CURL -X POST https://api.github.com/$PD -d @a.json")"                 guard-bash.sh
+check "GH_DEBUG=api gh api read"      allow "$(payload 'GH_DEBUG=api gh api repos/cli/cli')"                                  guard-bash.sh
+# 3. gh takes the last method, and pflag unpacks -iXPOST.
+check "approve, -X GET -iXPOST"       block "$(payload "gh api -X GET -iXPOST $PD -f state=approved")"                         guard-bash.sh
+check "-iX GET read"                  allow "$(payload "gh api -iX GET $PD")"                                                  guard-bash.sh
+# 4. curl takes the last -X.
+check "approve, curl -X GET -X POST"  block "$(payload "curl -X GET -X POST https://api.github.com/$PD -d @a.json")"           guard-bash.sh
+check "approve, curl -XGET -XPOST"    block "$(payload "curl -XGET -XPOST -d @a.json https://api.github.com/$PD")"            guard-bash.sh
+check "curl -X GET with a body"       allow "$(payload "curl -X GET https://api.github.com/$PD -d per_page=5")"               guard-bash.sh
+# 5. curl removes dot segments and expands {} and [] globs in the URL.
+check "approve, curl x/../"           block "$(payload "curl -X POST https://api.github.com/repos/O/R/actions/runs/1/x/../pending_deployments -d @a.json")" guard-bash.sh
+check "approve, curl ./"              block "$(payload "curl -X POST https://api.github.com/repos/O/R/actions/runs/1/./pending_deployments -d @a.json")" guard-bash.sh
+check "approve, curl {s} glob"        block "$(payload "curl -X POST 'https://api.github.com/repos/O/R/actions/runs/1/pending_deployment{s}' -d @a.json")" guard-bash.sh
+check "approve, curl [s-s] glob"      block "$(payload "curl -X POST 'https://api.github.com/repos/O/R/actions/runs/1/pending_deployment[s-s]' -d @a.json")" guard-bash.sh
+check "curl POST to a run's rerun"    allow "$(payload 'curl -X POST https://api.github.com/repos/O/R/actions/runs/1/rerun')" guard-bash.sh
+# 6. A gh alias body is a gh command.
+check "approve, gh alias set"         block "$(payload "gh alias set ok 'api -X POST $PD -f state=approved'")"                 guard-bash.sh
+check "merge, gh alias set"           block "$(payload "gh alias set m 'pr merge'")"                                           guard-bash.sh
+check "merge, gh alias set --clobber" block "$(payload "gh alias set --clobber m \"pr merge --squash\"")"                     guard-bash.sh
+ALIAS_BAD=$(mktemp); printf '%s\n' "ok: api -X POST $PD -f state=approved" > "$ALIAS_BAD"
+ALIAS_OK=$(mktemp); printf '%s\n' 'co: pr checkout' 'v: pr view --web' > "$ALIAS_OK"
+check "approve, gh alias import"      block "$(payload "gh alias import $ALIAS_BAD")"                                          guard-bash.sh
+check "gh alias import from stdin"    block "$(payload 'gh alias import -')"                                                  guard-bash.sh
+check "gh alias import, harmless"     allow "$(payload "gh alias import $ALIAS_OK")"                                           guard-bash.sh
+rm -f "$ALIAS_BAD" "$ALIAS_OK"
+check "gh alias set co pr checkout"   allow "$(payload "gh alias set co 'pr checkout'")"                                       guard-bash.sh
+check "gh alias list"                 allow "$(payload 'gh alias list')"                                                      guard-bash.sh
+# Run-time values: the cheap partial steps. The rest stay open (TheHub #61039).
+check "approve, endpoint in a variable" block "$(payload "P=$PD; gh api -X POST \$P -f state=approved")"                      guard-bash.sh
+check "approve, endpoint through xargs" block "$(payload "echo $PD | xargs gh api -X POST -f state=approved")"                guard-bash.sh
+check "approve, action in a variable" block "$(payload 'gh api -X POST repos/O/R/actions/runs/1/$E -f state=approved')"      guard-bash.sh
+check "approve, body from \$(...)"    block "$(payload "gh api $PD \$(printf -- '-f state=approved')")"                        guard-bash.sh
+check "graphql, query=\"\$(cat file)\"" block "$(payload 'gh api graphql -f query="$(cat no-such-q.graphql)"')"              guard-bash.sh
+check "curl graphql, -d \"\$(cat file)\"" block "$(payload 'curl -X POST https://api.github.com/graphql -d "$(cat no-such-q.json)"')" guard-bash.sh
+check "rerun a run by variable id"    allow "$(payload 'gh api -X POST repos/O/R/actions/runs/$ID/rerun')"                   guard-bash.sh
+check "jobs of a run by variable id"  allow "$(payload 'gh api repos/O/R/actions/runs/$ID/jobs --jq ".jobs[].name"')"        guard-bash.sh
+check "graphql with a \$(...) variable" allow "$(payload "gh api graphql -F owner=\"\$(gh repo view --json owner -q .owner.login)\" -f query='query(\$owner:String!){repositoryOwner(login:\$owner){id}}'")" guard-bash.sh
 # #117 -- reads inside a substitution stay allowed, and the anchor still needs a word
 # boundary: a command that merely ends in "gh" is not gh.
 # shellcheck disable=SC2016  # literal $(...) / backticks: the unexpanded command text is the hook input under test
