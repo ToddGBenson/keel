@@ -354,16 +354,24 @@ check("--history outside a git repository fails loudly (exit 2), never gates on 
 check("platform-integrity.sh runs `scripts/poam.py --check --history`",
       any(re.search(r"\bscripts/poam\.py --check --history\b", ln) for ln in live))
 
-# The test travels with the platform-owned script it exercises, and CI runs it
-# from the one list of tests.
+# poam.md's Entry format asks for the Risk "with reasoning", so a Risk cell can
+# read `**High** — internet-facing`. That is still High, and still gates.
+ROW_HIGH_WITH_REASON = ROW_OVERDUE_HIGH.replace("**High**", "**High** — reachable from a fork")
+rc, out = run_poam(register(ROW_HIGH_WITH_REASON), "--check", "--today", "2026-10-23")
+check("a Risk cell with reasoning (`**High** — ...`) still gates --check",
+      rc == 1 and "POAM-014" in out, f"rc={rc} {out}")
+rc, out = run_history([register(ROW_HIGH_WITH_REASON), register(ROW_DOWNGRADED)],
+                      "--check", "--history", "--today", "2026-10-23")
+check("--history: `High — reason` downgraded to Medium still fails --check",
+      rc == 1, f"rc={rc} {out}")
+
+# The test travels with the platform-owned script it exercises. Listing it in
+# test/manifest.txt is keel #151's change (#145/#146/#148's tests), not this one.
 manifest = (ROOT / "platform" / "MANIFEST.yml").read_text(encoding="utf-8")
 owned = manifest.split("platform_owned:", 1)[1].split("\nproject_owned:", 1)[0]
 for path in ("test/poam.test.py", "test/fixtures/poam-af878f1.md"):
     check(f"platform/MANIFEST.yml platform_owned lists {path}",
           re.search(r"^\s*-\s*" + re.escape(path) + r"\s*$", owned, re.M) is not None)
-tests_list = (ROOT / "test" / "manifest.txt").read_text(encoding="utf-8")
-check("test/manifest.txt runs test/poam.test.py in the test stage",
-      re.search(r"^test/poam\.test\.py\s+test\b", tests_list, re.M) is not None)
 
 print()
 if failures:
