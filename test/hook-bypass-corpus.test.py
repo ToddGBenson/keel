@@ -74,7 +74,7 @@ MODES = ("jq", "no-jq")
 HOOK_NAMES = ("guard-bash.sh", "guard-write.sh")
 WRITE_TOOLS = ("Write", "Edit", "MultiEdit", "NotebookEdit")
 # Tools the hooks invoke. The no-jq shim directory links exactly these.
-HOOK_TOOLS = ("bash", "sh", "cat", "grep", "sed", "tr", "head", "mktemp", "rm",
+HOOK_TOOLS = ("bash", "sh", "cat", "grep", "sed", "tr", "head", "mktemp", "rm", "awk",
               "python3", "python", "env")
 
 

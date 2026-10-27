@@ -15,14 +15,146 @@ set -uo pipefail
 
 payload="$(cat)"
 
+# Decode a JSON string body (the sed fallback below hands over the raw escapes).
+# \uXXXX is left as it is.
+read -r -d '' json_unescape_awk <<'AWK'
+{ s = (NR > 1) ? s "\n" $0 : $0 }
+END {
+  n = length(s); out = ""
+  for (i = 1; i <= n; i++) {
+    c = substr(s, i, 1)
+    if (c == "\\" && i < n) {
+      d = substr(s, ++i, 1)
+      if (d == "n") c = "\n"; else if (d == "t") c = "\t"; else if (d == "r") c = "\r"
+      else if (d == "u") c = "\\u"; else if (d == "b" || d == "f") c = " "; else c = d
+    }
+    out = out c
+  }
+  printf "%s", out
+}
+AWK
+
 # Extract the command. Prefer jq; fall back to a tolerant sed for environments without it.
 if command -v jq >/dev/null 2>&1; then
   cmd="$(printf '%s' "$payload" | jq -r '.tool_input.command // empty')"
 else
-  cmd="$(printf '%s' "$payload" | sed -n 's/.*"command"[[:space:]]*:[[:space:]]*"\(.*\)".*/\1/p')"
+  # TheHub #61038 review: take the JSON string itself (not everything up to the
+  # payload's last quote, which swallowed the "description" field) and decode it, so
+  # this mode sees the command jq would. Undecoded, \" is not a quote and \n is not a
+  # newline, and the quote-aware view below could not tell what is quoted.
+  cmd="$(printf '%s' "$payload" | sed -nE 's/.*"command"[[:space:]]*:[[:space:]]*"(([^"\\]|\\.)*)".*/\1/p')"
+  cmd_json="$cmd"
+  cmd="$(printf '%s' "$cmd_json" | LC_ALL=C awk "$json_unescape_awk" 2>/dev/null)" || cmd="$cmd_json"
 fi
 
 [ -z "$cmd" ] && exit 0
+
+# TheHub #61038 review: a backslash-newline continues the command, for every command.
+# This was done for curl only, so `gh api --method POST \<newline> .../pending_deployments`
+# put the endpoint on a line of its own, which no gh api rule read.
+cmd=${cmd//$'\\\n'/ }
+
+# TheHub #61038 review: the same binary under another name. curl.exe is the natural
+# spelling on Windows; /usr/bin/curl, \curl (which skips an alias) and
+# "C:\Program Files\GitHub CLI\gh.exe" are the others. Each rule names gh, git or curl
+# after the $B boundary, so write those back to the bare name first. A path that
+# merely ends in /gh becomes "gh" too, which only matters if the rest of the line is
+# a blocked call. Upper-case names (CURL.EXE) are not folded: a known limit.
+norm=()
+for name in gh git curl; do
+  norm+=(-e 's#"([^"]*[/\\])?'"$name"'(\.[Ee][Xx][Ee])?"#'"$name"'#g'
+         -e "s#'([^']*[/\\\\])?$name(\\.[Ee][Xx][Ee])?'#$name#g"
+         -e 's#(^|[|;&[:space:](`"'"'"'])\\?([^[:space:]|;&()`"'"'"'<>]*[/\\])?'"$name"'(\.[Ee][Xx][Ee])?([[:space:])`"'"'"'|;&]|$)#\1'"$name"'\4#g')
+done
+cmd="$(printf '%s' "$cmd" | sed -E "${norm[@]}")"
+
+# TheHub #61038 review: a | ; & or newline inside quotes is text, not a separator. The
+# rules cut a command into invocations on those characters ([^|;&]* and tr '|;&'), so
+# `gh api -X POST -f 'comment=a;b' .../pending_deployments` was two invocations, one
+# with the method and one with the endpoint, and neither matched.
+#
+# This prints the command with every such character that bash would NOT treat as a
+# separator -- quoted ('...', "...", $'...'), escaped, in a comment -- turned into a
+# space. Quoting inside $(...) and backticks is followed, including inside double
+# quotes, and heredoc bodies are copied unchanged.
+#
+# Quoted text can also BE a command (sh -c '...; ...'), and there the quoted separators
+# are real. So every rule runs twice, on the command as written and on this view, and
+# either can block. A deny rule is allowed to be judged on both readings.
+read -r -d '' mask_awk <<'AWK'
+{ s = (NR > 1) ? s "\n" $0 : $0 }
+END {
+  n = length(s); q = ""; out = ""; nh = 0; ws = 1; dp = 0; i = 1
+  while (i <= n) {
+    c = substr(s, i, 1)
+    if (q == "" || q == "\"") {
+      if (c == "$" && substr(s, i + 1, 1) == "(") {
+        sv[++dp] = q; ft[dp] = "("; pc[dp] = 1; q = ""
+        out = out "$("; i += 2; ws = 1; continue
+      }
+      if (c == "`") {
+        if (q == "" && dp > 0 && ft[dp] == "`") q = sv[dp--]
+        else { sv[++dp] = q; ft[dp] = "`"; q = "" }
+        out = out c; i++; ws = 1; continue
+      }
+    }
+    if (q == "") {
+      if (c == "\\") {
+        d = substr(s, i + 1, 1)
+        out = out ((d == "\n" || d == "|" || d == ";" || d == "&") ? "  " : c d)
+        i += 2; ws = 0; continue
+      }
+      if (c == "#" && ws) {
+        j = index(substr(s, i), "\n"); if (j == 0) j = n - i + 2
+        t = substr(s, i, j - 1); gsub(/[|;&]/, " ", t)
+        out = out t; i += j - 1; continue
+      }
+      if (dp > 0 && ft[dp] == "(" && c == "(") pc[dp]++
+      if (dp > 0 && ft[dp] == "(" && c == ")" && --pc[dp] == 0) {
+        q = sv[dp--]; out = out c; i++; ws = 0; continue
+      }
+      if (c == "'") q = (i > 1 && substr(s, i - 1, 1) == "$") ? "$" : "'"
+      else if (c == "\"") q = "\""
+      else if (c == "<" && substr(s, i, 3) ~ /^<<[^<]/) {
+        r = substr(s, i + 2); hdash = (substr(r, 1, 1) == "-")
+        if (hdash) r = substr(r, 2)
+        sub(/^[ \t]*/, "", r)
+        if (match(r, /^["'\\]?[A-Za-z0-9_.-]+["']?/)) {
+          w = substr(r, 1, RLENGTH); gsub(/["'\\]/, "", w)
+          hw[++nh] = w; hd[nh] = hdash
+        }
+      }
+      else if (c == "\n" && nh > 0) {
+        out = out c; i++
+        for (k = 1; k <= nh && i <= n; k++) {
+          while (i <= n) {
+            j = index(substr(s, i), "\n")
+            line = (j > 0) ? substr(s, i, j - 1) : substr(s, i)
+            out = out line; i += length(line)
+            if (j > 0) { out = out "\n"; i++ }
+            t = line; if (hd[k]) sub(/^\t+/, "", t)
+            if (t == hw[k]) break
+          }
+        }
+        nh = 0; ws = 1; continue
+      }
+      ws = (c == " " || c == "\t" || c == "\n" || c == ";" || c == "&" || c == "|" || c == "(")
+      out = out c; i++; continue
+    }
+    if (c == "\\" && q != "'") {
+      d = substr(s, i + 1, 1)
+      out = out c ((d == "\n" || d == "|" || d == ";" || d == "&") ? " " : d)
+      i += 2; continue
+    }
+    if ((q == "\"" && c == "\"") || (q != "\"" && c == "'")) q = ""
+    else if (c == "|" || c == ";" || c == "&" || c == "\n") c = " "
+    out = out c; i++
+  }
+  printf "%s", out
+}
+AWK
+masked_cmd="$(printf '%s' "$cmd" | LC_ALL=C awk "$mask_awk" 2>/dev/null)" || masked_cmd="$cmd"
+raw_cmd="$cmd"
 
 block() {
   echo "BLOCKED by .claude/hooks/guard-bash.sh — $1" >&2
@@ -50,6 +182,10 @@ B='(^|[|;&[:space:](`"'"'"'])'
 # `x=$(git push origin main)` ends in "main)" and is still a push to main.
 E='([[:space:])`"'"'"']|$)'
 
+# Every rule below reads $cmd. guard() runs them all once per view of the command (see
+# masked_cmd above); the body is left at the top level's indentation so its history
+# stays readable.
+guard() {
 # ── Hook bypass ─────────────────────────────────────────────────────────────
 # If a hook blocks you, the hook is working correctly. Bypassing it defeats the
 # pre-commit secret scan, which is the last cheap chance to stop a credential leak.
@@ -144,13 +280,19 @@ g 'continue-on-error:[[:space:]]*true' \
 # watch), so there is no named subcommand to block -- only these routes, and curl.
 DEPLOY_REVIEW='/actions/runs/[^|;&/]+/(pending_deployments|deployment_protection_rule)([^A-Za-z0-9_-]|$)'
 
+# TheHub #61038 review: gh upper-cases the method before sending it, so `-X post` is a
+# POST, and pflag reads -X 'PUT', --method "delete" and -X=PUT as well. The method was
+# matched upper-case and unquoted only, for every rule below, not just this one.
+GH_M='(-X[[:space:]]*=?|--method[[:space:]]*=?)[[:space:]]*["'"'"']?'
+GH_WRITE='([Pp][Oo][Ss][Tt]|[Pp][Uu][Tt]|[Pp][Aa][Tt][Cc][Hh]|[Dd][Ee][Ll][Ee][Tt][Ee])\b'
+
 gh_api_write() { # true if this is a gh api call carrying a write method
   g "$B"'gh[[:space:]]+api\b' || return 1
-  printf '%s' "$cmd" | grep -qE '(-X[[:space:]]*|--method[[:space:]]*=?[[:space:]]*)(POST|PUT|PATCH|DELETE)\b' && return 0
+  printf '%s' "$cmd" | grep -qE "$GH_M$GH_WRITE" && return 0
   printf '%s' "$cmd" | tr '|;&' '\n' \
     | grep -E "$B"'gh[[:space:]]+api\b' \
     | grep -E '[[:space:]](-i*[fF]|--(raw-)?field([=[:space:]]|$)|--input([=[:space:]]|$))' \
-    | grep -qvE '(-X[[:space:]]*|--method[[:space:]]*=?[[:space:]]*)[A-Za-z]'
+    | grep -qvE "$GH_M"'[A-Za-z]'
 }
 
 if gh_api_write; then
@@ -239,19 +381,38 @@ fi
 
 # TheHub #61038: curl reaches the same endpoints as gh api, with the token from
 # `gh auth token`, and no rule above reads curl. Judged per invocation (backslash-
-# continued lines rejoined first) and on the endpoint path, not the host, so a full
-# api.github.com URL and an Enterprise one are the same request. As with gh api, a
-# body makes it a write unless a GET was asked for (-G/--get, or -X GET); a GET of
-# pending_deployments lists what is waiting and stays allowed.
+# continued lines are rejoined at the top) and on the endpoint path, not the host, so
+# a full api.github.com URL and an Enterprise one are the same request. As with gh
+# api, a body makes it a write unless a GET was asked for (-G/--get, or -X GET); a GET
+# of pending_deployments lists what is waiting and stays allowed. A config file
+# (-K/--config) can carry the method and the body, so to these endpoints it counts
+# as a body.
 if g "$B"'curl([[:space:]]|$)'; then
-  curl_segs=$(printf '%s' "${cmd//$'\\\n'/ }" | tr '|;&' '\n' | grep -E "$B"'curl[[:space:]]')
-  printf '%s' "$curl_segs" | grep -qE '(^|[^A-Za-z0-9_])(approve|reject)Deployments([^A-Za-z0-9_]|$)' \
+  curl_segs=$(printf '%s' "$cmd" | tr '|;&' '\n' | grep -E "$B"'curl[[:space:]]')
+  # TheHub #61038 review: a GraphQL document sent from a file (-d @file, --data-binary
+  # @file, --json @file, -T file, -K config) is read, or refused when it cannot be --
+  # stdin, a missing file -- exactly as the gh api graphql rule does.
+  curl_text="$curl_segs"
+  curl_gql=$(printf '%s\n' "$curl_segs" | grep -E '/graphql([^A-Za-z0-9_-]|$)')
+  if [ -n "$curl_gql" ]; then
+    while IFS= read -r f; do
+      [ -n "$f" ] || continue
+      if [ "$f" = "-" ] || [ ! -r "$f" ]; then
+        block "a GraphQL document sent with curl that this hook cannot read ($f). Pass it inline with -d '{\"query\":\"...\"}'." "CM-3, AC-5, AIC-1, AIC-2"
+      fi
+      curl_text="$curl_text
+$(cat -- "$f")"
+    done < <(printf '%s\n' "$curl_gql" \
+      | grep -oE '(^|[[:space:]])((-[a-zA-Z]*d[[:space:]]*|--(data|data-ascii|data-binary|json)[[:space:]]+)["'"'"']?@|(-[a-zA-Z]*[TK][[:space:]]*|--(upload-file|config)[[:space:]]+)["'"'"']?)[^[:space:]"'"'"'`)]+' \
+      | sed -E 's/^[[:space:]]*(-[a-zA-Z]*[dTK][[:space:]]*|--[a-z-]+[[:space:]]+)["'"'"']?@?//')
+  fi
+  printf '%s' "$curl_text" | grep -qE '(^|[^A-Za-z0-9_])(approve|reject)Deployments([^A-Za-z0-9_]|$)' \
     && block "approving or rejecting an environment deployment through GraphQL over curl. Only a human reviews a deployment; the environment's reviewers ARE the G5 authorization gate." "CM-3, AC-5, AIC-1, AIC-2"
   curl_dr=$(printf '%s\n' "$curl_segs" | grep -E "$DEPLOY_REVIEW")
   if [ -n "$curl_dr" ]; then
     curl_m='(-[a-zA-Z]*X[[:space:]]*|--request[[:space:]=]+)[\"'"'"']*'
-    { printf '%s\n' "$curl_dr" | grep -E "$curl_m"'[A-Za-z]' | grep -qvE "$curl_m"'(GET|HEAD|get|head)([^A-Za-z]|$)' \
-      || printf '%s\n' "$curl_dr" | grep -E '[[:space:]](-[a-zA-Z]*[dFT]|--data|--json|--form|--upload-file)' \
+    { printf '%s\n' "$curl_dr" | grep -E "$curl_m"'[A-Za-z]' | grep -qvE "$curl_m"'([Gg][Ee][Tt]|[Hh][Ee][Aa][Dd])([^A-Za-z]|$)' \
+      || printf '%s\n' "$curl_dr" | grep -E '[[:space:]](-[a-zA-Z]*[dFTK]|--data|--json|--form|--upload-file|--config)' \
            | grep -qvE "$curl_m"'[A-Za-z]|[[:space:]](-[a-zA-Z]*G|--get)([[:space:]]|$)'; } \
       && block "approving or rejecting an environment deployment through curl. Only a human reviews a deployment; the environment's reviewers ARE the G5 authorization gate." "CM-3, AC-5, AIC-1, AIC-2"
   fi
@@ -294,5 +455,9 @@ case "$cmd" in
   *"kubectl"*"prod"*|*"--context"*"prod"*|*"--profile"*"prod"*|*"terraform apply"*)
     block "production or infrastructure mutation. The pipeline deploys, never an agent." "AIC-3, CM-5, AC-6" ;;
 esac
+}
+
+cmd="$raw_cmd"; guard
+if [ "$masked_cmd" != "$raw_cmd" ]; then cmd="$masked_cmd"; guard; fi
 
 exit 0
