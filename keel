@@ -4,7 +4,12 @@
 # The 72k words of docs are reference. This is the daily driver. Everything a
 # personal DevSecOps loop needs, wrapped so you never hand-type four scripts:
 #
-#   ./keel check          fast local mirror of CI — run this constantly
+#   ./keel check          the full CI mirror (default): every test file CI runs,
+#                         read from test/manifest.txt, plus the guard self-test,
+#                         platform integrity, pipeline structure and agent evals.
+#                         Run it before every push.
+#   ./keel check --quick  the fast subset only: parse, platform integrity, guard
+#                         self-test and the manifest's `quick` tests. NOT a mirror.
 #   ./keel fast "<msg>"    the trivial-change lane (docs/config only, no ceremony)
 #   ./keel ship           check, then push the current branch
 #   ./keel secure         guard self-test + platform integrity + gaps
@@ -20,8 +25,8 @@
 #   ./keel sync            what changed upstream (--apply to take it)
 #   ./keel help            this
 #
-# Design goals, in priority order: fast (check is <5s), honest (never green on a
-# skipped step), portable (pure bash + the tools already required). Learned the
+# Design goals, in priority order: honest (never green on a skipped step), fast
+# (`check --quick` for the inner loop; `check` costs what CI's tests cost), portable (pure bash + the tools already required). Learned the
 # hard way — see docs/lessons/. This script obeys them: no `set -e` foot-guns
 # around greps, CR-tolerant, quoted paths.
 
@@ -45,11 +50,23 @@ die()  { printf '  %s✗ %s%s\n' "$X" "$1" "$R" >&2; exit 1; }
 have() { command -v "$1" >/dev/null 2>&1; }
 PY="$(command -v python3 || command -v python || echo python)"
 
-# ── check: the fast local mirror of what CI gates on ────────────────────────
-# Run this before every push. If it is green, CI is green — no round-trip.
+# ── check: the local mirror of what CI gates on ─────────────────────────────
+# Run this before every push. If it is green, CI's tests are green: it runs every
+# file in test/manifest.txt, the list ci/scripts/ci-stage.sh runs (TheHub #60980).
+# What it does not run: shellcheck and the scanner lanes, which need their images.
+# --quick is the old subset, for the inner loop, and says so.
 cmd_check() {
-  local fail=0
-  say "keel check — local CI mirror"
+  local fail=0 quick=0
+  case "${1:-}" in
+    "") ;;
+    --quick) quick=1 ;;
+    *) die "unknown option '$1' — usage: ./keel check [--quick]" ;;
+  esac
+  if [ "$quick" -eq 1 ]; then
+    say "keel check --quick — the fast subset, NOT a CI mirror (./keel check is)"
+  else
+    say "keel check — local CI mirror (every test in test/manifest.txt)"
+  fi
 
   # 1. Workflows and config parse (the failure that wastes a CI round-trip)
   if "$PY" - <<'PYEOF' 2>/dev/null; then ok "workflows + settings parse"; else warn "YAML/JSON parse issues"; fail=1; fi
@@ -80,22 +97,30 @@ PYEOF
   else
     warn "guard self-test FAILED — a control is misbehaving"; fail=1
   fi
-  # 3b. No previously fixed hook bypass works again (TheHub #60818)
-  if [ -f test/hook-bypass-corpus.test.py ]; then
-    if "$PY" test/hook-bypass-corpus.test.py >/dev/null 2>&1; then
-      ok "guard hooks (bypass corpus)"
+
+  # 4. The test files, from the one list CI reads (TheHub #60980). One ok/warn
+  #    line per file. No node is a warning and a failure here, not a skip: CI's
+  #    GitHub Actions test job runs the .js tests, so green must have run them.
+  if [ "$quick" -eq 0 ]; then
+    local drift
+    if drift="$("$PY" scripts/test-manifest.py check 2>&1)"; then
+      ok "test/manifest.txt names every test file"
     else
-      warn "bypass corpus FAILED — run: $PY test/hook-bypass-corpus.test.py"; fail=1
+      warn "test/manifest.txt is out of step with test/ — CI fails on this:"
+      printf '%s\n' "$drift" | sed 's/^/      /'
+      fail=1
     fi
+    "$PY" scripts/test-manifest.py run --quiet --node-missing fail || fail=1
+  else
+    "$PY" scripts/test-manifest.py run --quiet --node-missing fail --quick || fail=1
   fi
 
-  # 4. Platform's own unit tests (the dashboard generator has real logic worth testing)
-  if [ -f test/dashboard.test.py ]; then
-    if "$PY" test/dashboard.test.py >/dev/null 2>&1; then
-      ok "dashboard generator tests"
-    else
-      warn "dashboard tests FAILED — run: $PY test/dashboard.test.py"; fail=1
-    fi
+  # 4b. The rest of what CI's lint and test stages run (full mode only).
+  if [ "$quick" -eq 0 ]; then
+    if "$PY" scripts/validate-pipeline.py >/dev/null 2>&1; then ok "concourse pipeline structure"
+    else warn "pipeline structure — run: $PY scripts/validate-pipeline.py"; fail=1; fi
+    if bash evals/run-agent-evals.sh >/dev/null 2>&1; then ok "agent assurance (AIC-12 structural)"
+    else warn "agent evals FAILED — run: bash evals/run-agent-evals.sh"; fail=1; fi
   fi
 
   # 5. Secrets in the working tree (cheap, catches the expensive mistake)
@@ -248,7 +273,8 @@ cmd_status() {
 }
 
 cmd_help() {
-  sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'
+  # The header comment, up to the first line that is not one.
+  awk 'NR == 1 { next } /^#/ { sub(/^# ?/, ""); print; next } { exit }' "$0"
 }
 
 # ── dispatch ─────────────────────────────────────────────────────────────────
