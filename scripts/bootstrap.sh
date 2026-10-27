@@ -270,6 +270,10 @@ fi
 # requests in your repository.
 rm -f .merge-reconciled.json
 rm -f .control-liveness.json   # regenerated from your (empty) evidence below
+# The platform's grandfathered G3 keys name OUR work items. In your repository the
+# same numbers are different items, and keeping the list would count your own
+# verdict-less records as if they predated the rule (keel #148 review).
+rm -f .control-liveness-legacy.json
 
 # ── ADRs: theirs are decisions ABOUT the platform ─────────────────────────────
 # Kept, not deleted — they explain the process you have just inherited, and

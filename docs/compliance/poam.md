@@ -63,7 +63,7 @@ review*; POAM-005 and POAM-006 closed later the same day when the repository was
 | POAM-013 | Monthly monitoring cadence approximated by a weekly trigger | CA-7 | Low | Todd Benson | 2026-11-11 | Open — accepted, detection is loud |
 | POAM-014 | **The merge gate verifies process, not code.** Tests and scans run in Concourse *after* merge (re-scoped 2026-08-14 from "no merge gate exists") | CM-3, CM-5, AC-5, SA-11 | **High** | Todd Benson | ~~2026-09-14~~ **2026-11-21** (extended once, 2026-10-22) | Open — measured 2026-10-22: `Concourse / keel` lands on `main` commits only and no check is required. PR heads do run `Unit results`, `Mykronos sast` and `Mykronos secrets` on Actions, none required. Closes when the check arrives on PR heads and is required (TheHub #60580) |
 | POAM-015 | Manifest coverage was checked per top-level directory, so six platform docs were never delivered to forks | CM-2, SA-10 | Medium | Todd Benson | 2026-08-14 | **Closed** — check now per file; six docs classified; both directions proven (#58) |
-| POAM-018 | **14 controls were marked satisfied on gates that have never run.** Five of six gates have produced zero evidence records; keel runs a one-gate lifecycle while documenting a six-gate one | SA-3, CA-2, CM-3, AC-3, AU-2, CP-10 +8 | **High** | Todd Benson | 2026-11-15 | Open — claims downgraded and measured. **G1 has fired once (2026-10-23, TheHub #60981): `evidence/hub-60981/g1/ready.md`, `verdict: fail`.** G0, G1 and G5 now have a record path liveness can count; G0, G2, G4 and G5 remain unexercised |
+| POAM-018 | **14 controls were marked satisfied on gates that have never run.** Five of six gates have produced zero evidence records; keel runs a one-gate lifecycle while documenting a six-gate one | SA-3, CA-2, CM-3, AC-3, AU-2, CP-10 +8 | **High** | Todd Benson | 2026-11-15 | Open — claims downgraded and measured. **A committed record proves a record exists, not that the gate ran**: the writer trusts the agent's judgement of each item (POAM-017). Records today: G1 1 (`evidence/hub-60981/g1/ready.md`, `verdict: fail`, 2026-10-23, TheHub #60981) · G3 16. G0, G2, G4 and G5 have no record. G5 counts only a record that cites a release run or an attestation |
 | POAM-017 | **Separation of duties is now agent-enforced, not human-enforced.** `delivery-lead` approves every gate; the control is a prompt boundary and a tool grant rather than a second person | AC-5, CM-5, SA-3 | **High** | Todd Benson | 2026-11-15 | Open — accepted by the system owner (ADR-0005) |
 | POAM-016 | **Two release paths that disagree.** `release.yml` still has `staging` and `authorize-and-deploy` jobs with a `PRODUCTION_URL`, describing a service deploy ADR-0004 says does not exist; Concourse has `release-preflight` → `authorize-release` | CM-3, CM-4, SA-10 | Medium | Todd Benson | 2026-09-14 | **Closed 2026-10-22** (TheHub #60935, 38 days late) — one path, `release.yml`: Concourse release jobs, task and script deleted; staging/deploy stubs and `PRODUCTION_URL` removed. Evidence: `evidence/143/` |
 
@@ -80,6 +80,18 @@ review*; POAM-005 and POAM-006 closed later the same day when the repository was
 records (a file with a `verdict:` line) rather than directories, and G0/G1/G5 were given record
 paths: G0 0 · **G1 1** (`evidence/hub-60981/g1/ready.md`, NOT READY) · G2 0 · G3 15 · G4 0 · G5 0.
 The fifteen G3 records predate the verdict line and are named, frozen, in `LEGACY_G3_KEYS`.
+
+**Re-measured 2026-10-27 (keel #148 review)**: G0 0 · G1 1 · G2 0 · G3 16 · G4 0 · G5 0, the
+numbers in `.control-liveness.json`. The 2026-10-23 line said G3 15 while its own baseline said
+16: G3 is the fifteen grandfathered self-reviews, now listed in the project-owned
+`.control-liveness-legacy.json` (frozen; `test/control-liveness-keel.test.py` fails if it
+changes), plus `evidence/148/g3/self-review.md`. The self-reviews of #145 and #147
+(`evidence/144/g3/`, `evidence/147/g3/`) merged without a verdict line and are not counted.
+These are counts of records that exist. A record proves it was written, not that the gate ran
+well, or at all; G5 counts only a record that also cites the release run
+(`release-run: https://github.com/<owner>/<repo>/actions/runs/<id>`) or its attestation
+(`attestation: https://github.com/<owner>/<repo>/attestations/<id>`), never a markdown file
+on its own.
 
 **keel runs a one-gate lifecycle while documenting a six-gate one.** Every change in this
 repository has gone idea → code → self-review → merge. Design review, threat modelling,

@@ -39,8 +39,12 @@ asks for — complete, not tidy:
 11. Verification plan — post-deploy checks and who runs them
 12. Communications
 13. Authorization — to be completed by the human approver
-14. A `verdict: pass` or `verdict: fail` line on a line of its own. `scripts/control-liveness.py`
-    counts G5 from `evidence/releases/<version>/change-record.md` carrying that line (POAM-018)
+14. A `verdict: pass` or `verdict: fail` line on a line of its own. That line alone does **not**
+    make G5 count: `scripts/control-liveness.py` counts G5 only when the record also cites what
+    happened, on a line of its own, once it exists (step 5):
+    `release-run: https://github.com/<owner>/<repo>/actions/runs/<id>` or
+    `attestation: https://github.com/<owner>/<repo>/attestations/<id>`. A markdown file is
+    somebody saying a release happened; the run and the attestation are the release (POAM-018)
 
 ## 3. Readiness review
 
@@ -92,7 +96,9 @@ AUTHORIZATION REQUIRED — a human must approve in the GitHub Environment.
 ## 5. Post-release
 
 Immediately: smoke tests, health check, error-rate and latency vs. the pre-deploy baseline,
-deployment record written.
+deployment record written. Append the `release-run:` URL of the run that released it, or the
+`attestation:` URL it published, to `evidence/releases/<version>/change-record.md`. Append;
+never rewrite what was authorized. Cite only a run or attestation you have opened.
 
 At 24 hours: **confirm the success metric from the original idea record is actually moving.**
 This is the step nearly everyone skips, and the reason backlogs fill with features nobody
