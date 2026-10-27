@@ -47,8 +47,12 @@ python scripts/control-liveness.py --check
 # docs/compliance/poam.md (strike the old date, write the new one), which is
 # reviewed like any other change; it cannot be done quietly.
 # Overdue Medium/Low items are printed but do not fail the job.
+# --history: an open item is gated at the highest Risk any committed version of
+# poam.md gave it, so lowering High to Medium does not get an overdue item past
+# this job (keel #146 review). The repo resource is a full clone, and git is in
+# the python image; if git cannot answer, poam.py exits 2 rather than gate on less.
 echo "── POA&M due dates (TheHub #60977) ────────────────────────────────────────"
-python scripts/poam.py --check
+python scripts/poam.py --check --history
 
 # Per the control-assessment skill: TEST beats EXAMINE. Three real defects in
 # these guards were found only by exercising them (POAM-002/003/004), including
