@@ -1,7 +1,8 @@
 # G0 — Intake
 
 **Recommends:** Product Owner · **Approves:** Delivery Lead (ADR-0005) · **Command:** `/idea`
-**Reference:** `docs/02-intake-and-discovery.md` · **Controls:** SA-3(1), RA-3, PM-30,
+**Evidence:** `evidence/<key>/g0/intake.md`, written by `scripts/gate-record.py` on every run
+(pass or fail) · **Reference:** `docs/02-intake-and-discovery.md` · **Controls:** SA-3(1), RA-3, PM-30,
 AI RMF MAP 1
 
 An idea leaves this gate accepted, rejected, or parked with a review date. It does not

@@ -64,6 +64,24 @@ Gates now required: G2 (security-relevant: touches session handling)
 Required co-approvers: security-engineer
 ```
 
+## Record the gate: `evidence/<key>/g1/ready.md`
+
+Write the record on **every** run, READY or NOT READY:
+
+```
+python scripts/gate-record.py --gate g1 --key <key> --verdict pass|fail --role product-owner+ux --item ac-binary=yes|no:<gap> --item sized=... --item flags=... --item no-open-question=...
+```
+
+- `<key>` is the GitHub issue number (`^[0-9]+$`) or the tracker id (`^[a-z]+-[0-9]+$`, e.g.
+  `hub-60944`; the Hub is the system of record, D-133). Any other value, including one with `/`
+  or `..`, is refused and nothing is written. Never build the path by hand.
+- The `--item` ids are the G1 checklist ids in `.sdlc/process.yaml`; every one is marked. The
+  18-row table above is how you judge them; the ids are what the record carries.
+- **NOT READY is `verdict: fail` and is still written.** A re-run appends, so the rejection
+  stays on record; the rejection rate is the health signal.
+
+`scripts/control-liveness.py` counts G1 from these records and nothing else.
+
 ## Then
 
 **A human, plus the Delivery Lead, confirms G1.** Agents do not pass gates. If NOT READY,

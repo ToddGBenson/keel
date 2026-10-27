@@ -49,6 +49,23 @@ available), following `.github/ISSUE_TEMPLATE/idea.yml`:
 - Recommend Accept / Reject / Park, with a reason. Park without a review date is rejection
   in disguise — either give it a date or recommend rejection.
 
+## Record the gate: `evidence/<key>/g0/intake.md`
+
+Every run writes its record, accepted or not, through the one writer that validates the key:
+
+```
+python scripts/gate-record.py --gate g0 --key <key> --verdict pass|fail --role product-owner --item problem=yes|no:<the gap>
+```
+
+- `<key>` is the GitHub issue number (`^[0-9]+$`) or the tracker id (`^[a-z]+-[0-9]+$`, e.g.
+  `hub-60944`). Anything else is refused and nothing is written. Never build the path by hand.
+- Mark **every** checklist item `.sdlc/process.yaml` declares for G0. An unsatisfied item names
+  its gap. `pass` with an unsatisfied item is refused (PD-7).
+- **Reject and Park are `verdict: fail`, and are still recorded.** A gate that only records
+  its passes reports a 0% rejection rate, which is the rubber-stamp signal.
+
+`scripts/control-liveness.py` counts G0 from these records and nothing else.
+
 ## Then
 
 Report the recommendation and stop. **A human confirms the G0 decision.** Do not create

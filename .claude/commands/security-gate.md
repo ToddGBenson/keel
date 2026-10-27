@@ -69,5 +69,7 @@ Not checked: runtime behavior under load — deferred to /qa-gate
 
 ## Then
 
+The record carries a `verdict: pass` or `verdict: fail` line on a line of its own; `scripts/control-liveness.py` counts the gate from that line and nothing else (POAM-018).
+
 Write to `evidence/<issue>/g4/security/`. Escalate any Critical or High to a human
 immediately. Do not wait for the gate summary.

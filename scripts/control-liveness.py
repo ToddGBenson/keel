@@ -67,9 +67,53 @@ GATE_NAMES = {
 STALE_DAYS = 120
 
 
+# A record is a file carrying this line. Counting directories (the original
+# rule) let an empty `evidence/x/g1/` count as a gate that fired (TheHub #60981).
+VERDICT_RE = re.compile(r"^\s*verdict:\s*(pass|fail)\s*$", re.M | re.I)
+
+# The G3 self-review records written before a verdict line was required. They are
+# real reviews and stay counted; the set is frozen, so a NEW record without a
+# verdict line does not count (test/control-liveness.test.py pins its size).
+# Editing these records to add a verdict line would be writing evidence after the
+# fact (PD-7), which is why they are named here instead.
+LEGACY_G3_KEYS = frozenset({
+    "0", "13", "42", "44", "48", "50", "52", "56", "58", "61", "63", "65", "67", "70", "143",
+})
+
+
+def is_record(path: Path) -> bool:
+    try:
+        return path.is_file() and bool(VERDICT_RE.search(path.read_text(encoding="utf-8")))
+    except (OSError, UnicodeDecodeError):
+        return False
+
+
+def has_record(gate_dir: Path) -> bool:
+    return any(is_record(p) for p in gate_dir.rglob("*"))
+
+
 def gate_liveness() -> dict[str, int]:
-    """Evidence records per gate. The only fully local signal, and the sharpest."""
-    return {g: len(glob.glob(str(ROOT / "evidence" / "*" / g))) for g in GATES}
+    """Work items (or releases) with at least one record per gate.
+
+    A record is a file under evidence/<key>/<gate>/ with a `verdict: pass|fail`
+    line. G5 also counts evidence/releases/<version>/change-record.md, which is
+    where /release writes and which `evidence/*/g5` never matched.
+    """
+    ev = ROOT / "evidence"
+    counts = {}
+    for g in GATES:
+        n = 0
+        for d in glob.glob(str(ev / "*" / g)):
+            d = Path(d)
+            if has_record(d):
+                n += 1
+            elif g == "g3" and d.parent.name in LEGACY_G3_KEYS and any(
+                    p.is_file() and p.stat().st_size > 0 for p in d.rglob("*.md")):
+                n += 1
+        counts[g] = n
+    counts["g5"] += sum(1 for p in glob.glob(str(ev / "releases" / "*" / "change-record.md"))
+                        if is_record(Path(p)))
+    return counts
 
 
 def claims_on_dead_gates(dead: set[str]) -> list[tuple[str, str]]:
