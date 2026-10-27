@@ -61,8 +61,10 @@ check(f"{legacy_file.name} is project-owned in platform/MANIFEST.yml",
 print("\nPOAM-018 states the measured numbers")
 measured = cl.gate_liveness()
 baseline = json.loads((ROOT / ".control-liveness.json").read_text(encoding="utf-8"))["gates"]
-check("the committed baseline equals today's count (re-run --update-baseline if not)",
-      measured == baseline, f"measured={measured} baseline={baseline}")
+# Not equality: a new record legitimately raises today's count above the
+# baseline until somebody re-baselines, and --check already fails a drop.
+check("today's G3 count is at least the baseline's (the legacy file loaded)",
+      measured["g3"] >= baseline["g3"], f"measured={measured} baseline={baseline}")
 
 poam = (ROOT / "docs" / "compliance" / "poam.md").read_text(encoding="utf-8")
 section = poam.split("### POAM-018", 1)[1].split("\n### ", 1)[0]

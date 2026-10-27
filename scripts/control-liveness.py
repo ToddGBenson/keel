@@ -71,25 +71,68 @@ STALE_DAYS = 120
 # rule) let an empty `evidence/x/g1/` count as a gate that fired (TheHub #60981).
 VERDICT_RE = re.compile(r"^\s*verdict:\s*(pass|fail)\s*$", re.M | re.I)
 
-# The G3 self-review records written before a verdict line was required. They are
-# real reviews and stay counted; the set is frozen, so a NEW record without a
-# verdict line does not count (test/control-liveness.test.py pins its size).
-# Editing these records to add a verdict line would be writing evidence after the
-# fact (PD-7), which is why they are named here instead.
-LEGACY_G3_KEYS = frozenset({
-    "0", "13", "42", "44", "48", "50", "52", "56", "58", "61", "63", "65", "67", "70", "143",
-})
+# A G5 record must also cite what actually happened: the release run, or the
+# attestation it published. A markdown file on its own is somebody saying a
+# release happened (keel #148 review). The citation is a line of its own, and
+# only a GitHub Actions run URL or a GitHub attestation URL is accepted.
+RELEASE_CITATION_RE = re.compile(
+    r"^\s*(?:release-run:\s*https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/actions/runs/[0-9]+"
+    r"|attestation:\s*https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/attestations/[0-9]+)"
+    r"/?[ \t]*$", re.M | re.ASCII)
+
+# The project's G3 records written before a verdict line was required. They are
+# real reviews and stay counted, but which ones they are is the project's data,
+# not the platform's: they live in a project-owned file, which bootstrap.sh
+# deletes, so a fork grandfathers nothing. Editing those records to add a
+# verdict line would be writing evidence after the fact (PD-7), which is why
+# they are named instead. Only G3 can be grandfathered; G5 never can.
+LEGACY = ROOT / ".control-liveness-legacy.json"
+KEY_RE = re.compile(r"\A(?:[0-9]+|[a-z]+-[0-9]+)\Z", re.ASCII)
 
 
-def is_record(path: Path) -> bool:
+def legacy_keys() -> dict[str, frozenset[str]]:
+    """{gate: keys} from the project's legacy file; {} when there is none.
+
+    A file that exists but cannot be read exactly is refused (exit 2) rather
+    than read as "nothing grandfathered", which would drop a gate to 0, or as
+    whatever parsed, which would count records nobody listed.
+    """
+    if not LEGACY.exists():
+        return {}
+
+    def refuse(why: str):
+        print(f"control-liveness: {LEGACY.name}: {why}", file=sys.stderr)
+        raise SystemExit(2)
+
     try:
-        return path.is_file() and bool(VERDICT_RE.search(path.read_text(encoding="utf-8")))
+        data = json.loads(LEGACY.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, ValueError) as e:
+        refuse(f"not readable JSON ({e})")
+    if not isinstance(data, dict):
+        refuse("must be a JSON object")
+    unknown = sorted(k for k in data if k != "g3" and not k.startswith("_"))
+    if unknown:
+        refuse(f"only g3 records can be grandfathered, not {', '.join(unknown)}")
+    keys = data.get("g3", [])
+    if not isinstance(keys, list) or not all(isinstance(k, str) and KEY_RE.match(k) for k in keys):
+        refuse("g3 must be a list of work-item keys (digits, or a word, a hyphen and digits)")
+    return {"g3": frozenset(keys)}
+
+
+def is_record(path: Path, need_citation: bool = False) -> bool:
+    try:
+        if not path.is_file():
+            return False
+        text = path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError):
         return False
+    if not VERDICT_RE.search(text):
+        return False
+    return not need_citation or bool(RELEASE_CITATION_RE.search(text))
 
 
-def has_record(gate_dir: Path) -> bool:
-    return any(is_record(p) for p in gate_dir.rglob("*"))
+def has_record(gate_dir: Path, need_citation: bool = False) -> bool:
+    return any(is_record(p, need_citation) for p in gate_dir.rglob("*"))
 
 
 def gate_liveness() -> dict[str, int]:
@@ -97,22 +140,25 @@ def gate_liveness() -> dict[str, int]:
 
     A record is a file under evidence/<key>/<gate>/ with a `verdict: pass|fail`
     line. G5 also counts evidence/releases/<version>/change-record.md, which is
-    where /release writes and which `evidence/*/g5` never matched.
+    where /release writes and which `evidence/*/g5` never matched. Every G5
+    record must also cite a release run or an attestation (RELEASE_CITATION_RE).
     """
     ev = ROOT / "evidence"
+    legacy = legacy_keys()
     counts = {}
     for g in GATES:
         n = 0
+        grandfathered = legacy.get(g, frozenset())
         for d in glob.glob(str(ev / "*" / g)):
             d = Path(d)
-            if has_record(d):
+            if has_record(d, need_citation=(g == "g5")):
                 n += 1
-            elif g == "g3" and d.parent.name in LEGACY_G3_KEYS and any(
+            elif d.parent.name in grandfathered and any(
                     p.is_file() and p.stat().st_size > 0 for p in d.rglob("*.md")):
                 n += 1
         counts[g] = n
     counts["g5"] += sum(1 for p in glob.glob(str(ev / "releases" / "*" / "change-record.md"))
-                        if is_record(Path(p)))
+                        if is_record(Path(p), need_citation=True))
     return counts
 
 
