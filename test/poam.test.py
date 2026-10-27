@@ -240,21 +240,10 @@ rc, out = brief(register(ROW_REDATED_HIGH, ROW_NODATE_LOW, ROW_CLOSED_LATE), "20
 check("session brief adds no output when nothing is overdue",
       rc == 0 and out == baseline, f"\n--- got ---\n{out}\n--- baseline ---\n{baseline}")
 
-# ── 7. the daily platform-integrity lane runs --check ────────────────────────
-pipeline = (ROOT / "ci" / "pipeline.yml").read_text(encoding="utf-8")
-m = re.search(r"^  - name: platform-integrity\n(.*?)(?=^  - name: |\Z)", pipeline, re.M | re.S)
-job = m.group(1) if m else ""
-check("platform-integrity is triggered by daily-0600",
-      re.search(r"get: daily-0600\s*\n\s*trigger: true", job) is not None, job)
-check("platform-integrity runs ci/tasks/platform-integrity.yml",
-      "file: repo/ci/tasks/platform-integrity.yml" in job)
-task = (ROOT / "ci" / "tasks" / "platform-integrity.yml").read_text(encoding="utf-8")
-check("that task runs ci/scripts/platform-integrity.sh",
-      "repo/ci/scripts/platform-integrity.sh" in task)
-script = (ROOT / "ci" / "scripts" / "platform-integrity.sh").read_text(encoding="utf-8")
-live = [ln for ln in script.splitlines() if not ln.lstrip().startswith("#")]
-check("platform-integrity.sh runs `scripts/poam.py --check`",
-      any(re.search(r"\bscripts/poam\.py --check\b", ln) for ln in live))
+# ── 7. the daily platform-integrity lane ─────────────────────────────────────
+# That wiring is in ci/, which is merge_required (a fork adapts it), so its
+# checks live in the project-owned test/poam-wiring.test.py. A platform-owned
+# test opens no ci/ or .github/ file; test/supply-chain.test.py enforces that.
 
 # ── 8. review of #146 (rework): empty register, status vocabulary, downgrade ──
 # An empty register is "0 open", not exit 2. binnacle and every fresh fork ship
@@ -351,8 +340,6 @@ check("--history: an item that was only ever Medium does not gate", rc == 0, f"r
 rc, out = run_poam(register(ROW_OVERDUE_MEDIUM), "--check", "--history", "--today", "2026-10-23")
 check("--history outside a git repository fails loudly (exit 2), never gates on less",
       rc == 2, f"rc={rc} {out}")
-check("platform-integrity.sh runs `scripts/poam.py --check --history`",
-      any(re.search(r"\bscripts/poam\.py --check --history\b", ln) for ln in live))
 
 # poam.md's Entry format asks for the Risk "with reasoning", so a Risk cell can
 # read `**High** — internet-facing`. That is still High, and still gates.

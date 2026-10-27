@@ -155,6 +155,8 @@ jobs:
       # POA&M due-date enforcement (TheHub #60977).
       - name: POA&M due-date tests
         run: python test/poam.test.py
+      - name: POA&M lane wiring (project-owned)
+        run: python test/poam-wiring.test.py
 
       # 33 assertions, mutation-verified, incl. one against a real filesystem.
       # This is the compensating control for POAM-008; see scripts/selfreview-check.js.
