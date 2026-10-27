@@ -21,7 +21,10 @@ instead:
   * --history (with --check): an open item is gated at the HIGHEST Risk any
     committed version of the register gave it, so downgrading High to Medium
     does not get an overdue item past the gate. Closing it or re-dating it
-    (both reviewed edits) does.
+    (both reviewed edits) does. Old versions are read for ID and Risk only, so
+    a status the vocabulary does not know (keel's own register once said
+    `REOPENED`) cannot hide a version's Risk; a version whose ID and Risk
+    cannot be read is named and the check exits 2 (keel #153 review).
 
     python scripts/poam.py [--file F] [--today YYYY-MM-DD]   count + OVERDUE lines
     python scripts/poam.py --overdue                        OVERDUE lines only
@@ -147,6 +150,36 @@ def _columns(header: List[str]):
     return cols
 
 
+def parse_risks(text: str) -> Dict[str, str]:
+    """{id: Risk} from a register, reading only the ID and Risk columns.
+
+    For --history: an old version is evidence of what Risk an item had, whatever
+    its Status or Due said, so neither is read. Raises PoamError when a POAM row
+    has no readable ID or Risk -- that version would otherwise count for less.
+    """
+    risks: Dict[str, str] = {}
+    cols = None
+    for n, line in enumerate(text.splitlines(), 1):
+        if not line.lstrip().startswith("|"):
+            continue
+        cells = _cells(line)
+        if not _ROW.match(line):
+            names = [_plain(h).lower() for h in cells]
+            if "id" in names and ("risk" in names or "severity" in names):
+                cols = {"id": names.index("id"),
+                        "severity": names.index("risk" if "risk" in names else "severity")}
+            continue
+        c = cols or {"id": 0, "severity": 3}
+        ident = _plain(cells[c["id"]]) if len(cells) > c["id"] else ""
+        if len(cells) <= c["severity"] or rank(cells[c["severity"]]) == 0:
+            raise PoamError(f"line {n}: {ident or 'a POAM row'} has no readable Risk: "
+                            f"{line.strip()[:80]}")
+        sev = level(cells[c["severity"]])
+        if ident not in risks or rank(sev) > rank(risks[ident]):
+            risks[ident] = sev
+    return risks
+
+
 def parse(text: str) -> List[Item]:
     items: List[Item] = []
     cols = None
@@ -184,11 +217,13 @@ def parse(text: str) -> List[Item]:
     return items
 
 
-def history_ranks(path: Path) -> Tuple[Dict[str, Tuple[str, str]], int]:
+def history_ranks(path: Path) -> Tuple[Dict[str, Tuple[str, str]], int, List[str]]:
     """The highest Risk each ID had in any committed version of `path`.
 
-    Returns ({id: (severity, short sha)}, versions read). Raises PoamError when
-    git cannot answer: --history must never quietly gate on less.
+    Returns ({id: (severity, short sha)}, versions found, ["<sha>: <why>" for
+    each version whose ID/Risk could not be read]). Raises PoamError when git
+    cannot answer. The caller fails on any skipped version: --history must
+    never quietly gate on less.
     """
     path = path.resolve()
 
@@ -211,15 +246,17 @@ def history_ranks(path: Path) -> Tuple[Dict[str, Tuple[str, str]], int]:
     if not shas:
         raise PoamError(f"--history: {rel} has no committed versions")
     best: Dict[str, Tuple[str, str]] = {}
+    skipped: List[str] = []
     for sha in shas:
         try:
-            old = parse(git("show", f"{sha}:{rel}"))
-        except PoamError:
-            continue  # an older layout this parser does not read; newer ones still count
-        for i in old:
-            if i.id not in best or rank(i.severity) > rank(best[i.id][0]):
-                best[i.id] = (i.severity, sha[:12])
-    return best, len(shas)
+            old = parse_risks(git("show", f"{sha}:{rel}"))
+        except PoamError as exc:
+            skipped.append(f"{sha[:12]}: {exc}")
+            continue
+        for ident, sev in old.items():
+            if ident not in best or rank(sev) > rank(best[ident][0]):
+                best[ident] = (sev, sha[:12])
+    return best, len(shas), skipped
 
 
 def overdue(items: List[Item], today: date) -> List[Item]:
@@ -265,7 +302,7 @@ def main(argv=None) -> int:
     gate_as = {i.id: i.severity for i in items}
     if args.history and args.check:
         try:
-            best, versions = history_ranks(args.file)
+            best, versions, skipped = history_ranks(args.file)
         except (OSError, ValueError, PoamError) as exc:
             print(f"poam.py: {exc}", file=sys.stderr)
             return 2
@@ -275,7 +312,14 @@ def main(argv=None) -> int:
                 gate_as[i.id] = was[0]
                 print(f"note: {i.id} Risk is {i.severity} now but was {was[0]} at {was[1]}; "
                       f"gated as {was[0]} until it is closed or re-dated")
-        print(f"history: {versions} committed version(s) of {args.file.name} read")
+        print(f"history: {versions - len(skipped)} of {versions} committed version(s) of "
+              f"{args.file.name} read, {len(skipped)} skipped")
+        if skipped:
+            for why in skipped:
+                print(f"poam.py: --history: cannot read ID/Risk in {why}", file=sys.stderr)
+            print("poam.py: --history would gate on less than the full history; "
+                  "fix or explain the skipped version(s)", file=sys.stderr)
+            return 2
     late = overdue(items, args.today)
 
     if args.list:
