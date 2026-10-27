@@ -352,6 +352,29 @@ rc, out = run_history([register(ROW_HIGH_WITH_REASON), register(ROW_DOWNGRADED)]
 check("--history: `High — reason` downgraded to Medium still fails --check",
       rc == 1, f"rc={rc} {out}")
 
+# History reads only ID and Risk (keel #153 review). keel's own register had
+# `**REOPENED**` on POAM-005 in 4 of its 16 versions; the strict parser rejected
+# those versions whole, dropping POAM-014's Critical, while the output still
+# said "16 read". A status the current vocabulary does not know must not hide
+# that version's Risk -- otherwise: add High beside a bad status, fix the
+# status, downgrade.
+ROW_REOPENED = ("| POAM-005 | Repo visibility | AC-3 | Low | Todd Benson | review quarterly | "
+                "**REOPENED** — repo made private |")
+rc, out = run_history([register(ROW_OVERDUE_HIGH, ROW_REOPENED),
+                       register(ROW_DOWNGRADED, ROW_NODATE_LOW)],
+                      "--check", "--history", "--today", "2026-10-23")
+check("--history: a High in a version with an out-of-vocabulary status still gates",
+      rc == 1 and "was High" in out, f"rc={rc} {out}")
+check("--history: reports versions read of versions found, none skipped",
+      "history: 2 of 2 committed version(s)" in out and "0 skipped" in out, f"rc={rc} {out}")
+ROW_UNREADABLE = "| POAM-014 | a row cut short |"
+rc, out = run_history([register(ROW_OVERDUE_HIGH), register(ROW_UNREADABLE),
+                       register(ROW_DOWNGRADED)],
+                      "--check", "--history", "--today", "2026-10-23")
+check("--history: a version whose ID/Risk cannot be read is exit 2, names it, never gates on less",
+      rc == 2 and "2 of 3" in out and "1 skipped" in out and "POAM-014" in out,
+      f"rc={rc} {out}")
+
 # The test travels with the platform-owned script it exercises. Listing it in
 # test/manifest.txt is keel #151's change (#145/#146/#148's tests), not this one.
 manifest = (ROOT / "platform" / "MANIFEST.yml").read_text(encoding="utf-8")
