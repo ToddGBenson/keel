@@ -37,6 +37,9 @@ platform_owned:
   # too: a fork that receives a hook without the corpus can regress it silently.
   - test/hook-bypass-corpus.test.py
   - test/hook-bypass-corpus.yml
+  # scripts/test-gitleaks-allowlist.sh must cap every container it starts
+  # (keel #147 review: uncapped test containers took TheHub prod down 2026-10-23).
+  - test/gitleaks-allowlist.test.py
   - docs/00-overview.md
   - docs/01-roles.md
   - docs/02-intake-and-discovery.md
