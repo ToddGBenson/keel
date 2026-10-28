@@ -1,0 +1,4 @@
+{
+  "_why": "keel's G3 self-reviews written before a record needed a `verdict:` line (TheHub #60981). They are real reviews, so they stay counted; editing them to add a verdict line would be writing evidence after the fact (PD-7). Frozen by PO decision (keel #148 review): test/control-liveness-keel.test.py fails if this list changes. Project-owned; bootstrap.sh deletes it, so a fork grandfathers nothing.",
+  "g3": ["0", "13", "42", "44", "48", "50", "52", "56", "58", "61", "63", "65", "67", "70", "143"]
+}

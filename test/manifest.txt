@@ -16,7 +16,7 @@ test/validate-pipeline.test.py      lint         pipeline validator: script refe
 test/validate-manifest.test.py      lint         manifest validator refuses a vacuous pass (#111)
 test/gate-record.test.py            lint         gate records: key validation, failed gates recorded (TheHub #60981)
 test/validate-platform.test.py      lint         platform validator: gate commands name evidence/ (TheHub #60981)
-# test: the test stage installs PyYAML before it runs these.
+# test
 test/dashboard.test.py              test,quick   dashboard generator tests
 test/control-liveness.test.py       test         control liveness counts records, not directories (TheHub #60981)
 test/checkov-gate.test.py           test         IaC lane gate tests (#59989 / #60071)
@@ -31,11 +31,15 @@ test/gitleaks-allowlist.test.py     test         gitleaks allowlist check caps i
 # previously fixed bypass through the real hooks, in both parser modes.
 test/hook-bypass-corpus.test.py     test,quick   guard hook bypass corpus (TheHub #60818)
 test/platform-release.test.py       test         platform release: signed, and an unsigned one is refused (#144)
-# keel's own lanes (supply-chain.sh, release.yml). Project-owned and separate from
-# the platform-owned test above, because a fork adapts these files.
-test/supply-chain.test.py           test         supply chain: keel's own release lanes (#60936)
+# keel's own lanes (supply-chain.sh, release.yml). Project-owned and separate
+# from the platform-owned test above: a fork adapts these files and must be able
+# to edit the test that asserts on them.
+test/supply-chain.test.py           test         supply-chain lanes: verify-artifact, release floor, --tree (#145)
 # scripts/selfreview-check.js is loaded only by .github/workflows/pr-governance.yml.
 # Concourse's Python image has no node, so there this entry says it did not run;
 # GitHub Actions 'Unit suites' (unit-results.yml, every PR) and ./keel check run it
 # (keel check fails without node).
 test/selfreview-check.test.js       test         self-review check tests (POAM-008)
+# keel's own liveness numbers: the frozen G3 legacy list, POAM-018 states the baseline.
+# Project-owned; test/control-liveness.test.py (platform-owned) holds in any fork.
+test/control-liveness-keel.test.py  test         keel liveness: frozen legacy G3 list, POAM-018 = baseline (keel #148 review)

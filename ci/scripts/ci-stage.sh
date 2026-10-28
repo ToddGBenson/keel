@@ -115,11 +115,6 @@ PY
     ;;
 
   test)
-    # Several test-stage entries need PyYAML (hook-bypass-corpus,
-    # platform-release, supply-chain), so install it before running any of them.
-    python -m pip install --quiet --disable-pip-version-check \
-      --require-hashes -r ci/requirements.txt
-
     echo "── test-stage test files (test/manifest.txt: test) ────────────────────"
     # Every entry the manifest tags `test`, in its order; the lint stage checks
     # the manifest names every test file. A failure does not stop the files
@@ -127,6 +122,9 @@ PY
     # this Python image does not have: it says so and is not counted as a pass.
     # GitHub Actions 'Unit suites' (unit-results.yml, on every PR) runs it with
     # node, as `./keel check` does.
+    # hook-bypass-corpus and platform-release need PyYAML, so install it first
+    # as the lint stage does.
+    python -m pip install --quiet --disable-pip-version-check       --require-hashes -r ci/requirements.txt
     python scripts/test-manifest.py run --stage test --node-missing skip
 
     echo "── guard hook self-test ───────────────────────────────────────────────"
