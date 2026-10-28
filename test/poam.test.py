@@ -240,21 +240,148 @@ rc, out = brief(register(ROW_REDATED_HIGH, ROW_NODATE_LOW, ROW_CLOSED_LATE), "20
 check("session brief adds no output when nothing is overdue",
       rc == 0 and out == baseline, f"\n--- got ---\n{out}\n--- baseline ---\n{baseline}")
 
-# ── 7. the daily platform-integrity lane runs --check ────────────────────────
-pipeline = (ROOT / "ci" / "pipeline.yml").read_text(encoding="utf-8")
-m = re.search(r"^  - name: platform-integrity\n(.*?)(?=^  - name: |\Z)", pipeline, re.M | re.S)
-job = m.group(1) if m else ""
-check("platform-integrity is triggered by daily-0600",
-      re.search(r"get: daily-0600\s*\n\s*trigger: true", job) is not None, job)
-check("platform-integrity runs ci/tasks/platform-integrity.yml",
-      "file: repo/ci/tasks/platform-integrity.yml" in job)
-task = (ROOT / "ci" / "tasks" / "platform-integrity.yml").read_text(encoding="utf-8")
-check("that task runs ci/scripts/platform-integrity.sh",
-      "repo/ci/scripts/platform-integrity.sh" in task)
-script = (ROOT / "ci" / "scripts" / "platform-integrity.sh").read_text(encoding="utf-8")
-live = [ln for ln in script.splitlines() if not ln.lstrip().startswith("#")]
-check("platform-integrity.sh runs `scripts/poam.py --check`",
-      any(re.search(r"\bscripts/poam\.py --check\b", ln) for ln in live))
+# ── 7. the daily platform-integrity lane ─────────────────────────────────────
+# That wiring is in ci/, which is merge_required (a fork adapts it), so its
+# checks live in the project-owned test/poam-wiring.test.py. A platform-owned
+# test opens no ci/ or .github/ file; test/supply-chain.test.py enforces that.
+
+# ── 8. review of #146 (rework): empty register, status vocabulary, downgrade ──
+# An empty register is "0 open", not exit 2. binnacle and every fresh fork ship
+# poam.md with the header and one placeholder row and nothing else; that is a
+# register with nothing in it, not a parse that failed.
+EMPTY_REGISTER = ("# POA&M\n\n## Register\n\n" + HEADER +
+                  "| — | *No entries yet. Populated by `/security-gate`, `/ai-gate`, "
+                  "assessments, and incidents.* | | | | | |\n\n## Rules\n\nDue dates.\n")
+rc, out = run_poam(EMPTY_REGISTER, "--today", "2026-10-23")
+check("empty register (template row only): exit 0 and `open POA&M findings: 0`",
+      rc == 0 and "open POA&M findings: 0" in out, f"rc={rc} {out}")
+rc, out = run_poam(EMPTY_REGISTER, "--check", "--today", "2026-10-23")
+check("empty register: --check exits 0", rc == 0, f"rc={rc} {out}")
+rc, out = keel_status(EMPTY_REGISTER, "2026-10-23")
+check("keel status on an empty register prints `open POA&M findings: 0`",
+      re.search(r"open POA&M findings: 0\b", out) is not None and rc == 0, f"rc={rc} {out}")
+rc, out = brief(EMPTY_REGISTER, "2026-10-23")
+check("session brief on an empty register adds nothing (no 'could not be parsed')",
+      rc == 0 and out == brief(EMPTY_REGISTER, "2026-10-23", with_poam_py=False)[1], out)
+rc, out = run_poam("# POA&M\n\nNo table here at all.\n", "--check")
+check("a file with no register table at all still fails (exit 2)", rc == 2, f"rc={rc} {out}")
+
+# Status vocabulary is poam.md's own (Entry format, `Status` row):
+# Open / In progress / Risk accepted / Completed. Completed is closed, as is the
+# `Closed` this register uses in practice. Anything else is not guessed at.
+ROW_COMPLETED_LATE_HIGH = ("| POAM-020 | Done thing | CM-3 | **High** | Todd Benson | "
+                           "2026-09-01 | Completed — evidence in #150 |")
+ROW_COMPLETED_BOLD = ("| POAM-021 | Done thing | CM-3 | Medium | Todd Benson | "
+                      "2026-09-01 | **Completed 2026-10-01** — rescan clean |")
+ROW_RISK_ACCEPTED = ("| POAM-022 | Accepted thing | CM-3 | **High** | Todd Benson | "
+                     "2026-09-01 | Risk accepted — ADR-0009, review 2027-01 |")
+ROW_UNKNOWN_STATUS = ("| POAM-023 | Typo thing | CM-3 | **High** | Todd Benson | "
+                      "2026-09-01 | Done |")
+rc, out = run_poam(register(ROW_COMPLETED_LATE_HIGH, ROW_COMPLETED_BOLD), "--today", "2026-10-23")
+check("`Completed` counts as closed: `open POA&M findings: 0`",
+      rc == 0 and "open POA&M findings: 0" in out and "OVERDUE" not in out, f"rc={rc} {out}")
+rc, out = run_poam(register(ROW_COMPLETED_LATE_HIGH), "--check", "--today", "2026-10-23")
+check("a Completed High past its due date does not fail --check", rc == 0, f"rc={rc} {out}")
+rc, out = run_poam(register(ROW_RISK_ACCEPTED), "--check", "--today", "2026-10-23")
+check("`Risk accepted` stays open (it is still on the register) and gates when past due",
+      rc == 1 and "OVERDUE POAM-022 High" in out, f"rc={rc} {out}")
+rc, out = run_poam(register(ROW_UNKNOWN_STATUS, ROW_NODATE_LOW), "--today", "2026-10-23")
+check("a status outside the vocabulary is exit 2 and names the allowed statuses",
+      rc == 2 and "POAM-023" in out and "Risk accepted" in out and "Completed" in out,
+      f"rc={rc} {out}")
+
+
+# Downgrading Risk must not dodge the gate. With --history, an open item is
+# gated at the highest Risk any committed version of the register gave it.
+def git_register(versions):
+    """A throwaway git repo whose poam.md went through `versions` in order."""
+    tmp = Path(tempfile.mkdtemp(prefix="poam-git-"))
+    cfg = tmp / "empty.gitconfig"
+    cfg.write_text("", encoding="utf-8")
+    env = dict(os.environ, GIT_CONFIG_GLOBAL=str(cfg), GIT_CONFIG_NOSYSTEM="1",
+               GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@example.invalid",
+               GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@example.invalid")
+    repo = tmp / "repo"
+    (repo / "docs" / "compliance").mkdir(parents=True)
+    subprocess.run(["git", "init", "-q", str(repo)], check=True, env=env)
+    f = repo / "docs" / "compliance" / "poam.md"
+    for n, text in enumerate(versions):
+        f.write_text(text, encoding="utf-8")
+        subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True, env=env)
+        subprocess.run(["git", "-C", str(repo), "commit", "-q", "-m", f"v{n}"],
+                       check=True, env=env)
+    return tmp, f, env
+
+
+def run_history(versions, *args):
+    tmp, f, env = git_register(versions)
+    try:
+        p = subprocess.run([sys.executable, str(POAM_PY), "--file", str(f), *args],
+                           capture_output=True, text=True, encoding="utf-8", env=env)
+        return p.returncode, p.stdout + p.stderr
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+ROW_DOWNGRADED = ROW_OVERDUE_HIGH.replace("**High**", "Medium")
+rc, out = run_history([register(ROW_OVERDUE_HIGH), register(ROW_DOWNGRADED)],
+                      "--check", "--history", "--today", "2026-10-23")
+check("--history: an overdue High downgraded to Medium still fails --check",
+      rc == 1 and "POAM-014" in out and "High" in out, f"rc={rc} {out}")
+rc, out = run_history([register(ROW_OVERDUE_HIGH),
+                       register(ROW_DOWNGRADED.replace("2026-09-14",
+                                                       "~~2026-09-14~~ 2026-12-01"))],
+                      "--check", "--history", "--today", "2026-10-23")
+check("--history: a downgraded item that is re-dated (the reviewed route) passes",
+      rc == 0, f"rc={rc} {out}")
+rc, out = run_history([register(ROW_OVERDUE_MEDIUM)],
+                      "--check", "--history", "--today", "2026-10-23")
+check("--history: an item that was only ever Medium does not gate", rc == 0, f"rc={rc} {out}")
+rc, out = run_poam(register(ROW_OVERDUE_MEDIUM), "--check", "--history", "--today", "2026-10-23")
+check("--history outside a git repository fails loudly (exit 2), never gates on less",
+      rc == 2, f"rc={rc} {out}")
+
+# poam.md's Entry format asks for the Risk "with reasoning", so a Risk cell can
+# read `**High** — internet-facing`. That is still High, and still gates.
+ROW_HIGH_WITH_REASON = ROW_OVERDUE_HIGH.replace("**High**", "**High** — reachable from a fork")
+rc, out = run_poam(register(ROW_HIGH_WITH_REASON), "--check", "--today", "2026-10-23")
+check("a Risk cell with reasoning (`**High** — ...`) still gates --check",
+      rc == 1 and "POAM-014" in out, f"rc={rc} {out}")
+rc, out = run_history([register(ROW_HIGH_WITH_REASON), register(ROW_DOWNGRADED)],
+                      "--check", "--history", "--today", "2026-10-23")
+check("--history: `High — reason` downgraded to Medium still fails --check",
+      rc == 1, f"rc={rc} {out}")
+
+# History reads only ID and Risk (keel #153 review). keel's own register had
+# `**REOPENED**` on POAM-005 in 4 of its 16 versions; the strict parser rejected
+# those versions whole, dropping POAM-014's Critical, while the output still
+# said "16 read". A status the current vocabulary does not know must not hide
+# that version's Risk -- otherwise: add High beside a bad status, fix the
+# status, downgrade.
+ROW_REOPENED = ("| POAM-005 | Repo visibility | AC-3 | Low | Todd Benson | review quarterly | "
+                "**REOPENED** — repo made private |")
+rc, out = run_history([register(ROW_OVERDUE_HIGH, ROW_REOPENED),
+                       register(ROW_DOWNGRADED, ROW_NODATE_LOW)],
+                      "--check", "--history", "--today", "2026-10-23")
+check("--history: a High in a version with an out-of-vocabulary status still gates",
+      rc == 1 and "was High" in out, f"rc={rc} {out}")
+check("--history: reports versions read of versions found, none skipped",
+      "history: 2 of 2 committed version(s)" in out and "0 skipped" in out, f"rc={rc} {out}")
+ROW_UNREADABLE = "| POAM-014 | a row cut short |"
+rc, out = run_history([register(ROW_OVERDUE_HIGH), register(ROW_UNREADABLE),
+                       register(ROW_DOWNGRADED)],
+                      "--check", "--history", "--today", "2026-10-23")
+check("--history: a version whose ID/Risk cannot be read is exit 2, names it, never gates on less",
+      rc == 2 and "2 of 3" in out and "1 skipped" in out and "POAM-014" in out,
+      f"rc={rc} {out}")
+
+# The test travels with the platform-owned script it exercises. Listing it in
+# test/manifest.txt is keel #151's change (#145/#146/#148's tests), not this one.
+manifest = (ROOT / "platform" / "MANIFEST.yml").read_text(encoding="utf-8")
+owned = manifest.split("platform_owned:", 1)[1].split("\nproject_owned:", 1)[0]
+for path in ("test/poam.test.py", "test/fixtures/poam-af878f1.md"):
+    check(f"platform/MANIFEST.yml platform_owned lists {path}",
+          re.search(r"^\s*-\s*" + re.escape(path) + r"\s*$", owned, re.M) is not None)
 
 print()
 if failures:

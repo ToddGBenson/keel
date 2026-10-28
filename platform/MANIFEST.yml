@@ -45,6 +45,11 @@ platform_owned:
   # sync, so the test that proves it refuses an unsigned release travels with
   # it (#144, POAM-011).
   - test/platform-release.test.py
+  # scripts/poam.py (TheHub #60977) is platform-owned under scripts/, and
+  # session-brief.sh and keel call it, so its test and the fixture that test
+  # reads travel with it (keel #146 review).
+  - test/poam.test.py
+  - test/fixtures/poam-af878f1.md
   - docs/00-overview.md
   - docs/01-roles.md
   - docs/02-intake-and-discovery.md
