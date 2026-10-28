@@ -204,6 +204,14 @@ check("ci-stage.sh lint stage checks the manifest and runs its lint entries",
       and re.search(r"scripts/test-manifest\.py run --stage lint", stage_sh) is not None)
 check("ci-stage.sh test stage runs its test entries",
       re.search(r"scripts/test-manifest\.py run --stage test", stage_sh) is not None)
+# test-stage entries need PyYAML too (platform-release, supply-chain): the
+# test stage must install ci/requirements.txt BEFORE it runs them, or they
+# fail on Concourse's bare python image (keel #147 rework).
+_test_stage = code(stage_sh).split("\n  test)", 1)[-1].split("\n  full-suite)", 1)[0]
+_pip = _test_stage.find("-r ci/requirements.txt")
+_run = _test_stage.find("scripts/test-manifest.py run --stage test")
+check("ci-stage.sh test stage installs PyYAML before it runs its entries",
+      -1 < _pip < _run, f"(pip at {_pip}, run at {_run})")
 
 # ── ./keel check on a copy whose test/ holds only fixtures ──────────────────
 def keel_copy():
