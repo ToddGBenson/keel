@@ -337,6 +337,46 @@ groups:
 # ══════════════════════════════════════════════════════════════════════════════
 # Jobs
 # ══════════════════════════════════════════════════════════════════════════════
+#
+# ── THREE LANES: AT MOST THREE HEAVY JOBS AT ONCE (TheHub #61062, D-172) ──────
+# Every job below except `set-pipeline` carries exactly one `serial_groups:`
+# lane, and Concourse never runs two jobs of one lane at the same time. So a
+# commit, a daily wave or the weekly fan-out runs at most three keel jobs at
+# once, however many it triggers. `set-pipeline` has no task container.
+#
+# Before this, every job that `get`s `repo` with `trigger: true` started on the
+# same version in the same minute. On 2026-10-27 20:20-21:04Z one keel commit
+# started 15 builds within a minute beside thehub's and mykronos's lanes, on the
+# two workers that share a host with production, and TheHub production lost
+# backend workers 11 times. #60496 staggered the daily waves above; nothing
+# bounded the commit fan-out. On keel's last six main commits, 13-14 jobs were
+# running at once at the peak.
+#
+#   verdict  build lint test secrets sca iac suppression-audit
+#            platform-integrity build-and-attest verify-artifact
+#   codeql   sast mykronos-sast
+#   ingest   mykronos-secrets mykronos-sca mykronos-atlas
+#            agent-assurance compliance-monthly container-scan
+#
+# `codeql` holds the two CodeQL jobs, so keel never has two 846MB bundles and
+# two CodeQL evaluators on the workers at once. `sast` is the longest job in
+# the verdict, so it gets a lane it shares only with a job nothing waits on.
+# `verdict` holds the rest of the commit chain, so `Concourse / keel` never
+# queues behind an ingestion upload. `ingest` reports and decides nothing, and
+# absorbs the slow `mykronos-sca`.
+#
+# The cost, replayed at median durations in test/serial-lanes.test.py: the
+# verdict lands at ~16 minutes and the last lane drains at ~25, against
+# 11.7-23.5 and 12.5-28.9 measured unbounded on those six commits. The medians
+# were taken while 14 jobs shared the workers, so they overstate a job that
+# runs beside two others.
+#
+# A lane is a ceiling for THIS pipeline: serial groups do not span pipelines,
+# so thehub's three lanes and mykronos's lanes still run beside these.
+#
+# Every task also yields CPU: ci/tasks/*.yml declare container_limits.cpu 512
+# shares and no memory limit (mykronos D-174). test/container-limits.test.py
+# holds that.
 
 jobs:
 
@@ -404,6 +444,7 @@ jobs:
 
   - name: build
     public: true
+    serial_groups: [verdict]
     on_failure:
       task: check-run
       file: repo/ci/tasks/check-run.yml
@@ -434,6 +475,7 @@ jobs:
 
   - name: lint
     public: true
+    serial_groups: [verdict]
     on_failure:
       task: check-run
       file: repo/ci/tasks/check-run.yml
@@ -491,6 +533,7 @@ jobs:
 
   - name: test
     public: true
+    serial_groups: [verdict]
     on_failure:
       task: check-run
       file: repo/ci/tasks/check-run.yml
@@ -546,6 +589,7 @@ jobs:
   # switched off within a week.
   - name: sast
     public: true
+    serial_groups: [codeql]
     # serial: an 846MB CodeQL bundle is downloaded per language per run, so two
     # concurrent builds is 3.4GB on one worker and three is five. Three stacked
     # up during testing and none of them finished — they were not deadlocked,
@@ -599,6 +643,7 @@ jobs:
   # is the difference between it and the ingestion lane below.
   - name: secrets
     public: true
+    serial_groups: [verdict]
     on_failure:
       task: check-run
       file: repo/ci/tasks/check-run.yml
@@ -625,6 +670,7 @@ jobs:
 
   - name: sca
     public: true
+    serial_groups: [verdict]
     on_failure:
       task: check-run
       file: repo/ci/tasks/check-run.yml
@@ -675,6 +721,7 @@ jobs:
   # fabricated attribution on every push-triggered run.
   - name: iac
     public: true
+    serial_groups: [verdict]
     on_failure:
       task: check-run
       file: repo/ci/tasks/check-run.yml
@@ -718,6 +765,7 @@ jobs:
   # `Concourse / keel`; it only stops the lane reading green while unused.
   - name: container-scan
     public: true
+    serial_groups: [ingest]
     plan:
       - get: repo
       - task: trivy
@@ -728,6 +776,7 @@ jobs:
 
   - name: suppression-audit
     public: true
+    serial_groups: [verdict]
     plan:
       - get: repo
         trigger: true
@@ -743,6 +792,7 @@ jobs:
 
   - name: mykronos-sast
     public: true
+    serial_groups: [codeql]
     serial: true
     plan:
       - get: repo
@@ -800,6 +850,7 @@ jobs:
 
   - name: mykronos-secrets
     public: true
+    serial_groups: [ingest]
     plan:
       - get: repo
         trigger: true
@@ -846,6 +897,7 @@ jobs:
   # both `repo` and `weekly`, and `schedule` would be wrong on every push run.
   - name: mykronos-sca
     public: true
+    serial_groups: [ingest]
     plan:
       - get: repo
         trigger: true
@@ -872,6 +924,7 @@ jobs:
 
   - name: mykronos-atlas
     public: true
+    serial_groups: [ingest]
     serial: true
     plan:
       - get: repo
@@ -940,6 +993,7 @@ jobs:
 
   - name: platform-integrity
     public: true
+    serial_groups: [verdict]
     plan:
       - get: repo
         trigger: true
@@ -963,6 +1017,7 @@ jobs:
 
   - name: agent-assurance
     public: true
+    serial_groups: [ingest]
     plan:
       - get: repo
       - get: weekly
@@ -990,6 +1045,7 @@ jobs:
   # than reporting a clean month it never looked at.
   - name: compliance-monthly
     public: true
+    serial_groups: [ingest]
     plan:
       - get: repo
       - get: weekly
@@ -1007,6 +1063,7 @@ jobs:
 
   - name: build-and-attest
     public: true
+    serial_groups: [verdict]
     serial: true
     on_failure:
       task: check-run
@@ -1052,6 +1109,7 @@ jobs:
   # before use.
   - name: verify-artifact
     public: true
+    serial_groups: [verdict]
     on_failure:
       task: check-run
       file: repo/ci/tasks/check-run.yml

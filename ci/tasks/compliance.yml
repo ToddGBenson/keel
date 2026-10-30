@@ -4,6 +4,13 @@
 # does not. PERIOD selects the bundle: daily | weekly | monthly | metrics.
 platform: linux
 
+# Half the default cpu weight: these containers share one host with production.
+# No memory limit: on these cgroup v2 workers one stops the container being
+# created at all (mykronos D-174); the worker containers carry the memory cap.
+# See ci/README.md, "Container limits"; test/container-limits.test.py holds it.
+container_limits:
+  cpu: 512
+
 image_resource:
   type: registry-image
   source:

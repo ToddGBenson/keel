@@ -127,6 +127,44 @@ G5 is not a Concourse job. It is the `production` environment in `release.yml`: 
 reviewer approves, and `authorize-release` refuses a run with no recorded approval. See
 POAM-010/016.
 
+
+### Three lanes, and every task yields CPU (TheHub #61062)
+
+The two Concourse workers share one Docker host with production (TheHub, MyKronos,
+Postgres, Vault). Every job here that `get`s `repo` with `trigger: true` used to start on
+the same commit in the same minute. On 2026-10-27, one keel commit started 15 builds within
+a minute, and TheHub production lost backend workers 11 times. Two things now bound keel's
+share of the host:
+
+- **At most three jobs at once.** Every job that runs a task is in exactly one
+  `serial_groups:` lane, and there are three. This is the pattern thehub's pipeline uses
+  (mykronos D-172).
+
+  | Lane | Jobs | Why together |
+  |---|---|---|
+  | `verdict` | `build` `lint` `test` `secrets` `sca` `iac` `suppression-audit` `platform-integrity` `build-and-attest` `verify-artifact` | the commit chain, so `Concourse / keel` never queues behind an upload |
+  | `codeql` | `sast` `mykronos-sast` | only one CodeQL bundle and evaluator on the workers at a time |
+  | `ingest` | `mykronos-secrets` `mykronos-sca` `mykronos-atlas` `agent-assurance` `compliance-monthly` `container-scan` | reporting lanes; nothing waits on them |
+
+  `set-pipeline` has no lane, because it runs no task container. The cost, replayed at
+  October's median durations: the verdict lands at about 16 minutes and the last lane
+  drains at about 25. Unbounded, the last six main commits took 11.7 to 23.5 minutes and
+  12.5 to 28.9 minutes. In the worst queue order (`mykronos-sast` ahead of `sast`), the
+  verdict lands at about 29 minutes. `test/serial-lanes.test.py` replays a commit through
+  the lanes and fails, printing the timeline, if an edit puts the verdict behind an
+  ingestion job or lifts the ceiling.
+
+  Serial groups do not span pipelines. This is a ceiling for keel only; thehub's and
+  mykronos's lanes still run beside it.
+
+- **Half the default CPU weight.** Every file in `ci/tasks/` declares
+  `container_limits: {cpu: 512}`, and **no `memory:`**. On these cgroup v2 workers, a task
+  with a memory limit cannot be created at all (`cannot enter cgroupv2 /sys/fs/cgroup/garden
+  with domain controllers -- it is in threaded mode`). Memory is capped on the worker
+  containers instead (mykronos D-174). `test/container-limits.test.py` is the limits half of
+  binnacle's test of the same name. It fails on a task step with no CPU share below 1024,
+  or with any memory limit.
+
 ### Trying a pipeline change on a branch
 
 `set-pipeline` applies `ci/pipeline.yml` **from the repo**, and that file pins
