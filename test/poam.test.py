@@ -117,7 +117,9 @@ def fake_repo(poam_text, with_poam_py=True):
     # PR-awaiting-approval block stays out of the comparison.
     (stubs / "gh").write_text(
         '#!/usr/bin/env bash\n[ "${1:-}" = "auth" ] && exit 1\nexit 0\n', newline="\n")
-    os.chmod(stubs / "gh", 0o755)
+    # Owner-only: the stub is run by this test's own user, nothing else needs it
+    # (CodeQL py/overly-permissive-file, which failed keel's sast job).
+    os.chmod(stubs / "gh", 0o700)
     return tmp, stubs
 
 
