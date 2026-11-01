@@ -119,7 +119,7 @@ def overrides(node, where="pipeline"):
             yield from overrides(v, f"{where}[{i}]")
 
 
-print("── ci/scripts/codeql.sh: CodeQL is held to --ram and --threads (TheHub #61062) ──")
+print("-- ci/scripts/codeql.sh: CodeQL is held to --ram and --threads (TheHub #61062) --")
 text = SCRIPT.read_text(encoding="utf-8")
 found = problems(text)
 check("every codeql database create/analyze passes --ram <= 1024 and --threads <= 2",
@@ -139,7 +139,7 @@ for where, k, v in overrides(pipeline):
         ups.append(f"{where}={v}")
 check("no pipeline step raises CODEQL_RAM or CODEQL_THREADS", not ups, "; ".join(ups))
 
-print("── the check can fail ──")
+print("-- the check can fail --")
 bare = "codeql database create db \\\n  --language=python\ncodeql database analyze db \\\n  -- x\n"
 check("a script without the flags is reported", len(problems(bare)) == 4, problems(bare))
 big = ('CODEQL_RAM="${CODEQL_RAM:-4096}"\nCODEQL_THREADS="${CODEQL_THREADS:-2}"\n'
