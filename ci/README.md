@@ -165,6 +165,13 @@ share of the host:
   binnacle's test of the same name. It fails on a task step with no CPU share below 1024,
   or with any memory limit.
 
+- **CodeQL sized to the worker, not the host.** Inside a container CodeQL reads the
+  host's memory and cores, so `ci/scripts/codeql.sh` passes `--ram=1024 --threads=2` to
+  both `database create` and `database analyze` (binnacle's values, #61040). `sast` and
+  `mykronos-sast` each run python and javascript in parallel, so one CodeQL job holds
+  about 2 GB plus JVM overhead. `test/codeql-limits.test.py` fails if either command
+  loses a flag, a default rises, or a pipeline step overrides them upward.
+
 ### Trying a pipeline change on a branch
 
 `set-pipeline` applies `ci/pipeline.yml` **from the repo**, and that file pins

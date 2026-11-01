@@ -115,8 +115,24 @@ codeql version --format=terse
 # Actions `autobuild` step was doing. If you enable one, pass it explicitly
 # rather than relying on autodetection — a silent autobuild failure produces an
 # empty database and a clean-looking report.
-echo "Building CodeQL database for ${cli_lang}"
+# ── Memory and cores: stay well inside the worker's cap ───────────────────────
+# Tasks carry no memory limit (they cannot be created with one on these
+# workers, mykronos D-174); the worker container is capped instead, and every
+# build on that worker shares the cap. CodeQL sizes its evaluator from the
+# memory and cores it can SEE, and inside a container /proc/meminfo and nproc
+# report the HOST's, so left alone it plans for the whole VM that also runs
+# production, pushes its worker into swap or OOM, and a worker OOM kills every
+# task on it. `sast` and `mykronos-sast` each run two of these at once
+# (python and javascript), and the `codeql` lane keeps those two jobs apart.
+# 1024 MB, not more: the JVM adds overhead on top of --ram. The same values
+# as binnacle's codeql.sh (#61040); raise them only together with the worker
+# cap. test/codeql-limits.test.py holds them. Refs: TheHub #61062
+CODEQL_RAM="${CODEQL_RAM:-1024}"
+CODEQL_THREADS="${CODEQL_THREADS:-2}"
+
+echo "Building CodeQL database for ${cli_lang} (--ram=${CODEQL_RAM} --threads=${CODEQL_THREADS})"
 codeql database create codeql-db \
+  --ram="${CODEQL_RAM}" --threads="${CODEQL_THREADS}" \
   --language="${cli_lang}" \
   --source-root=repo \
   --overwrite
@@ -140,6 +156,7 @@ fi
 
 echo "Analysing with: ${suites[*]}"
 codeql database analyze codeql-db \
+  --ram="${CODEQL_RAM}" --threads="${CODEQL_THREADS}" \
   --format=sarif-latest \
   --output="mykronos-results/codeql.sarif" \
   --sarif-category="/language:${CODEQL_LANGUAGE}" \
