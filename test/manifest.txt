@@ -19,6 +19,7 @@ test/validate-platform.test.py      lint         platform validator: gate comman
 test/serial-lanes.test.py           lint         pipeline: at most 3 heavy jobs at once, verdict replayed (TheHub #61062)
 test/container-limits.test.py       lint         tasks: cpu shares below 1024, no memory limit (TheHub #61062, D-174)
 test/codeql-limits.test.py          lint         CodeQL held to --ram=1024 --threads=2 (TheHub #61062)
+test/task-timeouts.test.py          lint         every task step times out within 3h, so a hang frees its lane (TheHub #61062)
 # test
 test/dashboard.test.py              test,quick   dashboard generator tests
 test/control-liveness.test.py       test         control liveness counts records, not directories (TheHub #60981)
