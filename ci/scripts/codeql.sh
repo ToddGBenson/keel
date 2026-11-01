@@ -122,8 +122,9 @@ codeql version --format=terse
 # memory and cores it can SEE, and inside a container /proc/meminfo and nproc
 # report the HOST's, so left alone it plans for the whole VM that also runs
 # production, pushes its worker into swap or OOM, and a worker OOM kills every
-# task on it. `sast` and `mykronos-sast` each run two of these at once
-# (python and javascript), and the `codeql` lane keeps those two jobs apart.
+# task on it. `sast` runs two of these at once (python and javascript in
+# parallel; `mykronos-sast` runs them in turn), and the `codeql` lane keeps
+# those two jobs apart.
 # 1024 MB, not more: the JVM adds overhead on top of --ram. The same values
 # as binnacle's codeql.sh (#61040); raise them only together with the worker
 # cap. test/codeql-limits.test.py holds them. Refs: TheHub #61062

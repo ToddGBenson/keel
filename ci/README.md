@@ -167,10 +167,18 @@ share of the host:
 
 - **CodeQL sized to the worker, not the host.** Inside a container CodeQL reads the
   host's memory and cores, so `ci/scripts/codeql.sh` passes `--ram=1024 --threads=2` to
-  both `database create` and `database analyze` (binnacle's values, #61040). `sast` and
-  `mykronos-sast` each run python and javascript in parallel, so one CodeQL job holds
-  about 2 GB plus JVM overhead. `test/codeql-limits.test.py` fails if either command
+  both `database create` and `database analyze` (binnacle's values, #61040). `sast` runs
+  python and javascript in parallel (`mykronos-sast` runs them in turn), so the `codeql`
+  lane holds at most about 2 GB plus JVM overhead. `test/codeql-limits.test.py` fails if either command
   loses a flag, a default rises, or a pipeline step overrides them upward.
+
+- **Every task step times out within 3h.** A lane turns one hung job into a shut lane: on
+  2026-10-31 the run of 9699ecb started one job per lane (iac, mykronos-secrets, sast), all
+  three hung, and they errored 9.7 hours later with every keel lane closed. The longest keel
+  job that ever succeeded took 139 minutes (mykronos-sast, in the pre-lane storms; median
+  17), so `timeout: 3h` on every task step fails nothing that passes. The check-run hooks
+  keep their 5m. `test/task-timeouts.test.py` fails on a task step without a timeout, or
+  with one above 3h.
 
 ### Trying a pipeline change on a branch
 
