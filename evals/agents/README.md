@@ -10,7 +10,8 @@ change to an agent definition, via the Task tool against a **fresh** agent invoc
 freshness matters, because a warmed-up agent that just discussed the answer is not an
 independent test.
 
-Record results to `evidence/ai-assurance/agent-evals/<date>/`. A regression is a defect
+Record results to `evidence/ai-assurance/agent-evals/<date>/` and list the run in that
+folder's `README.md`, which also says when the next run is due. A regression is a defect
 against the agent definition; fix it through `/learn`, not by tweaking the eval.
 
 ## The cases

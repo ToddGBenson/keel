@@ -36,6 +36,8 @@ RECORD = ROOT / "evidence" / "ai-assurance" / "agent-evals"
 INDEX = RECORD / "README.md"
 NOT_YET = "No behavioral run has been recorded yet"
 failures = []
+# The eval output has non-ASCII; a cp1252 console must not crash the report.
+sys.stdout.reconfigure(errors="replace")
 
 
 def check(name, cond, detail=""):
