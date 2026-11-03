@@ -180,6 +180,13 @@ share of the host:
   keep their 5m. `test/task-timeouts.test.py` fails on a task step without a timeout, or
   with one above 3h.
 
+- **Every get and set_pipeline step times out within 15m** (TheHub #61238). A git get
+  that stalls on the network, or any get whose credential sits behind a sealed Vault,
+  would hold its lane exactly as a hung task does. The longest get (resource or task
+  image) in the last 4 builds of 12 keel jobs, read from Concourse on 2026-11-03, took
+  55 s, so `timeout: 15m` on every `get` and on `set_pipeline: self` fails nothing that
+  passes. The same test fails on a get or set_pipeline step without one, or above 15m.
+
 ### Trying a pipeline change on a branch
 
 `set-pipeline` applies `ci/pipeline.yml` **from the repo**, and that file pins

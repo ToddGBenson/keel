@@ -425,9 +425,11 @@ jobs:
     plan:
       - get: repo
         trigger: true
+        timeout: 15m
       - set_pipeline: self
         file: repo/ci/pipeline.yml
         var_files: [repo/ci/vars.example.yml]
+        timeout: 15m
 
   # ── PREMISE CHANGED 2026-08-13: THESE ARE NOW THE ONLY VERIFICATION ─────────
   # These lanes were moved to a daily cadence because re-running a deterministic
@@ -469,8 +471,10 @@ jobs:
     plan:
       - get: repo
         trigger: true
+        timeout: 15m
       - get: daily-0300
         trigger: true
+        timeout: 15m
       # `Concourse / keel` goes in_progress on this commit. On the daily re-run
       # of a commit that already has a verdict, MyKronos leaves the verdict
       # alone (a start never reopens one).
@@ -501,8 +505,10 @@ jobs:
     plan:
       - get: repo
         trigger: true
+        timeout: 15m
       - get: daily-0300
         trigger: true
+        timeout: 15m
       # Separate task because shellcheck ships its own Alpine image and the rest
       # of the lint stage needs Python. Its report is an input to the stage
       # below, which fails if it is missing — so the linter cannot be skipped
@@ -562,8 +568,10 @@ jobs:
     plan:
       - get: repo
         trigger: true
+        timeout: 15m
       - get: daily-0300
         trigger: true
+        timeout: 15m
       # No COVERAGE_THRESHOLD (TheHub #60850). It was "80" and nothing measured
       # against it: the coverage step echoed "ADAPT: assert coverage >= 80%" and
       # exited 0. keel has no application code to cover. A fork that has some
@@ -624,8 +632,10 @@ jobs:
     plan:
       - get: repo
         trigger: true
+        timeout: 15m
       - get: daily-0400
         trigger: true
+        timeout: 15m
       - in_parallel:
           - task: codeql-python
             timeout: 3h
@@ -675,8 +685,10 @@ jobs:
     plan:
       - get: repo
         trigger: true
+        timeout: 15m
       - get: daily-0400
         trigger: true
+        timeout: 15m
       - task: gitleaks
         timeout: 3h
         file: repo/ci/tasks/gitleaks.yml
@@ -704,8 +716,10 @@ jobs:
     plan:
       - get: repo
         trigger: true
+        timeout: 15m
       - get: daily-0500
         trigger: true
+        timeout: 15m
       - task: grype
         timeout: 3h
         file: repo/ci/tasks/grype.yml
@@ -756,8 +770,10 @@ jobs:
     plan:
       - get: repo
         trigger: true
+        timeout: 15m
       - get: daily-0500
         trigger: true
+        timeout: 15m
       - do:
           - *mykronos_preflight
           - task: checkov
@@ -789,6 +805,7 @@ jobs:
     serial_groups: [ingest]
     plan:
       - get: repo
+        timeout: 15m
       - task: trivy
         timeout: 3h
         file: repo/ci/tasks/trivy.yml
@@ -802,8 +819,10 @@ jobs:
     plan:
       - get: repo
         trigger: true
+        timeout: 15m
       - get: daily-0600
         trigger: true
+        timeout: 15m
       - task: suppression-audit
         timeout: 3h
         file: repo/ci/tasks/suppression-audit.yml
@@ -820,8 +839,10 @@ jobs:
     plan:
       - get: repo
         trigger: true
+        timeout: 15m
       - get: weekly
         trigger: true
+        timeout: 15m
       # BOTH languages, in one lane. There used to be a second `sast` job running
       # CodeQL over javascript-typescript and then throwing the SARIF away
       # (POAM-012) — a duplicate analysis whose results reached nothing. This is
@@ -881,8 +902,10 @@ jobs:
     plan:
       - get: repo
         trigger: true
+        timeout: 15m
       - get: weekly
         trigger: true
+        timeout: 15m
       - do:
           - *mykronos_preflight
           # Never fails the step itself: exit codes are the upload step's job,
@@ -930,8 +953,10 @@ jobs:
     plan:
       - get: repo
         trigger: true
+        timeout: 15m
       - get: weekly
         trigger: true
+        timeout: 15m
       - do:
           - *mykronos_preflight
           - task: grype
@@ -960,6 +985,7 @@ jobs:
     plan:
       - get: repo
         trigger: true
+        timeout: 15m
       # `github-release` removed 2026-08-14. It resolved to
       #   GET /repos/ToddGBenson/keel/releases -> 404 Not Found
       # because the repository is private and ((github_token)) is empty, and an
@@ -977,6 +1003,7 @@ jobs:
       # back. Do not add it back without the token.
       - get: weekly
         trigger: true
+        timeout: 15m
       - do:
           - *mykronos_preflight
           - task: osv-scan
@@ -1033,8 +1060,10 @@ jobs:
     plan:
       - get: repo
         trigger: true
+        timeout: 15m
       - get: daily-0600
         trigger: true
+        timeout: 15m
       - task: platform-integrity
         timeout: 3h
         file: repo/ci/tasks/platform-integrity.yml
@@ -1057,8 +1086,10 @@ jobs:
     serial_groups: [ingest]
     plan:
       - get: repo
+        timeout: 15m
       - get: weekly
         trigger: true
+        timeout: 15m
       - task: agent-assurance
         timeout: 3h
         file: repo/ci/tasks/ai.yml
@@ -1086,8 +1117,10 @@ jobs:
     serial_groups: [ingest]
     plan:
       - get: repo
+        timeout: 15m
       - get: weekly
         trigger: true
+        timeout: 15m
       - task: compliance
         timeout: 3h
         file: repo/ci/tasks/compliance.yml
@@ -1124,6 +1157,7 @@ jobs:
       - get: repo
         trigger: true
         passed: [build, lint, test, sast, secrets, sca, iac]
+        timeout: 15m
       # The SBOM is generated HERE, in this job. It was previously taken as an
       # optional input, which could never arrive: syft runs in `mykronos-atlas`,
       # and Concourse does not pass task outputs between jobs. So the branch was
@@ -1168,6 +1202,7 @@ jobs:
       - get: repo
         passed: [build-and-attest]
         trigger: true
+        timeout: 15m
       - task: verify
         timeout: 3h
         file: repo/ci/tasks/supply-chain.yml
