@@ -13,12 +13,15 @@ parallel), so an unbounded pair is the heaviest thing a keel commit starts.
 
 binnacle's ci/scripts/codeql.sh (#61040, HubOps review of binnacle #52) has
 held CodeQL to --ram=1024 --threads=2 since; keel's did not (keel #156's
-follow-up). Graded against the REAL ci/scripts/codeql.sh and ci/pipeline.yml:
+follow-up). Graded against the REAL ci/scripts/codeql.sh, ci/pipeline.yml and
+ci/tasks/codeql.yml:
 
   * every `codeql database create` and `codeql database analyze` passes
     --ram and --threads, and the walk is not vacuous (it finds both);
   * the defaults those flags resolve to are at most 1024 MB and 2 threads;
-  * no pipeline step overrides CODEQL_RAM or CODEQL_THREADS upward;
+  * no pipeline step overrides CODEQL_RAM or CODEQL_THREADS upward, and
+    neither does the task file's own `params:` (TheHub #61238: a task param
+    reaches the script exactly as a pipeline param does);
   * a synthetic script without the flags, or with a larger default, is
     reported, so the check can fail.
 
@@ -35,6 +38,7 @@ import yaml
 ROOT = Path(__file__).resolve().parent.parent
 SCRIPT = ROOT / "ci" / "scripts" / "codeql.sh"
 PIPELINE = ROOT / "ci" / "pipeline.yml"
+TASK = ROOT / "ci" / "tasks" / "codeql.yml"
 MAX_RAM_MB = 1024
 MAX_THREADS = 2
 
@@ -127,17 +131,29 @@ check("every codeql database create/analyze passes --ram <= 1024 and --threads <
 check("the walk is not vacuous: it finds create and analyze",
       {v for v, _ in commands(text)} == {"create", "analyze"})
 
+def upward(node, where):
+    """Every CODEQL_RAM/CODEQL_THREADS value under `node` above its limit."""
+    ups = []
+    for at, k, v in overrides(node, where):
+        limit = MAX_RAM_MB if k == "CODEQL_RAM" else MAX_THREADS
+        try:
+            ok = 0 < int(str(v)) <= limit
+        except ValueError:
+            ok = False
+        if not ok:
+            ups.append(f"{at}={v}")
+    return ups
+
+
 pipeline = yaml.safe_load(PIPELINE.read_text(encoding="utf-8"))
-ups = []
-for where, k, v in overrides(pipeline):
-    limit = MAX_RAM_MB if k == "CODEQL_RAM" else MAX_THREADS
-    try:
-        ok = 0 < int(str(v)) <= limit
-    except ValueError:
-        ok = False
-    if not ok:
-        ups.append(f"{where}={v}")
+ups = upward(pipeline, "pipeline")
 check("no pipeline step raises CODEQL_RAM or CODEQL_THREADS", not ups, "; ".join(ups))
+task = yaml.safe_load(TASK.read_text(encoding="utf-8"))
+tups = upward(task, "ci/tasks/codeql.yml")
+check("ci/tasks/codeql.yml does not raise CODEQL_RAM or CODEQL_THREADS", not tups,
+      "; ".join(tups))
+check("the task file is the one the CodeQL steps run",
+      "codeql.sh" in str(task.get("run", {}).get("args")) and "params" in task)
 
 print("-- the check can fail --")
 bare = "codeql database create db \\\n  --language=python\ncodeql database analyze db \\\n  -- x\n"
@@ -148,6 +164,9 @@ big = ('CODEQL_RAM="${CODEQL_RAM:-4096}"\nCODEQL_THREADS="${CODEQL_THREADS:-2}"\
 check("a 4096 MB default is reported", len(problems(big)) == 2, problems(big))
 good = big.replace("4096", "1024")
 check("a 1024 MB / 2 thread script passes", problems(good) == [], problems(good))
+raised = {"params": {"CODEQL_LANGUAGE": "", "CODEQL_RAM": "4096", "CODEQL_THREADS": 2}}
+check("a task file that raises CODEQL_RAM is reported, and 2 threads is not",
+      upward(raised, "t") == ["t.params=4096"], upward(raised, "t"))
 
 if failures:
     print(f"\n{len(failures)} check(s) failed")
