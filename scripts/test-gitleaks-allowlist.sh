@@ -19,7 +19,16 @@
 # Usage:  bash scripts/test-gitleaks-allowlist.sh
 
 set -uo pipefail
-cd "$(git rev-parse --show-toplevel)" || exit 1
+# The repository is where this script lives, not wherever git says the cwd is:
+# ./keel check runs it in copies with no .git (test/test-manifest.test.py), and
+# there `cd "$(git rev-parse --show-toplevel)"` is `cd ""`, which bash 5.2 on
+# ubuntu-latest rejects ("cd: null directory"), so the script exited 1 with
+# neither verdict and keel check went red (TheHub #61098).
+cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
+# With no git history to read, scan the files instead; gitleaks's default git
+# mode would fail, write no report, and read as a vacuous "clean".
+NO_GIT=""
+git rev-parse --is-inside-work-tree >/dev/null 2>&1 || NO_GIT="--no-git"
 
 GL_IMAGE="zricethezav/gitleaks:v8.18.4"
 fail=0
@@ -32,14 +41,14 @@ echo "Gitleaks allowlist regression test"
 # A scanner test with no way to run must SAY so rather than pass silently (L0009).
 # Skipping is an honest outcome; reporting success without running is not.
 if command -v gitleaks >/dev/null 2>&1; then
-  run_gl() { gitleaks detect --source "$1" --no-banner --report-format json --report-path "$2" >/dev/null 2>&1; }
+  run_gl() { gitleaks detect --source "$1" ${3:+"$3"} --no-banner --report-format json --report-path "$2" >/dev/null 2>&1; }
 elif command -v docker >/dev/null 2>&1 && docker version >/dev/null 2>&1; then
   run_gl() {
     local src; src="$(cd "$1" && (pwd -W 2>/dev/null || pwd))"
     # Capped: uncapped test containers took TheHub production down on 2026-10-23,
     # and ./keel check runs this on the same host as the services.
     MSYS_NO_PATHCONV=1 docker run --rm --cpus 1 --memory 1g -v "$src":/repo -v "$(cd "$(dirname "$2")" && (pwd -W 2>/dev/null || pwd))":/out \
-      "$GL_IMAGE" detect --source /repo --no-banner --report-format json \
+      "$GL_IMAGE" detect --source /repo ${3:+"$3"} --no-banner --report-format json \
       --report-path "/out/$(basename "$2")" >/dev/null 2>&1
   }
 else
@@ -87,7 +96,7 @@ else
 fi
 
 # 2. The self-test fixture must NOT be reported.
-run_gl "." "$TMP/self.json"
+run_gl "." "$TMP/self.json" "$NO_GIT"
 m="$(count_findings "$TMP/self.json")"
 if [ "$m" -eq 0 ]; then
   ok "repository clean — the selftest.sh fixture is correctly allowlisted"
