@@ -52,9 +52,11 @@ G0/G2; a chore skips most of it; only behavior/security/AI changes get the full 
 
 ## Merging
 
-**Squash merges only.** `required_signatures` is enforced on `main`, and GitHub cannot sign a
-rebase merge (it replays your commits rather than creating one). Squash produces a single
-GitHub-signed commit and still satisfies `required_linear_history`.
+**Squash merges only.** Squash produces a single GitHub-signed commit and still satisfies
+`required_linear_history`. GitHub cannot sign a rebase merge (it replays your commits rather
+than creating one), so on a branch that requires signatures a rebase merge cannot land at all.
+Whether `main` requires them is declared in `.sdlc/protection.yaml`, not here: read it, and
+`bash scripts/configure-github.sh --verify-only` compares it with the live settings.
 
 ## The rules that never bend
 

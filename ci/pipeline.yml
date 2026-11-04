@@ -210,7 +210,7 @@ resources:
   #   03:00  build, lint, test                 the commit chain, cheap
   #   04:00  sast, secrets
   #   05:00  sca, iac
-  #   06:00  suppression-audit, platform-integrity
+  #   06:00  suppression-audit, platform-integrity, protection-drift
 
   - name: daily-0300
     type: time
@@ -301,6 +301,7 @@ groups:
     jobs:
       - platform-integrity
       - suppression-audit
+      - protection-drift
       - compliance-monthly
 
   # The agents are a system that can regress.
@@ -330,6 +331,7 @@ groups:
     jobs:
       - agent-assurance
       - compliance-monthly
+      - protection-drift
 
   - name: all
     jobs: ["*"]
@@ -357,6 +359,7 @@ groups:
 #   codeql   sast mykronos-sast
 #   ingest   mykronos-secrets mykronos-sca mykronos-atlas
 #            agent-assurance compliance-monthly container-scan
+#            protection-drift
 #
 # `codeql` holds the two CodeQL jobs, so keel never has two 846MB bundles and
 # two CodeQL evaluators on the workers at once. `sast` is the longest job in
@@ -1001,6 +1004,32 @@ jobs:
         trigger: true
       - task: platform-integrity
         file: repo/ci/tasks/platform-integrity.yml
+
+  # ── Branch-protection drift (TheHub #60979) ─────────────────────────────────
+  # GitHub's settings are the controls; this repository's docs are claims about
+  # them. Nothing re-read the settings after setup, so OPERATING.md said
+  # signatures were enforced while the API said they were off, and only a manual
+  # audit found it. This job compares main's live protection with
+  # .sdlc/protection.yaml every morning and goes red on any DRIFT.
+  #
+  # GET only: it detects drift and never changes protection. Its token is a
+  # fine-grained one with Administration: read-only on this repository, from
+  # Vault as ((github_protection_token)). Vault seals on reboot; an empty token
+  # fails the task rather than passing it. Triggered by the timer alone: a commit
+  # does not change GitHub's settings. Out of the commit chain, so its red never
+  # reaches `Concourse / keel`. The `ingest` lane: it reports and decides nothing.
+  - name: protection-drift
+    public: true
+    serial_groups: [ingest]
+    plan:
+      - get: repo
+      - get: daily-0600
+        trigger: true
+      - task: protection-drift
+        file: repo/ci/tasks/protection-drift.yml
+        params:
+          GH_TOKEN: ((github_protection_token))
+          REPO_SLUG: ((github_owner))/((github_repo))
 
   # ── AI assurance ────────────────────────────────────────────────────────────
   # A prompt change is a code change. The scheduled run is the control that

@@ -18,6 +18,9 @@ test/gate-record.test.py            lint         gate records: key validation, f
 test/validate-platform.test.py      lint         platform validator: gate commands name evidence/ (TheHub #60981)
 test/serial-lanes.test.py           lint         pipeline: at most 3 heavy jobs at once, verdict replayed (TheHub #61062)
 test/container-limits.test.py       lint         tasks: cpu shares below 1024, no memory limit (TheHub #61062, D-174)
+test/protection-drift.test.py       lint         branch protection: live settings against .sdlc/protection.yaml (TheHub #60979)
+# Project-owned, beside the platform-owned test above: it reads ci/, which a fork adapts.
+test/protection-drift-wiring.test.py lint        keel's protection-drift job: daily-0600, read-only token (TheHub #60979)
 # test
 test/dashboard.test.py              test,quick   dashboard generator tests
 test/control-liveness.test.py       test         control liveness counts records, not directories (TheHub #60981)

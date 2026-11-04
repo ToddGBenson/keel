@@ -440,7 +440,10 @@ in the credential manager instead:
 ```
 github_token · webhook_token · mykronos_ingestion_token
 registry_user · registry_password
+github_protection_token
 ```
+
+`github_protection_token` is read by `protection-drift` alone (section 5).
 
 `anthropic_api_key` is needed only by a fork that wires the `ai-evals` template
 lane. keel's own pipeline no longer references it.
@@ -480,6 +483,47 @@ gh api repos/ToddGBenson/keel/branches/main/protection   --jq '{checks: .require
 
 `Concourse / keel` is the check that will be required, once TheHub #60580 lands.
 The section above gives the command and says why it must not be applied sooner.
+
+#### `protection-drift`: the settings are re-read every morning (TheHub #60979)
+
+Reading it by hand is what kept failing: this section, `OPERATING.md` and
+`configure-github.sh` each made a claim about these settings that was false for
+weeks. `.sdlc/protection.yaml` now declares the intended values on `main`
+(`enforce_admins`, `required_approving_review_count`, `required_signatures`,
+`required_linear_history`, `allow_force_pushes`, the required status checks).
+Each value that differs from `configure-github.sh`'s default carries a `reason:`
+citing the decision or Hub story behind it. The job `protection-drift` runs
+
+```sh
+bash scripts/configure-github.sh --verify-only
+```
+
+on the `daily-0600` timer. It makes GET requests only, prints one `match` or
+`DRIFT <field> declared=<x> live=<y>` line per field, and goes red on any DRIFT
+or when the protection cannot be read. It changes nothing. Run the same command
+locally with your own `gh` login to read the state at any time.
+
+On drift, either GitHub moved (put it back, then confirm the job goes green) or
+the intent changed (edit `.sdlc/protection.yaml` with a `reason:`, in the same
+pull request as any doc that describes the setting). To require signed commits
+again: `gh api -X POST repos/ToddGBenson/keel/branches/main/protection/required_signatures`,
+then set `required_signatures` to `true` in the declaration and restore the claim
+in `OPERATING.md`. `test/protection-drift.test.py` fails if the two disagree.
+
+**Its token.** A fine-grained personal access token, not a classic one:
+
+- Resource owner: the repository's owner. Repository access: **only this repository**.
+- Repository permissions: **Administration: Read-only** (Metadata: Read-only is added
+  automatically). Nothing else.
+- An expiry date, and a calendar reminder to rotate it before then.
+
+Store it in the credential manager as `github_protection_token`; with Vault at the
+default paths that is `/concourse/<team>/keel/github_protection_token` (field
+`value`). The task passes it to `curl` on stdin, so it is in no process's
+arguments, and nothing in `ci/scripts/protection-drift.sh` traces or prints it.
+Vault seals on every reboot: until it is unsealed the variable does not resolve,
+and the build errors. An empty value fails the task with
+`GH_TOKEN is empty`. Neither reads as "no drift".
 
 ---
 

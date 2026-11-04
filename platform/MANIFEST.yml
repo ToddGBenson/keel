@@ -50,6 +50,15 @@ platform_owned:
   # reads travel with it (keel #146 review).
   - test/poam.test.py
   - test/fixtures/poam-af878f1.md
+  # scripts/configure-github.sh --verify-only and scripts/protection-drift.py
+  # (TheHub #60979) compare a repository's live branch protection with its
+  # .sdlc/protection.yaml. The test and the recorded API responses it replays
+  # travel with them; it reads no ci/ file. keel's pipeline wiring is asserted
+  # by the project-owned test/protection-drift-wiring.test.py.
+  - test/protection-drift.test.py
+  - test/fixtures/protection-live-match.json
+  - test/fixtures/protection-live-enforce-admins-drift.json
+  - test/fixtures/protection-declared.yaml
   - docs/00-overview.md
   - docs/01-roles.md
   - docs/02-intake-and-discovery.md
@@ -136,6 +145,11 @@ project_owned:
   # false the moment it landed in a fork, and sync replacing a fork's would
   # silently rewrite what the fork has declared about itself.
   - .sdlc/threat-model.yaml
+  # Your intended branch protection (TheHub #60979), which the protection-drift
+  # job compares with GitHub's live settings. Upstream's values describe keel's
+  # main; in a fork they would report drift on the first morning, or worse,
+  # silently declare the fork's settings to be keel's.
+  - .sdlc/protection.yaml
   # Created by scripts/bootstrap.sh in YOUR repository and absent from upstream.
   # Unclassified, these made every fork fail its own manifest validator on day
   # one — and that validator runs in platform-integrity, a required check, so a
