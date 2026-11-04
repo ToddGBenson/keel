@@ -421,6 +421,38 @@ cat_files() { # stdin: command text -> the files that $(cat FILE) / $(< FILE) re
   grep -oE '\$\((cat[[:space:]]+(--[[:space:]]+)?|<[[:space:]]*)[^)[:space:]`"'"'"'|;&]+\)' \
     | sed -E 's/^\$\((cat[[:space:]]+(--[[:space:]]+)?|<[[:space:]]*)//; s/\)$//'
 }
+# TheHub #61048: the mutation checks are shared with GraphQL sent by curl (below).
+# $1 is the document text, $2 says how it was sent and is added to each reason.
+gql_mutations() {
+  local gql="$1" via="$2"
+  printf '%s' "$gql" | grep -qE '(^|[^A-Za-z0-9_])mutation([^A-Za-z0-9_]|$)' || return 0
+  m() { printf '%s' "$gql" | grep -qE '(^|[^A-Za-z0-9_])('"$1"')([^A-Za-z0-9_]|$)'; }
+  m 'mergePullRequest|enablePullRequestAutoMerge|mergeBranch' \
+    && block "merging through a GraphQL mutation$via. Merge happens after independent review, via GitHub." "AC-5, CM-5, AIC-2"
+  m 'addPullRequestReview|submitPullRequestReview|dismissPullRequestReview' \
+    && block "reviewing a PR through a GraphQL mutation$via. Agents recommend; a human or a separate identity approves. Use gh pr comment to say something." "AC-5, AIC-2"
+  m '(create|update|delete)Release' \
+    && block "creating or changing a release through GraphQL$via. G5 requires human authorization via the Environment." "CM-3, AIC-1"
+  m '(create|update|delete)(BranchProtectionRule|RepositoryRuleset)' \
+    && block "changing branch protection or a ruleset through GraphQL$via. This enforces separation of duties." "AC-5, CM-5"
+  m '(create|update|delete)Environment' \
+    && block "changing a deployment environment through GraphQL$via. Its reviewers ARE the G5 authorization gate." "CM-3, AC-5, AIC-1"
+  m '(approve|reject)Deployments' \
+    && block "approving or rejecting an environment deployment through GraphQL$via. Only a human reviews a deployment; the environment's reviewers ARE the G5 authorization gate." "CM-3, AC-5, AIC-1, AIC-2"
+  # #127: moving a ref is a push. A ref id is opaque -- it may be main -- so any
+  # GraphQL ref move is refused; a commit is refused when main appears anywhere in
+  # the call (inline, or as a variable: -f b=main) or its branch is named only by
+  # id. Quotes may still be JSON-escaped here, so main is matched as a word, not
+  # as "main". Push a feature branch with git instead.
+  m 'updateRefs?' \
+    && block "moving a ref through GraphQL$via. A ref id may be main; push a feature branch with git." "AC-5, CM-5"
+  if m 'createCommitOnBranch'; then
+    { printf '%s' "$gql" | grep -qE '(^|[^A-Za-z0-9_/.-])(refs/heads/)?(main|master)([^A-Za-z0-9_/.-]|$)' \
+      || ! printf '%s' "$gql" | grep -qE '(^|[^A-Za-z0-9_])branchName([^A-Za-z0-9_]|$)'; } \
+      && block "a commit to main through GraphQL$via (or to a branch named only by id). All change goes through a reviewed PR." "AC-5, CM-5"
+  fi
+  return 0
+}
 if g "$B"'gh[[:space:]]+api[[:space:]]+([^|;&]*[[:space:]])?graphql'"$E"; then
   gql="$cmd"
   # Only -F/--field reads @path; with -f/--raw-field "@q.graphql" is a literal string.
@@ -433,33 +465,7 @@ if g "$B"'gh[[:space:]]+api[[:space:]]+([^|;&]*[[:space:]])?graphql'"$E"; then
     gql="$gql
 $(cat -- "$f")"
   done
-  if printf '%s' "$gql" | grep -qE '(^|[^A-Za-z0-9_])mutation([^A-Za-z0-9_]|$)'; then
-    m() { printf '%s' "$gql" | grep -qE '(^|[^A-Za-z0-9_])('"$1"')([^A-Za-z0-9_]|$)'; }
-    m 'mergePullRequest|enablePullRequestAutoMerge|mergeBranch' \
-      && block "merging through a GraphQL mutation. Merge happens after independent review, via GitHub." "AC-5, CM-5, AIC-2"
-    m 'addPullRequestReview|submitPullRequestReview|dismissPullRequestReview' \
-      && block "reviewing a PR through a GraphQL mutation. Agents recommend; a human or a separate identity approves. Use gh pr comment to say something." "AC-5, AIC-2"
-    m '(create|update|delete)Release' \
-      && block "creating or changing a release through GraphQL. G5 requires human authorization via the Environment." "CM-3, AIC-1"
-    m '(create|update|delete)(BranchProtectionRule|RepositoryRuleset)' \
-      && block "changing branch protection or a ruleset through GraphQL. This enforces separation of duties." "AC-5, CM-5"
-    m '(create|update|delete)Environment' \
-      && block "changing a deployment environment through GraphQL. Its reviewers ARE the G5 authorization gate." "CM-3, AC-5, AIC-1"
-    m '(approve|reject)Deployments' \
-      && block "approving or rejecting an environment deployment through GraphQL. Only a human reviews a deployment; the environment's reviewers ARE the G5 authorization gate." "CM-3, AC-5, AIC-1, AIC-2"
-    # #127: moving a ref is a push. A ref id is opaque -- it may be main -- so any
-    # GraphQL ref move is refused; a commit is refused when main appears anywhere in
-    # the call (inline, or as a variable: -f b=main) or its branch is named only by
-    # id. Quotes may still be JSON-escaped here, so main is matched as a word, not
-    # as "main". Push a feature branch with git instead.
-    m 'updateRefs?' \
-      && block "moving a ref through GraphQL. A ref id may be main; push a feature branch with git." "AC-5, CM-5"
-    if m 'createCommitOnBranch'; then
-      { printf '%s' "$gql" | grep -qE '(^|[^A-Za-z0-9_/.-])(refs/heads/)?(main|master)([^A-Za-z0-9_/.-]|$)' \
-        || ! printf '%s' "$gql" | grep -qE '(^|[^A-Za-z0-9_])branchName([^A-Za-z0-9_]|$)'; } \
-        && block "a commit to main through GraphQL (or to a branch named only by id). All change goes through a reviewed PR." "AC-5, CM-5"
-    fi
-  fi
+  gql_mutations "$gql" ""
 fi
 
 # TheHub #61038: curl reaches the same endpoints as gh api, with the token from
@@ -492,31 +498,113 @@ $(cat -- "$f")"
   fi
   printf '%s' "$curl_text" | grep -qE '(^|[^A-Za-z0-9_])(approve|reject)Deployments([^A-Za-z0-9_]|$)' \
     && block "approving or rejecting an environment deployment through GraphQL over curl. Only a human reviews a deployment; the environment's reviewers ARE the G5 authorization gate." "CM-3, AC-5, AIC-1, AIC-2"
+  # TheHub #61048: every other mutation the gh api graphql rule blocks, read from the
+  # GraphQL calls (and the documents they send) only.
+  if [ -n "$curl_gql" ]; then
+    gql_mutations "${curl_text#"$curl_segs"}
+$curl_gql" " over curl"
+  fi
   # Second review: curl rewrites the URL before sending it. It removes dot segments
   # (runs/1/x/../pending_deployments is runs/1/pending_deployments) and expands {} and
   # [] globs (pending_deployment{s}). So dot segments are removed first, and a glob
   # anywhere after a run id counts as these endpoints. (-g and --path-as-is turn the
   # rewriting off; matching as if they were absent can only add a block.)
-  curl_dr=$(printf '%s\n' "$curl_segs" | sed -E ':a
+  curl_norm=$(printf '%s\n' "$curl_segs" | sed -E ':a
 s#/\./#/#g
 s#/[^/[:space:]]+/\.\./#/#
-ta' | grep -E "$DEPLOY_REVIEW"'|/actions/runs/[^|;&/[:space:]]+/[^[:space:]]*[][{}]')
-  if [ -n "$curl_dr" ]; then
-    # Second review: curl, like gh, sends the LAST -X it is given (curl -XGET -XPOST
-    # is a POST). So a call is a write if ANY -X/--request on it is not GET or HEAD,
-    # or if it carries a body and gives no -X and no -G.
-    curl_m='(-[a-zA-Z]*X[[:space:]]*|--request[[:space:]=]+)[\"'"'"']*'
-    while IFS= read -r seg; do
-      ms=$(printf '%s' "$seg" | grep -oE "$curl_m"'[A-Za-z]+' | sed -E "s/^$curl_m//")
-      if [ -n "$ms" ]; then
-        printf '%s\n' "$ms" | grep -qvxE '[Gg][Ee][Tt]|[Hh][Ee][Aa][Dd]' || continue
-      else
-        printf '%s' "$seg" | grep -qE '[[:space:]](-[a-zA-Z]*[dFTK]|--data|--json|--form|--upload-file|--config)' || continue
-        printf '%s' "$seg" | grep -qE '[[:space:]](-[a-zA-Z]*G|--get)([[:space:]]|$)' && continue
-      fi
-      block "approving or rejecting an environment deployment through curl. Only a human reviews a deployment; the environment's reviewers ARE the G5 authorization gate." "CM-3, AC-5, AIC-1, AIC-2"
-    done <<< "$curl_dr"
-  fi
+ta')
+  # Second review: curl, like gh, sends the LAST -X it is given (curl -XGET -XPOST
+  # is a POST). So a call is a write if ANY -X/--request on it is not GET or HEAD,
+  # or if it carries a body and gives no -X and no -G.
+  curl_m='(-[a-zA-Z]*X[[:space:]]*|--request[[:space:]=]+)[\"'"'"']*'
+  curl_is_write() { # $1 = one curl invocation
+    local ms
+    ms=$(printf '%s' "$1" | grep -oE "$curl_m"'[A-Za-z]+' | sed -E "s/^$curl_m//")
+    if [ -n "$ms" ]; then
+      printf '%s\n' "$ms" | grep -qvxE '[Gg][Ee][Tt]|[Hh][Ee][Aa][Dd]'
+      return
+    fi
+    printf '%s' "$1" | grep -qE '[[:space:]](-[a-zA-Z]*[dFTK]|--data|--json|--form|--upload-file|--config)' || return 1
+    ! printf '%s' "$1" | grep -qE '[[:space:]](-[a-zA-Z]*G|--get)([[:space:]]|$)'
+  }
+  # TheHub #61048: the {} and [] globs are expanded (every alternative, every
+  # character of a range) so pulls/1/merg{e} and mer[g-g]e are read as merge. The
+  # line itself is kept too. A glob too large to expand here is refused below.
+  read -r -d '' curl_glob_awk <<'AWK'
+{
+  cs = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+  print; n = 1; q[1] = $0; out = 0; ov = 0
+  while (n > 0) {
+    s = q[n--]
+    if (match(s, /\{[^{}]*\}/)) {
+      pre = substr(s, 1, RSTART - 1); body = substr(s, RSTART + 1, RLENGTH - 2)
+      post = substr(s, RSTART + RLENGTH); k = split(body, alt, ",")
+      if (k == 0) { k = 1; alt[1] = "" }
+      for (j = 1; j <= k; j++) { if (n >= 512) { ov = 1; break } q[++n] = pre alt[j] post }
+      continue
+    }
+    if (match(s, /\[[A-Za-z0-9]-[A-Za-z0-9](:[0-9]+)?\]/)) {
+      pre = substr(s, 1, RSTART - 1); post = substr(s, RSTART + RLENGTH)
+      ia = index(cs, substr(s, RSTART + 1, 1)); ib = index(cs, substr(s, RSTART + 3, 1))
+      for (j = ia; j <= ib; j++) { if (n >= 512) { ov = 1; break } q[++n] = pre substr(cs, j, 1) post }
+      continue
+    }
+    if (++out > 2048) { ov = 1; break }
+    print s
+  }
+  if (ov) print "CURL_GLOB_OVERFLOW"
+}
+AWK
+  # The value a JSON (or form) body gives to field $2 in invocation $1, if any. Quotes
+  # may be gone (the dequoted view) or JSON-escaped (the sed fallback).
+  curl_field() { printf '%s' "$1" \
+    | grep -oE '(^|[^A-Za-z0-9_])'"$2"'[\"'"'"']*[[:space:]]*[:=][[:space:]]*[\"'"'"']*[^\"'"'"',}&[:space:]]+' \
+    | head -n1 | sed -E 's/^[^:=]*[:=][[:space:]]*//; s/[\"'"'"']//g'; }
+  curl_main() { printf '%s' "$1" | grep -qE '^(refs/heads/)?(main|master)$'; }
+  # TheHub #61048: the deployment review was the only endpoint curl was judged on.
+  # Every endpoint the gh api rules guard is judged here, on the same write test:
+  # an explicit write method, or a body with no -X and no -G. A GET stays a read.
+  while IFS= read -r seg; do
+    [ -n "$seg" ] || continue
+    curl_is_write "$seg" || continue
+    # Only the words that hold a / and a glob are expanded, each on its own: a JSON
+    # body is full of braces and commas, and expanding it whole multiplies them.
+    cu_text="$seg
+$(printf '%s\n' "$seg" | grep -oE '[^[:space:]]*/[^[:space:]]*' | grep -E '[][{}]' | LC_ALL=C awk "$curl_glob_awk" 2>/dev/null)"
+    cu() { printf '%s\n' "$cu_text" | grep -qE "$1"; }
+    cu "$DEPLOY_REVIEW"'|/actions/runs/[^|;&/[:space:]]+/[^[:space:]]*[][{}]' \
+      && block "approving or rejecting an environment deployment through curl. Only a human reviews a deployment; the environment's reviewers ARE the G5 authorization gate." "CM-3, AC-5, AIC-1, AIC-2"
+    cu '^CURL_GLOB_OVERFLOW$' \
+      && block "a curl write whose URL glob is too large to read here. Name the endpoint without {} or [] globs." "AC-5, CM-5"
+    cu '/pulls/[^/[:space:]]+/merge([^A-Za-z0-9_-]|$)' \
+      && block "merging a PR through curl. Merge happens after independent review, via GitHub." "AC-5, CM-5, AIC-2"
+    cu '/pulls/[^/[:space:]]+/reviews([^A-Za-z0-9_-]|$)' \
+      && block "reviewing a PR through curl. Agents recommend; a human or a separate identity approves. Use gh pr comment to say something." "AC-5, AIC-2"
+    cu '/releases([^A-Za-z0-9_-]|$)' \
+      && block "creating or changing a release through curl. G5 requires human authorization via the Environment." "CM-3, AIC-1"
+    cu '/branches/[^[:space:]]*/protection' \
+      && block "changing branch protection through curl. This enforces separation of duties." "AC-5, CM-5"
+    cu '/rulesets([^A-Za-z0-9_-]|$)' \
+      && block "changing a ruleset through curl. Rulesets are branch protection under a newer name, and the same separation of duties rests on them." "AC-5, CM-5"
+    cu '/(actions|codespaces|dependabot)/secrets' \
+      && block "writing a secret through curl. Agents never touch secrets; escalate to a human." "AIC-5, IA-5"
+    cu '/environments([^A-Za-z0-9_-]|$)' \
+      && block "changing a deployment environment through curl. Its reviewers ARE the G5 authorization gate." "CM-3, AC-5, AIC-1"
+    cu '/git/refs/heads/(main|master)([^A-Za-z0-9_./-]|$)' \
+      && block "moving main through the git refs API with curl. All change goes through a reviewed PR." "AC-5, CM-5"
+    # A contents write is a commit; with no branch in the body it lands on the
+    # default branch. A body this hook cannot see (a file) names no branch.
+    if cu '/contents/'; then
+      br=$(curl_field "$seg" branch)
+      { [ -z "$br" ] || curl_main "$br"; } \
+        && block "a commit to main through the contents API with curl (it commits to the default branch when the body names no branch). All change goes through a reviewed PR; put \"branch\":\"<feature>\" in an inline body." "AC-5, CM-5"
+    fi
+    if cu '/merges([^A-Za-z0-9_-]|$)'; then
+      bs=$(curl_field "$seg" base)
+      { [ -z "$bs" ] || curl_main "$bs"; } \
+        && block "merging into main through the merges API with curl (or into a base this hook cannot read). Merge happens after independent review, via GitHub." "AC-5, CM-5, AIC-2"
+    fi
+  done <<< "$curl_norm"
 fi
 
 # ── Secrets (AIC-5) ─────────────────────────────────────────────────────────
