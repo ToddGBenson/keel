@@ -41,11 +41,16 @@ only on a repository whose default branch requires it. Require it **pinned to th
 a workflow job with the same name cannot satisfy it:
 
 ```sh
-bash scripts/configure-github.sh --checks-only --review-app-id <MyKronos App id>
+bash scripts/configure-github.sh --checks-only                         # MyKronos App 4551328
+bash scripts/configure-github.sh --checks-only --review-app-id <id>    # another MyKronos App
+bash scripts/configure-github.sh --review-app-id none                  # a fork without MyKronos
 ```
 
-The App id is the `app.id` of any check run MyKronos posted on your repository (keel's is
-4551328, `mykronos-platform`). The script refuses the GitHub Actions app, and an App that has
+The App id defaults to keel's MyKronos App, 4551328 (`mykronos-platform`); for another
+installation it is the `app.id` of any check run MyKronos posted on your repository.
+`--checks-only` changes the required checks and nothing else: on a branch whose required
+checks were never set it PUTs the protection it read back, with only that field replaced.
+A review is requested with `POST /api/approvals/pull-requests` on the MyKronos API, body `{repo, number, statement}`. The script refuses the GitHub Actions app, and an App that has
 not posted on the repository yet, since a required check that never arrives blocks every
 merge. It sets `strict` off: an approval pins the head sha, and "branches up to date" would
 move every approved head each time `main` moves.

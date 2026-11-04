@@ -15,10 +15,24 @@ approve anything. Gate approval stays a human act recorded in GitHub (PD-2).
 > **2026-11-04 (TheHub #60978).** The gate is **`independent-review`**, not `Concourse / keel`.
 > MyKronos posts it on every pull request head through its GitHub App, App-pinned, and opens
 > the approval request itself on a repository whose `main` requires it.
-> `scripts/configure-github.sh --checks-only --review-app-id 4551328` requires it. **Not yet
+> `scripts/configure-github.sh` requires it, pinned to the MyKronos App id **4551328**
+> (`mykronos-platform`, the default; `--checks-only` changes nothing else). **Not yet
 > applied:** on 2026-11-04 `main` still required no checks, so a human review is still the
 > only gate (POAM-014). `Concourse / keel` stays a post-merge verdict on `main` commits; it
-> cannot be required, for the reason below. The rest of this box is the earlier reading.
+> cannot be required, for the reason below.
+>
+> **Requesting the review:** `POST /api/approvals/pull-requests` on the MyKronos API, body `{repo, number, statement}`.
+> MyKronos reads the diff, posts `independent-review` `in_progress` on the head, and turns it
+> green or red on the approver's decision. The approval covers that head only. Once `main`
+> requires the check, MyKronos also opens a request for every open pull request on its own.
+>
+> **`scripts/selfreview-check.js` and `test/selfreview-check.test.js` are fork-only.** Their
+> only consumer is `pr-governance.yml`, which keel runs on `workflow_dispatch` only, so keel
+> has no consumer of either. They stay because they are platform-owned
+> (`platform/MANIFEST.yml`): a fork that restores PR Governance on Actions gets them working.
+> keel's own self-review record is read by its reviewers, not by this script.
+>
+> The rest of this box is the earlier reading.
 >
 > **Re-read 2026-10-22 (TheHub #60935).** The repository is **public** again, and Actions runs
 > on pull requests: `Unit results`, `Mykronos sast` and `Mykronos secrets` ran on #142's head.

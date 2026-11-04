@@ -75,9 +75,10 @@ Branch protection on `main` — configured, not documented-and-hoped:
 
 - **`independent-review` passes, pinned to the MyKronos App** (TheHub #60978). MyKronos
   posts it on the PR head and opens the approval request; the check goes green only when
-  someone other than the author approves that exact head. `scripts/configure-github.sh
-  --review-app-id <id>` requires it. A fork without MyKronos gets no automated gate from
-  this line, and the script says so
+  someone other than the author approves that exact head. `scripts/configure-github.sh`
+  requires it (App id 4551328 by default). Request it with `POST /api/approvals/pull-requests`.
+  A fork without MyKronos (`--review-app-id none`) gets no automated gate from this line,
+  and the script says so
 - All required status checks pass
 - ≥1 approving review from a **CODEOWNER who is not the author**
 - Stale approvals dismissed on new commits

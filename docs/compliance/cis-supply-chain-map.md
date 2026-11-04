@@ -26,7 +26,7 @@ which controls are achievable — recorded honestly below rather than marked sat
 | 1.1.4 | Dismiss stale approvals | ✅ | `dismiss_stale_reviews: true` |
 | 1.1.5 | Code owners are set and approve | 🟡 | CODEOWNERS present and routes; **advisory** in solo mode (cannot self-approve) |
 | 1.1.6 | Inactive branches reviewed and removed | 🟡 | Trunk-based, short-lived branches; no automated pruning yet |
-| 1.1.7 | All checks passed before merge | 🟡 | **Declared, not applied** (TheHub #60978): the required check is MyKronos `independent-review`, App-pinned, set by `configure-github.sh --review-app-id`. Measured 2026-11-04: `main` requires no checks. POAM-014 |
+| 1.1.7 | All checks passed before merge | 🟡 | **Declared, not applied** (TheHub #60978): the required check is MyKronos `independent-review`, App-pinned, set by `configure-github.sh` (App id 4551328 by default). Measured 2026-11-04: `main` requires no checks. POAM-014 |
 | 1.1.8 | Open comments resolved before merge | ✅ | `required_conversation_resolution: true` |
 | 1.1.9 | Verify signed commits before merge | 🟡 | Capability probed and found incomplete, so **deliberately not enabled** (L0010). POAM-009 |
 | 1.1.10 | Linear history required | ✅ | `required_linear_history: true` |
