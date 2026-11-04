@@ -131,17 +131,29 @@ def run_verify(fixture, declared, stub_exit=0, with_gh=True):
             env["PATH"] = str(stubs) + os.pathsep + env.get("PATH", "")
             env.pop("GH_TOKEN", None)
         else:
-            # A PATH with no gh on it: the stubs, bash's own directory (coreutils)
-            # and python's. curl is the stub.
+            # A PATH with no gh on it, and curl a stub. On Linux, gh often shares
+            # /usr/bin with coreutils, so PATH is ONLY the stub directory, with
+            # the few tools the verify path runs linked into it. Where symlinks
+            # are not allowed (Windows), PATH is the directories of those tools
+            # instead, which there never hold gh.
             write_stub(stubs / "curl", CURL_STUB)
-            keep = [str(stubs)]
-            for tool in ("bash", "python3", "python", "mktemp", "cat"):
-                found = shutil.which(tool)
-                if found and os.path.dirname(found) not in keep:
-                    keep.append(os.path.dirname(found))
-            keep = [d for d in keep if d == str(stubs) or not (Path(d) / "gh").exists()
-                    and not (Path(d) / "gh.exe").exists()]
-            env["PATH"] = os.pathsep.join(keep)
+            tools = ("bash", "python3", "python", "mktemp", "cat", "rm", "dirname")
+            try:
+                for tool in tools:
+                    found = shutil.which(tool)
+                    if found:
+                        os.symlink(found, stubs / tool)
+                env["PATH"] = str(stubs)
+            except OSError:
+                keep = [str(stubs)]
+                for tool in tools:
+                    found = shutil.which(tool)
+                    if found and os.path.dirname(found) not in keep:
+                        keep.append(os.path.dirname(found))
+                env["PATH"] = os.pathsep.join(keep)
+            check("the curl-path PATH has no gh on it",
+                  not any((Path(d) / g).exists() for d in env["PATH"].split(os.pathsep)
+                          for g in ("gh", "gh.exe")), env["PATH"])
             env["GH_TOKEN"] = SENTINEL_TOKEN
         p = subprocess.run([BASH, str(CONFIGURE), "--verify-only", "--repo", "fixture/repo",
                             "--declared", str(declared)],
