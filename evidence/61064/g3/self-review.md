@@ -37,3 +37,17 @@ verdict: pass
 
 - The reviewer is the same model family, the same session and the same GitHub identity as the builder. This is a self-review, not an independent review, and it is not an approval.
 - The permission deny/ask/allow lists in settings.json are still spelled Bash(...) only, so the hook alone enforces the rules for PowerShell. Splatted arrays (gh @a) and .NET HTTP clients stay open entries until TheHub #61039.
+
+## Second round: keel#166 independent review
+
+The review (comment 6637155206) found PowerShell's own escaping still hid gh calls from the PowerShell tool. Each finding is a new corpus entry, red on the previous head and green on the fix, run in a Linux container (mawk, and again with gawk) with real jq:
+
+- `--%` before a gh call (KB-165, KB-166): the PowerShell view drops the token.
+- a backtick escape joined to a quoted fragment (KB-167, KB-168): a quote no longer emits a space in the PowerShell view.
+- `` `t `` and `` `u{..} `` inside an iex string (KB-169..KB-171): read as whitespace or as the character.
+- a gh-protected endpoint in a variable or a pipeline (KB-172, KB-173): read anywhere in the command, as pending_deployments was.
+- `(Get-Command gh)` and `(gcm gh).Source` (KB-174, KB-175), and two literals joined by `+` (KB-176, KB-177): read as gh and as one string.
+
+Red on c9bcf5a..a248cec plus the test commit: 13 entries x 2 parser modes allowed, nothing else failing. Green: corpus exit 0 (only the declared open entries), selftest 273 passed, 0 failed. The six new selftest allow cases (read-only twins of each shape) passed on the old hook too, so they are guards against a false positive, not evidence of the fix.
+
+Not fixed here: the jq shim in the corpus runner can fail under load and the hook then reads an empty command and allows. Seen only with the shim (no real jq) in a 2-CPU container; with real jq, as CI has, every run was clean.
