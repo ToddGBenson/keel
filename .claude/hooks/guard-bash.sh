@@ -209,6 +209,16 @@ raw_cmd="$cmd"
 #     'pr','merge') separate words;
 #   - Start-Process gh -ArgumentList ... runs gh with those arguments, so the cmdlet and
 #     its -FilePath / -ArgumentList names are dropped and what is left is the gh call.
+# keel#166 review: PowerShell's own escaping, read the way PowerShell reads it.
+#   - a quote is not a word boundary: PowerShell joins adjacent bare and quoted
+#     fragments into one argument, so `m"erge" and m"er"`ge are both merge. A quote
+#     emits nothing here (the raw view still reads a quote as a boundary);
+#   - 'a' + "b", two literals joined by +, is one string: ('.../12/' + 'merge');
+#   - inside "...", `t `n `r `f `v are whitespace and `u{hex} is that character, so
+#     iex "gh pr`tmerge 12" and iex "gh pr `u{6d}erge 12" are gh pr merge 12;
+#   - --% (stop parsing) hands the rest of the line to the native command verbatim,
+#     so the token is dropped: gh --% pr merge 12 is gh pr merge 12;
+#   - (Get-Command gh), (gcm gh) and (gcm gh).Source name gh, as gh.exe does.
 # The view only ever adds a reading: a rule that blocks on any view blocks the call,
 # whichever tool sent it.
 read -r -d '' ps_awk <<'AWK'
@@ -220,6 +230,14 @@ END {
     if (q != "'" && c == "`") {
       d = substr(s, i + 1, 1)
       if (d == "\r" && substr(s, i + 2, 1) == "\n") { out = out " "; i += 3; continue }
+      if (q == "\"" && (d == "t" || d == "n" || d == "r" || d == "f" || d == "v")) { out = out " "; i += 2; continue }
+      if (q == "\"" && d == "u" && substr(s, i + 2, 1) == "{") {
+        j = i + 3; v = 0
+        while (j <= n && (h = index("0123456789abcdef", tolower(substr(s, j, 1)))) > 0) { v = v * 16 + h - 1; j++ }
+        if (j > i + 3 && substr(s, j, 1) == "}") {
+          out = out ((v > 32 && v < 127) ? sprintf("%c", v) : " "); i = j + 1; continue
+        }
+      }
       out = out ((d == "\n" || d == "|" || d == ";" || d == "&") ? " " : d)
       i += 2; continue
     }
@@ -229,13 +247,23 @@ END {
     if (q == "") {
       if (dp > 0 && c == "(") pc[dp]++
       if (dp > 0 && c == ")" && --pc[dp] == 0) { q = sv[dp--]; out = out c; i++; continue }
-      if (c == "'" || c == "\"") { q = c; out = out " "; i++; continue }
+      if (c == "'" || c == "\"") { q = c; i++; continue }
+      if (c == "-" && substr(s, i, 3) == "--%" && (i == 1 || index(" \t\n", substr(s, i - 1, 1)) > 0) \
+          && (i + 3 > n || index(" \t\r\n", substr(s, i + 3, 1)) > 0)) { out = out " "; i += 3; continue }
       if (c == "{" || c == "}" || c == ",") c = " "
       out = out c; i++; continue
     }
     if (c == q) {
       if (substr(s, i + 1, 1) == q) { out = out q; i += 2; continue }
-      q = ""; out = out " "; i++; continue
+      j = i + 1
+      while (substr(s, j, 1) == " " || substr(s, j, 1) == "\t") j++
+      if (substr(s, j, 1) == "+") {
+        j++
+        while (substr(s, j, 1) == " " || substr(s, j, 1) == "\t") j++
+        k = substr(s, j, 1)
+        if (k == "'" || k == "\"") { q = k; i = j + 1; continue }
+      }
+      q = ""; i++; continue
     }
     if (c == "|" || c == ";" || c == "&" || c == "\n") c = " "
     out = out c; i++
@@ -244,7 +272,8 @@ END {
 }
 AWK
 ps_sed=(-e 's#(^|[[:space:](])([Ss][Tt][Aa][Rr][Tt]-[Pp][Rr][Oo][Cc][Ee][Ss][Ss]|[Ss][Aa][Pp][Ss]|[Ss][Tt][Aa][Rr][Tt])([[:space:]]+-[Ff][A-Za-z]*)?[[:space:]]+#\1#g'
-        -e 's#[[:space:]]-[Aa][Rr][Gg][A-Za-z]*([[:space:]]|$)# #g')
+        -e 's#[[:space:]]-[Aa][Rr][Gg][A-Za-z]*([[:space:]]|$)# #g'
+        -e 's#\(([Gg][Ee][Tt]-[Cc][Oo][Mm][Mm][Aa][Nn][Dd]|[Gg][Cc][Mm])([[:space:]]+-[A-Za-z]+)*[[:space:]]+([^()[:space:]]+)[[:space:]]*\)(\.[A-Za-z]+)?# \3 #g')
 ps_cmd="$(printf '%s' "$raw_cmd" | LC_ALL=C awk "$ps_awk" 2>/dev/null | sed -E "${ps_sed[@]}" | normalize)" || ps_cmd="$raw_cmd"
 
 block() {
@@ -614,6 +643,9 @@ ta')
     done <<< "$curl_dr"
   fi
   curl_gh=$(printf '%s\n' "$curl_res" | grep -E "$HTTP_GH")
+  # keel#166 review: these endpoints are read anywhere in the command too ($u =
+  # '.../pulls/12/merge'; irm -Method Put $u, or the URL piped to % { irm ... $_ }).
+  g "$HTTP_GH" && curl_gh="$curl_segs"
   if [ -n "$curl_gh" ]; then
     while IFS= read -r seg; do
       http_write "$seg" || continue
