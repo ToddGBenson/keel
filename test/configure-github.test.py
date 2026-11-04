@@ -56,9 +56,9 @@ except AttributeError:
 
 def check(name, cond, detail=""):
     if cond:
-        print(f"  ok    {name}")
+        print(f"  [ok]   {name}")
     else:
-        print(f"  FAIL  {name}")
+        print(f"  [FAIL] {name}")
         if detail:
             print("        " + str(detail).replace("\n", "\n        ")[:3000])
         failures.append(name)
