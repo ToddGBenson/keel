@@ -454,6 +454,14 @@ check "PS: Get-Content a file"        allow "$(pspayload 'Get-Content -Raw READM
 check "PS: escaped quote in a string" allow "$(pspayload 'Write-Output "it`"s a pr merge note"; git status')" guard-bash.sh
 check "PS: git log, Select-Object"    allow "$(pspayload 'git log --oneline -5 | Select-Object -First 3')"     guard-bash.sh
 check "PS: Start-Process notepad"     allow "$(pspayload "Start-Process notepad -ArgumentList 'a.txt'")"     guard-bash.sh
+# keel#166 review: the readings that close --%, quote joins, `t / `u{..}, Get-Command and
+# a joined literal must leave the read-only spellings of the same shapes allowed.
+check "PS: gh --% pr view"            allow "$(pspayload 'gh --% pr view 12 --json title')"                    guard-bash.sh
+check "PS: & (Get-Command gh) pr view" allow "$(pspayload '& (Get-Command gh) pr view 12')"                   guard-bash.sh
+check "PS: joined fragment, pr view"  allow "$(pspayload 'gh pr `v"iew" 12')"                                 guard-bash.sh
+check "PS: tab escape in a message"   allow "$(pspayload 'Write-Output "pr`tmerge is for humans"; git status')" guard-bash.sh
+check "PS: joined literal, GET"       allow "$(pspayload "irm -Uri ('https://api.github.com/repos/O/R/pulls/12/' + 'merge')")" guard-bash.sh
+check "PS: \$u merge endpoint, GET"  allow "$(pspayload "\$u = 'https://api.github.com/repos/O/R/pulls/12/merge'; irm \$u")" guard-bash.sh
 
 echo ""
 echo "guard-write.sh — must BLOCK (AU-9, AIC-5)"

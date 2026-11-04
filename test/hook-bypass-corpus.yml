@@ -1267,3 +1267,109 @@ entries:
     why: "self-merge with the arguments splatted from an array"
     open_in: [jq, no-jq]
     gap: "supplied at run time with nothing on this command line that names the call; a denylist over command text cannot see it (TheHub #61039)"
+  # TheHub #61064 independent review (keel#166): PowerShell's own escaping, read as
+  # PowerShell reads it.
+  - id: KB-165
+    hook: guard-bash.sh
+    class: powershell-tool
+    source: TheHub#61064
+    tool: PowerShell
+    command: "gh --% pr merge 12"
+    expect: block
+    why: "self-merge; the stop-parsing token --% hands the rest of the line to gh verbatim"
+  - id: KB-166
+    hook: guard-bash.sh
+    class: powershell-tool
+    source: TheHub#61064
+    tool: PowerShell
+    command: "gh --% pr review 12 --approve"
+    expect: block
+    why: "self-approval behind the stop-parsing token"
+  - id: KB-167
+    hook: guard-bash.sh
+    class: powershell-tool
+    source: TheHub#61064
+    tool: PowerShell
+    command: "gh pr `m\"erge\" 12"
+    expect: block
+    why: "self-merge; PowerShell joins the bare `m and the quoted erge into one word, merge"
+  - id: KB-168
+    hook: guard-bash.sh
+    class: powershell-tool
+    source: TheHub#61064
+    tool: PowerShell
+    command: "gh pr m\"er\"`ge 12 --squash"
+    expect: block
+    why: "self-merge; a quoted fragment and a backtick escape inside one word"
+  - id: KB-169
+    hook: guard-bash.sh
+    class: powershell-tool
+    source: TheHub#61064
+    tool: PowerShell
+    command: "Invoke-Expression \"gh pr`tmerge 12\""
+    expect: block
+    why: "self-merge; `t is a tab inside a double-quoted string, so iex runs gh pr<TAB>merge"
+  - id: KB-170
+    hook: guard-bash.sh
+    class: powershell-tool
+    source: TheHub#61064
+    tool: PowerShell
+    command: "iex \"gh pr`u{20}merge 12\""
+    expect: block
+    why: "self-merge; `u{20} is a space inside a double-quoted string"
+  - id: KB-171
+    hook: guard-bash.sh
+    class: powershell-tool
+    source: TheHub#61064
+    tool: PowerShell
+    command: "iex \"gh pr `u{6d}erge 12\""
+    expect: block
+    why: "self-merge; `u{6d} is the letter m inside a double-quoted string"
+  - id: KB-172
+    hook: guard-bash.sh
+    class: powershell-tool
+    source: TheHub#61064
+    tool: PowerShell
+    command: "$u = 'https://api.github.com/repos/O/R/pulls/12/merge'; irm -Method Put $u"
+    expect: block
+    why: "self-merge over REST with the endpoint in a variable, as KB-150 is for pending_deployments"
+  - id: KB-173
+    hook: guard-bash.sh
+    class: powershell-tool
+    source: TheHub#61064
+    tool: PowerShell
+    command: "'https://api.github.com/repos/O/R/pulls/12/merge' | % { irm -Method Put $_ }"
+    expect: block
+    why: "self-merge over REST with the endpoint piped in"
+  - id: KB-174
+    hook: guard-bash.sh
+    class: powershell-tool
+    source: TheHub#61064
+    tool: PowerShell
+    command: "& (Get-Command gh) pr merge 12"
+    expect: block
+    why: "self-merge with gh resolved by Get-Command"
+  - id: KB-175
+    hook: guard-bash.sh
+    class: powershell-tool
+    source: TheHub#61064
+    tool: PowerShell
+    command: "& (gcm gh).Source pr merge 12"
+    expect: block
+    why: "self-merge with gh's path read from gcm"
+  - id: KB-176
+    hook: guard-bash.sh
+    class: powershell-tool
+    source: TheHub#61064
+    tool: PowerShell
+    command: "irm -Method Put -Uri ('https://api.github.com/repos/O/R/pulls/12/' + 'merge')"
+    expect: block
+    why: "self-merge over REST with the endpoint joined from two string literals"
+  - id: KB-177
+    hook: guard-bash.sh
+    class: powershell-tool
+    source: TheHub#61064
+    tool: PowerShell
+    command: "iex ('gh pr ' + \"merge 12\")"
+    expect: block
+    why: "self-merge with the command joined from a single- and a double-quoted literal"
