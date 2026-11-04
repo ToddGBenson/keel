@@ -199,7 +199,7 @@ def run(argv, protection=None, runs_on=None, app_id=APP, slug="mykronos-platform
         env.update(env_extra or {})
         p = subprocess.run([BASH, "scripts/configure-github.sh", *argv], cwd=str(tmp),
                            capture_output=True, text=True, encoding="utf-8", env=env,
-                           stdin=subprocess.DEVNULL, timeout=120)
+                           stdin=subprocess.DEVNULL, timeout=600)
         log = stubs / "writes.log"
         writes = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()] \
             if log.exists() else []
@@ -230,6 +230,13 @@ def protection_with(checks, strict=False):
     }
 
 
+def enabled():
+    """Protection with required checks enabled and empty, so --checks-only can PATCH."""
+    return protection_with([])
+
+
+# Full runs are slow on Windows (one process per gh call and per JSON read), so only
+# the cases about steps 1 to 4 run the whole script; the rest use --checks-only.
 print("configure-github.sh: the merge gate is MyKronos independent-review (TheHub #60978)")
 
 # 1. Fresh repository, App id given, App seen on the default branch head.
@@ -243,7 +250,8 @@ check("verification names the pinned check",
       f"[ok]   {CHECK} required, pinned to App {APP}" in out, out[-2500:])
 
 # 2. A PR head is enough evidence too (the App posts library-allowlist there).
-rc, out, writes, st = run(["--yes", "--solo", "--review-app-id", str(APP)], runs_on="prhead")
+rc, out, writes, st = run(["--yes", "--checks-only", "--review-app-id", str(APP)],
+                          protection=enabled(), runs_on="prhead")
 check("an App check run on an open PR head counts as the App posting here", pinned(st), out[-2000:])
 
 # 3. Re-run with the pin in place: step 4's PUT must carry it, app id included.
@@ -260,7 +268,7 @@ check("a re-run keeps the operator's own required check, and the pin",
       required(st))
 
 # 4. An unpinned independent-review (any app may post it) is re-pinned, once.
-rc, out, writes, st = run(["--yes", "--solo", "--review-app-id", str(APP)],
+rc, out, writes, st = run(["--yes", "--checks-only", "--review-app-id", str(APP)],
                           protection=protection_with([{"context": CHECK, "app_id": None}]),
                           runs_on="main")
 names = [c["context"] for c in required(st).get("checks") or []]
@@ -268,31 +276,32 @@ check("an unpinned independent-review is re-pinned, not duplicated",
       pinned(st) and names.count(CHECK) == 1, required(st))
 
 # 5. No App id: a fork without MyKronos requires nothing and says so.
-rc, out, writes, st = run(["--yes", "--solo"], runs_on="main")
+rc, out, writes, st = run(["--yes", "--checks-only"], protection=enabled(), runs_on="main")
 check("without an App id nothing is required", not required(st).get("checks"), required(st))
 check("without an App id the script says the merge gate is not configured",
       "--review-app-id" in out and "not required" in out, out[-2500:])
 
 # 6. KEEL_REVIEW_APP_ID is the same as the flag.
-rc, out, writes, st = run(["--yes", "--solo"], runs_on="main",
+rc, out, writes, st = run(["--yes", "--checks-only"], protection=enabled(), runs_on="main",
                           env_extra={"KEEL_REVIEW_APP_ID": str(APP)})
 check("KEEL_REVIEW_APP_ID works like --review-app-id", pinned(st), out[-2000:])
 
 # 7. The App has never posted here: requiring it would block every PR.
-rc, out, writes, st = run(["--yes", "--solo", "--review-app-id", str(APP)], runs_on=None)
+rc, out, writes, st = run(["--yes", "--checks-only", "--review-app-id", str(APP)],
+                          protection=enabled(), runs_on=None)
 check("an App never seen on this repository is not required (L0010)",
       not pinned(st), required(st))
 check("... and the script says why, and fails the run",
       "has not posted" in out and rc != 0, out[-2500:])
 
 # 8. The GitHub Actions app: any workflow job can post a check called independent-review.
-rc, out, writes, st = run(["--yes", "--solo", "--review-app-id", str(ACTIONS_APP)],
-                          runs_on="main", app_id=ACTIONS_APP, slug="github-actions")
+rc, out, writes, st = run(["--yes", "--checks-only", "--review-app-id", str(ACTIONS_APP)],
+                          protection=enabled(), runs_on="main", app_id=ACTIONS_APP, slug="github-actions")
 check("the GitHub Actions app is refused as the review App",
       not pinned(st, ACTIONS_APP) and rc != 0 and "github-actions" in out, out[-2000:])
 
 # 9. Verification fails an independent-review that any app could satisfy.
-rc, out, writes, st = run(["--yes", "--solo", "--checks-only", "--dry-run"],
+rc, out, writes, st = run(["--yes", "--checks-only", "--dry-run"],
                           protection=protection_with([{"context": CHECK, "app_id": None}]))
 check("verification FAILS an independent-review pinned to no app",
       f"[FAIL] {CHECK}" in out and rc != 0, out[-2000:])
@@ -305,10 +314,8 @@ check("--dry-run says it would require the pinned check",
       f"would require {CHECK}" in out and str(APP) in out, out[-2000:])
 
 # 11. --checks-only touches the required checks and nothing else.
-prot = protection_with([])
-prot["required_status_checks"] = {"strict": False, "contexts": [], "checks": []}
 rc, out, writes, st = run(["--yes", "--checks-only", "--review-app-id", str(APP)],
-                          protection=prot, runs_on="main")
+                          protection=enabled(), runs_on="main")
 paths = sorted({(w["method"], w["path"]) for w in writes})
 check("--checks-only writes only the required status checks",
       paths == [("PATCH", "repos/o/r/branches/main/protection/required_status_checks")],

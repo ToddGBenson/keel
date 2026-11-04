@@ -10,7 +10,15 @@ approve anything. Gate approval stays a human act recorded in GitHub (PD-2).
 
 ## What runs where, after the port
 
-> ## ⚠️ READ THIS FIRST — the Concourse check run is the gate; PR Governance is retired
+> ## ⚠️ READ THIS FIRST — the merge gate is MyKronos `independent-review`; PR Governance is retired
+>
+> **2026-11-04 (TheHub #60978).** The gate is **`independent-review`**, not `Concourse / keel`.
+> MyKronos posts it on every pull request head through its GitHub App, App-pinned, and opens
+> the approval request itself on a repository whose `main` requires it.
+> `scripts/configure-github.sh --checks-only --review-app-id 4551328` requires it. **Not yet
+> applied:** on 2026-11-04 `main` still required no checks, so a human review is still the
+> only gate (POAM-014). `Concourse / keel` stays a post-merge verdict on `main` commits; it
+> cannot be required, for the reason below. The rest of this box is the earlier reading.
 >
 > **Re-read 2026-10-22 (TheHub #60935).** The repository is **public** again, and Actions runs
 > on pull requests: `Unit results`, `Mykronos sast` and `Mykronos secrets` ran on #142's head.
@@ -366,6 +374,11 @@ tracks `main`, and Concourse never sees a pull request's head. So:
 - **A commit Concourse skips stays in progress.** When two commits land close
   together, the chain takes the newer one, and the older commit's check stays
   `in_progress`.
+
+> **Superseded 2026-11-04 (TheHub #60978).** keel's merge gate is MyKronos
+> `independent-review`, which does arrive on PR heads, and `scripts/configure-github.sh`
+> requires it. `Concourse / keel` is not required. The 2026-10-20 plan below is kept as
+> written; do **not** run its `PUT`, which would block every pull request.
 
 **Requiring it: decided, not yet applied (TheHub #60849, option C).** This is
 keel's merge gate. It is switched on when TheHub #60580 lands, by #60580 or by

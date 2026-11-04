@@ -21,7 +21,7 @@ Settings → Branches → Add rule for `main`:
 | **Require review from Code Owners** | ✅ | This is what makes `.github/CODEOWNERS` real |
 | Require conversation resolution | ✅ | An unanswered review question is not an approval |
 | Require status checks to pass | ✅ | See §2 |
-| Require branches up to date | ✅ | Green on a stale base proves nothing |
+| Require branches up to date | ❌ for `independent-review` | An approval pins the head sha; updating the branch orphans it (§2) |
 | **Require signed commits** | ✅ | Cryptographic attribution — SI-7, CM-14 |
 | Require linear history | ✅ | A readable, attributable audit trail |
 | **Do not allow bypassing the above** | ✅ | **The one that matters most** |
@@ -35,7 +35,24 @@ own record — not a quiet click.
 
 ## 2. Required status checks
 
-Add each as required once it has run at least once:
+**The merge gate is MyKronos `independent-review`** (TheHub #60978). MyKronos posts it on
+each pull request head through its GitHub App and opens the approval request itself, but
+only on a repository whose default branch requires it. Require it **pinned to the App**, so
+a workflow job with the same name cannot satisfy it:
+
+```sh
+bash scripts/configure-github.sh --checks-only --review-app-id <MyKronos App id>
+```
+
+The App id is the `app.id` of any check run MyKronos posted on your repository (keel's is
+4551328, `mykronos-platform`). The script refuses the GitHub Actions app, and an App that has
+not posted on the repository yet, since a required check that never arrives blocks every
+merge. It sets `strict` off: an approval pins the head sha, and "branches up to date" would
+move every approved head each time `main` moves.
+
+The list below is what forks that run these workflows on Actions can add. keel does not
+require them: `ci.yml`, `security.yml` and `pr-governance.yml` run on `workflow_dispatch`
+only, and a required check that never runs blocks every pull request.
 
 ```
 Process compliance                    (pr-governance.yml)  ← CM-3, CM-5, AIC-6

@@ -61,7 +61,7 @@ review*; POAM-005 and POAM-006 closed later the same day when the repository was
 | POAM-011 | No provenance for what forks receive — cosign sign/attest are stubs (re-scoped 2026-08-14: the subject is the platform release, not an artifact) | SR-4(3), CM-14 | Medium | Todd Benson | 2026-11-11 | Open — **remediation built** (#144, TheHub #60936): `release.yml` signs keylessly and attests a manifest of platform-owned files; `verify-artifact` verifies the latest release and fails an unsigned one, or one tagged off `main` (advisory only until the first release exists). Closes on evidence, not on merge: the first release signed by `release.yml` and verified by `verify-artifact` |
 | POAM-012 | CodeQL SARIF from Concourse does not reach GitHub code scanning | SA-11(1) | Low | Todd Benson | 2026-08-13 | **Closed** — the lane that discarded SARIF was deleted; SAST on main now ingests both languages to Mykronos |
 | POAM-013 | Monthly monitoring cadence approximated by a weekly trigger | CA-7 | Low | Todd Benson | 2026-11-11 | Open — accepted, detection is loud |
-| POAM-014 | **The merge gate verifies process, not code.** Tests and scans run in Concourse *after* merge (re-scoped 2026-08-14 from "no merge gate exists") | CM-3, CM-5, AC-5, SA-11 | **High** | Todd Benson | ~~2026-09-14~~ **2026-11-21** (extended once, 2026-10-22) | Open — measured 2026-10-22: `Concourse / keel` lands on `main` commits only and no check is required. PR heads do run `Unit results`, `Mykronos sast` and `Mykronos secrets` on Actions, none required. Closes when the check arrives on PR heads and is required (TheHub #60580) |
+| POAM-014 | **The merge gate verifies process, not code.** Tests and scans run in Concourse *after* merge (re-scoped 2026-08-14 from "no merge gate exists") | CM-3, CM-5, AC-5, SA-11 | **High** | Todd Benson | ~~2026-09-14~~ **2026-11-21** (extended once, 2026-10-22) | Open — **the gate is now MyKronos `independent-review`** (TheHub #60978, 2026-11-04): posted on every PR head by the MyKronos App, App-pinned. `scripts/configure-github.sh --review-app-id` declares it; **not yet applied** (measured 2026-11-04: no check required, `enforce_admins` off). `Concourse / keel` stays unrequired: it lands on `main` commits only. Closes when `independent-review` is required, pinned, and a PR is observed blocked by it and then merged on an approval |
 | POAM-015 | Manifest coverage was checked per top-level directory, so six platform docs were never delivered to forks | CM-2, SA-10 | Medium | Todd Benson | 2026-08-14 | **Closed** — check now per file; six docs classified; both directions proven (#58) |
 | POAM-018 | **14 controls were marked satisfied on gates that have never run.** Five of six gates have produced zero evidence records; keel runs a one-gate lifecycle while documenting a six-gate one | SA-3, CA-2, CM-3, AC-3, AU-2, CP-10 +8 | **High** | Todd Benson | 2026-11-15 | Open — claims downgraded and measured. **A committed record proves a record exists, not that the gate ran**: the writer trusts the agent's judgement of each item (POAM-017). Records today: G1 1 (`evidence/hub-60981/g1/ready.md`, `verdict: fail`, 2026-10-23, TheHub #60981) · G3 16. G0, G2, G4 and G5 have no record. G5 counts only a record that cites a release run or an attestation |
 | POAM-017 | **Separation of duties is now agent-enforced, not human-enforced.** `delivery-lead` approves every gate; the control is a prompt boundary and a tool grant rather than a second person | AC-5, CM-5, SA-3 | **High** | Todd Benson | 2026-11-15 | Open — accepted by the system owner (ADR-0005) |
@@ -203,6 +203,43 @@ approvals by `compliance-officer` against the evidence actually cited. None is i
 **This is the second control accepted rather than solved** for unattended solo operation, after
 POAM-008. They compound: POAM-008's compensating control is a self-review artifact that
 `delivery-lead` now checks — so one agent-enforced control is verified by another.
+
+### 2026-11-04 — POAM-014: the merge gate is `independent-review` (TheHub #60978)
+
+**What changed.** The required check is MyKronos `independent-review`, not `Concourse / keel`.
+Decision #60849 (option C) chose a MyKronos-posted check run as the gate; #60580 then closed
+without any check being required, because `Concourse / keel` lands on `main` commits only and
+cannot be required without blocking every pull request. `independent-review` is the check
+that does arrive on a pull request's head. MyKronos posts it through its own GitHub App, on
+the head sha, and `request_missing()` opens the approval request for every open PR head on a
+repository whose default branch requires it. MyKronos's own `main` has run on it since
+2026-10-21. Approval pins the head sha, so a new push needs a new approval.
+
+**Measured 2026-11-04**, before this change: `main` requires no status checks,
+`enforce_admins` is off, one approving review. On the heads of #159, #161 and #162 the
+MyKronos App (`mykronos-platform`) posts `library-allowlist` and `Mykronos / risk decision`,
+so it is installed and reaches keel. It posts no `independent-review`, which is expected:
+it does so only where the check is required.
+
+**What this change does.** `scripts/configure-github.sh` step 5 requires
+`independent-review` pinned to the App id given by `--review-app-id` (or
+`KEEL_REVIEW_APP_ID`), with `strict` off. It refuses the GitHub Actions app, because any
+workflow job can post a check run with that name. It refuses an App that has not posted a
+check run on this repository (L0010), and it verifies the pin as well as the name.
+`--checks-only` applies the gate and changes nothing else. Two defects went with it.
+Step 5 required twelve Actions job names from workflows reduced to `workflow_dispatch`, so a
+run as written would have blocked every merge. And step 4 preserved bare `contexts`, so a
+re-run would have dropped the App pin (L0013 again, in a newer field).
+
+**POAM-014 does not close.** Nothing is applied until the operator runs the script, and an
+unapplied control is a documented intention. Milestones: (1) this change merges; (2) the
+operator runs `bash scripts/configure-github.sh --checks-only --review-app-id 4551328`;
+(3) a PR is observed blocked on `independent-review` until approved, then merging. Closing
+needs (3). Two residuals stay recorded here. With `enforce_admins` off, an admin merge
+bypasses the check. The agents' GitHub identity is the owner's account, so `enforce_admins`
+must be on for this to bind anyone. That is a separate operator decision (`--solo` sets it).
+And a check about approval still is not a check about the code: tests and scans still run
+after the merge in Concourse.
 
 ### 2026-10-22 — the three overdue entries, re-measured (TheHub #60935)
 
