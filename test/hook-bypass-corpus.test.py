@@ -31,6 +31,17 @@ and `\\n` reach the rules as two characters. Every entry runs in both modes:
          tools the hooks call; if symlinks cannot be made the mode is SKIPPED and
          says so.
 
+Two tools
+---------
+Claude Code runs a shell command through its Bash tool and, on Windows hosts, its
+PowerShell tool, and both send the command as tool_input.command. A guard bound to
+Bash alone is bypassed by sending the same command to PowerShell (TheHub #61064).
+So every guard-bash.sh entry runs once per tool in BASH_TOOLS (an entry may pin one
+with `tool:`), and before anything runs, .claude/settings.json is read and the
+PreToolUse matcher that runs guard-bash.sh must cover every one of those tools: a hook
+the harness never calls blocks nothing, whatever this runner sees when it calls the
+hook itself.
+
 Verdicts
 --------
   enforced entry, blocked          ok
@@ -73,6 +84,9 @@ JQ_FILTERS = {
 MODES = ("jq", "no-jq")
 HOOK_NAMES = ("guard-bash.sh", "guard-write.sh")
 WRITE_TOOLS = ("Write", "Edit", "MultiEdit", "NotebookEdit")
+# The tools that send a shell command to guard-bash.sh (TheHub #61064).
+BASH_TOOLS = ("Bash", "PowerShell")
+SETTINGS = ROOT / ".claude" / "settings.json"
 # Tools the hooks invoke. The no-jq shim directory links exactly these.
 HOOK_TOOLS = ("bash", "sh", "cat", "grep", "sed", "tr", "head", "mktemp", "rm", "awk",
               "python3", "python", "env")
@@ -127,6 +141,8 @@ def load_corpus() -> tuple[list[dict], list[str]]:
             if not e.get("gap"):
                 errors.append(f"{where}: an open entry needs gap: (why the hook misses it)")
         if e.get("hook") == "guard-bash.sh":
+            if e.get("tool", "Bash") not in BASH_TOOLS:
+                errors.append(f"{where}: tool must be one of {BASH_TOOLS}")
             if not isinstance(e.get("command"), str) and not isinstance(e.get("command_parts"), list):
                 errors.append(f"{where}: guard-bash.sh entries need command or command_parts")
         elif e.get("hook") == "guard-write.sh":
@@ -142,6 +158,51 @@ def load_corpus() -> tuple[list[dict], list[str]]:
     return entries, errors
 
 
+def matcher_covers(matcher: str, tool: str) -> bool:
+    """Whether a PreToolUse matcher selects this tool, as Claude Code reads it: a plain
+    name list (letters, digits, _ and |) is an exact match on one of the names, and
+    anything else is a regular expression. An empty matcher or "*" selects every tool."""
+    import re
+
+    if matcher in ("", "*"):
+        return True
+    if re.fullmatch(r"[A-Za-z0-9_|]+", matcher):
+        return tool in matcher.split("|")
+    try:
+        return re.search(matcher, tool) is not None
+    except re.error:
+        return False
+
+
+def binding_errors() -> list[str]:
+    """guard-bash.sh must be bound to every tool in BASH_TOOLS (TheHub #61064)."""
+    try:
+        settings = json.loads(SETTINGS.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        return [f"{SETTINGS.name}: cannot read it ({exc})"]
+    bound: list[str] = []
+    for group in (settings.get("hooks") or {}).get("PreToolUse") or []:
+        if any("guard-bash.sh" in (h.get("command") or "") for h in group.get("hooks") or []):
+            bound.append(group.get("matcher", ""))
+    if not bound:
+        return [f"{SETTINGS.name}: no PreToolUse hook runs guard-bash.sh"]
+    return [f"{SETTINGS.name}: guard-bash.sh is not bound to the {tool} tool "
+            f"(matchers: {bound!r}); a {tool} command reaches no rule"
+            for tool in BASH_TOOLS if not any(matcher_covers(m, tool) for m in bound)]
+
+
+def runs(entries: list[dict]) -> list[tuple[dict, str]]:
+    """(entry, tool) pairs: a guard-bash.sh entry once per tool unless it names one."""
+    out: list[tuple[dict, str]] = []
+    for e in entries:
+        if e["hook"] == "guard-bash.sh":
+            tools = (e["tool"],) if "tool" in e else BASH_TOOLS
+        else:
+            tools = (e.get("tool", "Write"),)
+        out.extend((e, t) for t in tools)
+    return out
+
+
 def joined(e: dict, key: str) -> str:
     # *_parts lets credential-shaped fixtures live in this repository without the
     # literal ever being contiguous, so neither guard-write.sh nor gitleaks trips on
@@ -151,7 +212,7 @@ def joined(e: dict, key: str) -> str:
     return e.get(key, "")
 
 
-def payload(e: dict) -> bytes:
+def payload(e: dict, tool: str) -> bytes:
     base = {
         "session_id": "hook-bypass-corpus",
         "transcript_path": "/dev/null",
@@ -160,11 +221,10 @@ def payload(e: dict) -> bytes:
         "hook_event_name": "PreToolUse",
     }
     if e["hook"] == "guard-bash.sh":
-        base["tool_name"] = "Bash"
+        base["tool_name"] = tool
         base["tool_input"] = {"command": joined(e, "command"),
                               "description": "bypass corpus entry"}
     else:
-        tool = e.get("tool", "Write")
         content = joined(e, "content")
         base["tool_name"] = tool
         if tool == "Write":
@@ -216,9 +276,9 @@ def make_env(mode: str, tmp: Path) -> dict | None:
     return env
 
 
-def run_one(e: dict, env: dict, bash: str) -> tuple[int, str]:
+def run_one(e: dict, tool: str, env: dict, bash: str) -> tuple[int, str]:
     try:
-        r = subprocess.run([bash, str(HOOKS / e["hook"])], input=payload(e),
+        r = subprocess.run([bash, str(HOOKS / e["hook"])], input=payload(e, tool),
                            capture_output=True, cwd=ROOT, env=env, timeout=60)
     except subprocess.TimeoutExpired:
         # Claude Code would time the hook out and run the call.
@@ -240,6 +300,13 @@ def main() -> int:
             print(f"  [FAIL] {err}")
         return 1
 
+    bound = binding_errors()
+    if bound:
+        print("The guard hooks are not bound to every tool the corpus runs them for:")
+        for err in bound:
+            print(f"  [FAIL] {err}")
+        return 1
+
     bash = shutil.which("bash")
     if not bash:
         print("  [FAIL] bash not found -- the hooks cannot be exercised, which is not a pass")
@@ -255,25 +322,26 @@ def main() -> int:
                 continue
             jq_kind = ("real jq" if shutil.which("jq") else "jq shim") if mode == "jq" else "sed/python fallback"
             print(f"\n-- mode: {mode} ({jq_kind}) " + "-" * max(0, 50 - len(mode) - len(jq_kind)))
+            todo = runs(entries)
             with ThreadPoolExecutor(max_workers=8) as pool:
-                results = list(pool.map(lambda e: run_one(e, env, bash), entries))
-            for e, (rc, err) in zip(entries, results):
+                results = list(pool.map(lambda r: run_one(r[0], r[1], env, bash), todo))
+            for (e, tool), (rc, err) in zip(todo, results):
                 ran += 1
                 blocked = rc == 2
                 is_open = mode in (e.get("open_in") or [])
-                tag = f"{e['id']:<8} {e['class']:<22}"
+                tag = f"{e['id']:<8} {tool:<10} {e['class']:<22}"
                 if blocked and not is_open:
                     print(f"  [ok]   {tag} blocked")
                 elif not blocked and is_open:
                     print(f"  [OPEN] {tag} allowed (known gap: {e['gap']})")
-                    opened.append(f"{mode}:{e['id']}")
+                    opened.append(f"{mode}:{tool}:{e['id']}")
                 elif not blocked:
                     print(f"  [FAIL] {tag} ALLOWED (exit {rc}) -- {e['why']}")
-                    failures.append(f"{mode}:{e['id']}")
+                    failures.append(f"{mode}:{tool}:{e['id']}")
                 else:
                     print(f"  [FAIL] {tag} blocked, but the corpus records it as an open gap"
                           f" in {mode} -- remove '{mode}' from open_in so it stays closed")
-                    failures.append(f"{mode}:{e['id']}")
+                    failures.append(f"{mode}:{tool}:{e['id']}")
                 if verbose and err.strip():
                     print("         " + err.strip().splitlines()[0])
 
