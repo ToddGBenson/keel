@@ -1,0 +1,24 @@
+# Declared branch protection for test/protection-drift.test.py. Refs: TheHub #60979
+#
+# A fixture, not a repository's declaration: it matches
+# test/fixtures/protection-live-match.json (keel's main, recorded 2026-11-04),
+# so the test does not depend on what any one repository's .sdlc/protection.yaml
+# says. The real declaration is .sdlc/protection.yaml.
+version: 1
+branch: main
+fields:
+  enforce_admins:
+    value: false
+    reason: TheHub #60849 option C, fixture copy
+  required_approving_review_count:
+    value: 1
+  required_signatures:
+    value: false
+    reason: TheHub #60979, fixture copy
+  required_linear_history:
+    value: true
+  allow_force_pushes:
+    value: false
+  required_status_checks:
+    value: []
+    reason: TheHub #60849 option C, fixture copy
