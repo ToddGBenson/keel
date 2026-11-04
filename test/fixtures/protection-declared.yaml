@@ -9,16 +9,16 @@ branch: main
 fields:
   enforce_admins:
     value: false
-    reason: TheHub #60849 option C, fixture copy
+    reason: "TheHub #60849 option C, fixture copy"
   required_approving_review_count:
     value: 1
   required_signatures:
     value: false
-    reason: TheHub #60979, fixture copy
+    reason: "TheHub #60979, fixture copy"
   required_linear_history:
     value: true
   allow_force_pushes:
     value: false
   required_status_checks:
     value: []
-    reason: TheHub #60849 option C, fixture copy
+    reason: "TheHub #60849 option C, fixture copy"
