@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# PreToolUse hook for Bash — enforces the agent constraints that must not depend on a
+# PreToolUse hook for Bash and PowerShell (TheHub #61064) — enforces the agent constraints that must not depend on a
 # model choosing to comply. (AIC-3 least agency, AIC-5 secrets, AIC-11 bounded autonomy)
 #
 # Per docs/11-ai-agent-controls.md § Enforcement summary: prompt-only controls are
@@ -196,6 +196,56 @@ END {
 AWK
 word_cmd="$(printf '%s' "$masked_cmd" | LC_ALL=C awk "$dequote_awk" 2>/dev/null | normalize)" || word_cmd="$masked_cmd"
 raw_cmd="$cmd"
+
+# TheHub #61064: the PowerShell tool. Claude Code sends a PowerShell command to this
+# hook as tool_input.command, just as it sends a Bash one, and settings.json binds this
+# hook to both tools. PowerShell reads the same text differently, so a third view is
+# built from the command the way PowerShell passes its words:
+#   - the escape character is the backtick, not the backslash: g`h is gh, --f`orce is
+#     --force, and a backtick at the end of a line continues the command;
+#   - '' inside '...' and "" (or `") inside "..." are a literal quote, and a | ; & or
+#     newline inside either is text, as the masked view treats them;
+#   - { and } (a script block, &{gh pr merge 1}) and , (an argument list,
+#     'pr','merge') separate words;
+#   - Start-Process gh -ArgumentList ... runs gh with those arguments, so the cmdlet and
+#     its -FilePath / -ArgumentList names are dropped and what is left is the gh call.
+# The view only ever adds a reading: a rule that blocks on any view blocks the call,
+# whichever tool sent it.
+read -r -d '' ps_awk <<'AWK'
+{ s = (NR > 1) ? s "\n" $0 : $0 }
+END {
+  n = length(s); q = ""; out = ""; dp = 0; i = 1
+  while (i <= n) {
+    c = substr(s, i, 1)
+    if (q != "'" && c == "`") {
+      d = substr(s, i + 1, 1)
+      if (d == "\r" && substr(s, i + 2, 1) == "\n") { out = out " "; i += 3; continue }
+      out = out ((d == "\n" || d == "|" || d == ";" || d == "&") ? " " : d)
+      i += 2; continue
+    }
+    if ((q == "" || q == "\"") && c == "$" && substr(s, i + 1, 1) == "(") {
+      sv[++dp] = q; pc[dp] = 1; q = ""; out = out "$("; i += 2; continue
+    }
+    if (q == "") {
+      if (dp > 0 && c == "(") pc[dp]++
+      if (dp > 0 && c == ")" && --pc[dp] == 0) { q = sv[dp--]; out = out c; i++; continue }
+      if (c == "'" || c == "\"") { q = c; out = out " "; i++; continue }
+      if (c == "{" || c == "}" || c == ",") c = " "
+      out = out c; i++; continue
+    }
+    if (c == q) {
+      if (substr(s, i + 1, 1) == q) { out = out q; i += 2; continue }
+      q = ""; out = out " "; i++; continue
+    }
+    if (c == "|" || c == ";" || c == "&" || c == "\n") c = " "
+    out = out c; i++
+  }
+  printf "%s", out
+}
+AWK
+ps_sed=(-e 's#(^|[[:space:](])([Ss][Tt][Aa][Rr][Tt]-[Pp][Rr][Oo][Cc][Ee][Ss][Ss]|[Ss][Aa][Pp][Ss]|[Ss][Tt][Aa][Rr][Tt])([[:space:]]+-[Ff][A-Za-z]*)?[[:space:]]+#\1#g'
+        -e 's#[[:space:]]-[Aa][Rr][Gg][A-Za-z]*([[:space:]]|$)# #g')
+ps_cmd="$(printf '%s' "$raw_cmd" | LC_ALL=C awk "$ps_awk" 2>/dev/null | sed -E "${ps_sed[@]}" | normalize)" || ps_cmd="$raw_cmd"
 
 block() {
   echo "BLOCKED by .claude/hooks/guard-bash.sh — $1" >&2
@@ -421,6 +471,37 @@ cat_files() { # stdin: command text -> the files that $(cat FILE) / $(< FILE) re
   grep -oE '\$\((cat[[:space:]]+(--[[:space:]]+)?|<[[:space:]]*)[^)[:space:]`"'"'"'|;&]+\)' \
     | sed -E 's/^\$\((cat[[:space:]]+(--[[:space:]]+)?|<[[:space:]]*)//; s/\)$//'
 }
+# The mutations every GraphQL route refuses: gh api graphql, and (TheHub #61064) a
+# document sent with curl or a PowerShell web cmdlet. $1 is the document text.
+gql_judge() {
+  local gql="$1"
+  printf '%s' "$gql" | grep -qE '(^|[^A-Za-z0-9_])mutation([^A-Za-z0-9_]|$)' || return 0
+  m() { printf '%s' "$gql" | grep -qE '(^|[^A-Za-z0-9_])('"$1"')([^A-Za-z0-9_]|$)'; }
+  m 'mergePullRequest|enablePullRequestAutoMerge|mergeBranch' \
+    && block "merging through a GraphQL mutation. Merge happens after independent review, via GitHub." "AC-5, CM-5, AIC-2"
+  m 'addPullRequestReview|submitPullRequestReview|dismissPullRequestReview' \
+    && block "reviewing a PR through a GraphQL mutation. Agents recommend; a human or a separate identity approves. Use gh pr comment to say something." "AC-5, AIC-2"
+  m '(create|update|delete)Release' \
+    && block "creating or changing a release through GraphQL. G5 requires human authorization via the Environment." "CM-3, AIC-1"
+  m '(create|update|delete)(BranchProtectionRule|RepositoryRuleset)' \
+    && block "changing branch protection or a ruleset through GraphQL. This enforces separation of duties." "AC-5, CM-5"
+  m '(create|update|delete)Environment' \
+    && block "changing a deployment environment through GraphQL. Its reviewers ARE the G5 authorization gate." "CM-3, AC-5, AIC-1"
+  m '(approve|reject)Deployments' \
+    && block "approving or rejecting an environment deployment through GraphQL. Only a human reviews a deployment; the environment's reviewers ARE the G5 authorization gate." "CM-3, AC-5, AIC-1, AIC-2"
+  # #127: moving a ref is a push. A ref id is opaque -- it may be main -- so any
+  # GraphQL ref move is refused; a commit is refused when main appears anywhere in
+  # the call (inline, or as a variable: -f b=main) or its branch is named only by
+  # id. Quotes may still be JSON-escaped here, so main is matched as a word, not
+  # as "main". Push a feature branch with git instead.
+  m 'updateRefs?' \
+    && block "moving a ref through GraphQL. A ref id may be main; push a feature branch with git." "AC-5, CM-5"
+  if m 'createCommitOnBranch'; then
+    { printf '%s' "$gql" | grep -qE '(^|[^A-Za-z0-9_/.-])(refs/heads/)?(main|master)([^A-Za-z0-9_/.-]|$)' \
+      || ! printf '%s' "$gql" | grep -qE '(^|[^A-Za-z0-9_])branchName([^A-Za-z0-9_]|$)'; } \
+      && block "a commit to main through GraphQL (or to a branch named only by id). All change goes through a reviewed PR." "AC-5, CM-5"
+  fi
+}
 if g "$B"'gh[[:space:]]+api[[:space:]]+([^|;&]*[[:space:]])?graphql'"$E"; then
   gql="$cmd"
   # Only -F/--field reads @path; with -f/--raw-field "@q.graphql" is a literal string.
@@ -433,33 +514,7 @@ if g "$B"'gh[[:space:]]+api[[:space:]]+([^|;&]*[[:space:]])?graphql'"$E"; then
     gql="$gql
 $(cat -- "$f")"
   done
-  if printf '%s' "$gql" | grep -qE '(^|[^A-Za-z0-9_])mutation([^A-Za-z0-9_]|$)'; then
-    m() { printf '%s' "$gql" | grep -qE '(^|[^A-Za-z0-9_])('"$1"')([^A-Za-z0-9_]|$)'; }
-    m 'mergePullRequest|enablePullRequestAutoMerge|mergeBranch' \
-      && block "merging through a GraphQL mutation. Merge happens after independent review, via GitHub." "AC-5, CM-5, AIC-2"
-    m 'addPullRequestReview|submitPullRequestReview|dismissPullRequestReview' \
-      && block "reviewing a PR through a GraphQL mutation. Agents recommend; a human or a separate identity approves. Use gh pr comment to say something." "AC-5, AIC-2"
-    m '(create|update|delete)Release' \
-      && block "creating or changing a release through GraphQL. G5 requires human authorization via the Environment." "CM-3, AIC-1"
-    m '(create|update|delete)(BranchProtectionRule|RepositoryRuleset)' \
-      && block "changing branch protection or a ruleset through GraphQL. This enforces separation of duties." "AC-5, CM-5"
-    m '(create|update|delete)Environment' \
-      && block "changing a deployment environment through GraphQL. Its reviewers ARE the G5 authorization gate." "CM-3, AC-5, AIC-1"
-    m '(approve|reject)Deployments' \
-      && block "approving or rejecting an environment deployment through GraphQL. Only a human reviews a deployment; the environment's reviewers ARE the G5 authorization gate." "CM-3, AC-5, AIC-1, AIC-2"
-    # #127: moving a ref is a push. A ref id is opaque -- it may be main -- so any
-    # GraphQL ref move is refused; a commit is refused when main appears anywhere in
-    # the call (inline, or as a variable: -f b=main) or its branch is named only by
-    # id. Quotes may still be JSON-escaped here, so main is matched as a word, not
-    # as "main". Push a feature branch with git instead.
-    m 'updateRefs?' \
-      && block "moving a ref through GraphQL. A ref id may be main; push a feature branch with git." "AC-5, CM-5"
-    if m 'createCommitOnBranch'; then
-      { printf '%s' "$gql" | grep -qE '(^|[^A-Za-z0-9_/.-])(refs/heads/)?(main|master)([^A-Za-z0-9_/.-]|$)' \
-        || ! printf '%s' "$gql" | grep -qE '(^|[^A-Za-z0-9_])branchName([^A-Za-z0-9_]|$)'; } \
-        && block "a commit to main through GraphQL (or to a branch named only by id). All change goes through a reviewed PR." "AC-5, CM-5"
-    fi
-  fi
+  gql_judge "$gql"
 fi
 
 # TheHub #61038: curl reaches the same endpoints as gh api, with the token from
@@ -470,52 +525,100 @@ fi
 # of pending_deployments lists what is waiting and stays allowed. A config file
 # (-K/--config) can carry the method and the body, so to these endpoints it counts
 # as a body.
-if g "$B"'curl([[:space:]]|$)'; then
-  curl_segs=$(printf '%s' "$cmd" | tr '|;&' '\n' | grep -E "$B"'curl[[:space:]]')
+#
+# TheHub #61064: PowerShell's web cmdlets are the same request. Invoke-RestMethod,
+# Invoke-WebRequest and their aliases irm and iwr are read exactly as curl is, by
+# endpoint, with their own method parameter: -Method or pwsh 7's -CustomMethod, in any
+# case, abbreviated to any prefix PowerShell accepts (-Me), as -Method VALUE or
+# -Method:VALUE. With no method a cmdlet sends GET, body or not. A method that is a
+# variable or an expression, or a splatted hashtable (@p) that can carry one, cannot be
+# read here, so to these endpoints it counts as a write. (Windows PowerShell 5.1 also
+# aliases curl to Invoke-WebRequest; a curl line is judged by both readings.)
+#
+# And curl or a cmdlet that writes to any endpoint a gh api rule above protects --
+# merge, review, release, branch protection, rulesets, secrets, environments, a ref
+# or contents commit or merge on main -- is refused here too. Under the Bash tool,
+# settings.json's Bash(curl:*) deny rule stood in front of curl; nothing stands in front
+# of the PowerShell tool, so the hook carries it. A raw HTTP client cannot name a
+# branch the way -f branch= does for gh api, so its contents and merges writes are
+# refused outright: use gh api, where the branch can be read.
+PS_HTTP='(invoke-restmethod|invoke-webrequest|irm|iwr)'
+HTTP_GH='/pulls/[^/[:space:]]+/(merge|reviews)([^A-Za-z0-9_-]|$)|/releases([^A-Za-z0-9_-]|$)|/branches/[^[:space:]]*/protection|/rulesets([^A-Za-z0-9_-]|$)|/(actions|codespaces|dependabot)/secrets|/environments([^A-Za-z0-9_-]|$)|/git/refs/heads/(main|master)([^A-Za-z0-9_/.-]|$)|/contents/|/merges([^A-Za-z0-9_-]|$)'
+
+http_write() { # $1: one curl or web-cmdlet invocation -> true if it is a write
+  local seg="$1" ms
+  # Second review: curl, like gh, sends the LAST -X it is given (curl -XGET -XPOST
+  # is a POST). So a call is a write if ANY method on it is not GET or HEAD, or if
+  # it is curl, carries a body and gives no -X and no -G.
+  local curl_m='(-[a-zA-Z]*X[[:space:]]*|--request[[:space:]=]+)[\"'"'"']*'
+  local ps_m='(^|[[:space:]])-([Mm][Ee][A-Za-z]*|[Cc][Uu][A-Za-z]*)([[:space:]]*:[[:space:]]*|[[:space:]]+)[\"'"'"']*'
+  printf '%s' "$seg" | grep -qiE "$B$PS_HTTP"'([[:space:]]|$)' \
+    && printf '%s' "$seg" | grep -qE '(^|[[:space:]])@[A-Za-z_]' && return 0
+  ms=$(printf '%s' "$seg" | grep -oE "$curl_m"'[$(A-Za-z][A-Za-z]*' | sed -E "s/^$curl_m//"
+       printf '%s' "$seg" | grep -oE "$ps_m"'[$(A-Za-z][A-Za-z]*' | sed -E "s/^$ps_m//")
+  if [ -n "$ms" ]; then
+    printf '%s\n' "$ms" | grep -qvxE '[Gg][Ee][Tt]|[Hh][Ee][Aa][Dd]'
+    return
+  fi
+  printf '%s' "$seg" | grep -qiE "$B"'curl([[:space:]]|$)' || return 1
+  printf '%s' "$seg" | grep -qE '[[:space:]](-[a-zA-Z]*[dFTK]|--data|--json|--form|--upload-file|--config)' || return 1
+  printf '%s' "$seg" | grep -qE '[[:space:]](-[a-zA-Z]*G|--get)([[:space:]]|$)' && return 1
+  return 0
+}
+
+if g "$B"'curl([[:space:]]|$)' || printf '%s' "$cmd" | grep -qiE "$B$PS_HTTP"'([[:space:]]|$)'; then
+  curl_segs=$(printf '%s' "$cmd" | tr '|;&' '\n' | grep -iE "$B"'(curl|'"$PS_HTTP"')([[:space:]]|$)')
   # TheHub #61038 review: a GraphQL document sent from a file (-d @file, --data-binary
   # @file, --json @file, -T file, -K config) is read, or refused when it cannot be --
-  # stdin, a missing file -- exactly as the gh api graphql rule does.
+  # stdin, a missing file -- exactly as the gh api graphql rule does. TheHub #61064:
+  # and a cmdlet's -InFile file, or a -Body read with (Get-Content FILE) / (gc FILE).
   curl_text="$curl_segs"
   curl_gql=$(printf '%s\n' "$curl_segs" | grep -E '/graphql([^A-Za-z0-9_-]|$)')
   if [ -n "$curl_gql" ]; then
     while IFS= read -r f; do
       [ -n "$f" ] || continue
       if [ "$f" = "-" ] || [ ! -r "$f" ]; then
-        block "a GraphQL document sent with curl that this hook cannot read ($f). Pass it inline with -d '{\"query\":\"...\"}'." "CM-3, AC-5, AIC-1, AIC-2"
+        block "a GraphQL document sent with curl or a PowerShell web cmdlet that this hook cannot read ($f). Pass it inline with -d '{\"query\":\"...\"}' or -Body '...'." "CM-3, AC-5, AIC-1, AIC-2"
       fi
       curl_text="$curl_text
 $(cat -- "$f")"
     done < <(printf '%s\n' "$curl_gql" \
       | grep -oE '(^|[[:space:]])((-[a-zA-Z]*d[[:space:]]*|--(data|data-ascii|data-binary|json)[[:space:]]+)["'"'"']?@|(-[a-zA-Z]*[TK][[:space:]]*|--(upload-file|config)[[:space:]]+)["'"'"']?)[^[:space:]"'"'"'`)]+' \
       | sed -E 's/^[[:space:]]*(-[a-zA-Z]*[dTK][[:space:]]*|--[a-z-]+[[:space:]]+)["'"'"']?@?//'
+      printf '%s\n' "$curl_gql" \
+      | grep -oE '(^|[[:space:]])-[Ii][Nn][A-Za-z]*([[:space:]]*:[[:space:]]*|[[:space:]]+)["'"'"']?[^-[:space:]"'"'"'()|;&`][^[:space:]"'"'"'()|;&`]*|\(([Gg][Cc]|[Gg]et-[Cc]ontent|cat|type)([[:space:]]+-[A-Za-z]+)*[[:space:]]+["'"'"']?[^-[:space:]"'"'"'()|;&`][^[:space:]"'"'"'()|;&`]*' \
+      | sed -E 's/.*[[:space:]"'"'"']//; s/^-[A-Za-z]+://'
       printf '%s\n' "$curl_gql" | cat_files)
   fi
   printf '%s' "$curl_text" | grep -qE '(^|[^A-Za-z0-9_])(approve|reject)Deployments([^A-Za-z0-9_]|$)' \
     && block "approving or rejecting an environment deployment through GraphQL over curl. Only a human reviews a deployment; the environment's reviewers ARE the G5 authorization gate." "CM-3, AC-5, AIC-1, AIC-2"
+  # TheHub #61064: every other mutation the gh api graphql rule refuses.
+  [ -n "$curl_gql" ] && gql_judge "$curl_text"
   # Second review: curl rewrites the URL before sending it. It removes dot segments
   # (runs/1/x/../pending_deployments is runs/1/pending_deployments) and expands {} and
   # [] globs (pending_deployment{s}). So dot segments are removed first, and a glob
   # anywhere after a run id counts as these endpoints. (-g and --path-as-is turn the
   # rewriting off; matching as if they were absent can only add a block.)
-  curl_dr=$(printf '%s\n' "$curl_segs" | sed -E ':a
+  curl_res=$(printf '%s\n' "$curl_segs" | sed -E ':a
 s#/\./#/#g
 s#/[^/[:space:]]+/\.\./#/#
-ta' | grep -E "$DEPLOY_REVIEW"'|/actions/runs/[^|;&/[:space:]]+/[^[:space:]]*[][{}]')
+ta')
+  curl_dr=$(printf '%s\n' "$curl_res" | grep -E "$DEPLOY_REVIEW"'|/actions/runs/[^|;&/[:space:]]+/[^[:space:]]*[][{}]')
+  # TheHub #61064: the endpoint named anywhere in the command ($u = '...'; irm -Method
+  # Post $u), as the gh api rule reads it.
+  g "$DEPLOY_REVIEW" && curl_dr="$curl_segs"
   if [ -n "$curl_dr" ]; then
-    # Second review: curl, like gh, sends the LAST -X it is given (curl -XGET -XPOST
-    # is a POST). So a call is a write if ANY -X/--request on it is not GET or HEAD,
-    # or if it carries a body and gives no -X and no -G.
-    curl_m='(-[a-zA-Z]*X[[:space:]]*|--request[[:space:]=]+)[\"'"'"']*'
     while IFS= read -r seg; do
-      ms=$(printf '%s' "$seg" | grep -oE "$curl_m"'[A-Za-z]+' | sed -E "s/^$curl_m//")
-      if [ -n "$ms" ]; then
-        printf '%s\n' "$ms" | grep -qvxE '[Gg][Ee][Tt]|[Hh][Ee][Aa][Dd]' || continue
-      else
-        printf '%s' "$seg" | grep -qE '[[:space:]](-[a-zA-Z]*[dFTK]|--data|--json|--form|--upload-file|--config)' || continue
-        printf '%s' "$seg" | grep -qE '[[:space:]](-[a-zA-Z]*G|--get)([[:space:]]|$)' && continue
-      fi
-      block "approving or rejecting an environment deployment through curl. Only a human reviews a deployment; the environment's reviewers ARE the G5 authorization gate." "CM-3, AC-5, AIC-1, AIC-2"
+      http_write "$seg" || continue
+      block "approving or rejecting an environment deployment through curl or a PowerShell web cmdlet. Only a human reviews a deployment; the environment's reviewers ARE the G5 authorization gate." "CM-3, AC-5, AIC-1, AIC-2"
     done <<< "$curl_dr"
+  fi
+  curl_gh=$(printf '%s\n' "$curl_res" | grep -E "$HTTP_GH")
+  if [ -n "$curl_gh" ]; then
+    while IFS= read -r seg; do
+      http_write "$seg" || continue
+      block "a write with curl or a PowerShell web cmdlet to an endpoint the gh rules protect (merge, review, release, branch protection, rulesets, secrets, environments, a commit or ref on main). Agents recommend; a human merges, approves and releases, and change reaches main through a reviewed PR." "AC-5, CM-3, CM-5, AIC-1, AIC-2"
+    done <<< "$curl_gh"
   fi
 fi
 
@@ -560,5 +663,6 @@ esac
 
 cmd="$raw_cmd"; guard
 if [ "$word_cmd" != "$raw_cmd" ]; then cmd="$word_cmd"; guard; fi
+if [ "$ps_cmd" != "$raw_cmd" ] && [ "$ps_cmd" != "$word_cmd" ]; then cmd="$ps_cmd"; guard; fi
 
 exit 0
