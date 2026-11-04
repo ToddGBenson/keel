@@ -4,19 +4,18 @@
 #   bash scripts/configure-github.sh              # interactive
 #   bash scripts/configure-github.sh --yes        # no prompts
 #   bash scripts/configure-github.sh --dry-run    # show what would change
-#   bash scripts/configure-github.sh --review-app-id <id>   # also require independent-review
-#   bash scripts/configure-github.sh --checks-only --review-app-id <id>
-#                                                 # the merge gate only; nothing else changes
+#   bash scripts/configure-github.sh --review-app-id <id|none>   # another App, or no gate
+#   bash scripts/configure-github.sh --checks-only  # the merge gate only; nothing else changes
 #
 # ── THE MERGE GATE (TheHub #60978) ───────────────────────────────────────────
 # The required check is `independent-review`, posted on each pull request head by the
 # MyKronos GitHub App, and PINNED to that App's id. MyKronos opens the approval request
 # for a PR head itself, but only on a repository whose default branch already requires
-# the check, so declaring it here is what switches it on. The App id comes from
-# --review-app-id or KEEL_REVIEW_APP_ID. Without one (a fork with no MyKronos) nothing is
-# required and the script says so. With one, the check is required only once that App
-# has been seen posting a check run on this repository: an App that cannot post here
-# would block every pull request (L0010).
+# the check, so declaring it here is what switches it on. The App id is the documented
+# MyKronos App (REVIEW_APP_ID_DEFAULT below), or --review-app-id / KEEL_REVIEW_APP_ID.
+# `none` (a fork with no MyKronos) requires nothing and the script says so. The check is
+# required only once that App has been seen posting a check run on this repository: an
+# App that cannot post here would block every pull request (L0010).
 #
 # ── WHY THIS SCRIPT EXISTS ───────────────────────────────────────────────────
 # Everything in the repo is files. The controls that actually ENFORCE separation of duties
@@ -32,7 +31,10 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 DRY=0; YES=0; MODE="team"; CHECKS_ONLY=0
-REVIEW_APP_ID="${KEEL_REVIEW_APP_ID:-}"
+# The MyKronos GitHub App (`mykronos-platform`): the app.id on every check run it posts
+# here, e.g. library-allowlist. Documented in ci/README.md and SETUP.md section 2.
+REVIEW_APP_ID_DEFAULT=4551328
+REVIEW_APP_ID="${KEEL_REVIEW_APP_ID:-$REVIEW_APP_ID_DEFAULT}"
 while [ $# -gt 0 ]; do
   case "$1" in
     --dry-run) DRY=1; shift ;;
@@ -47,8 +49,9 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+[ "$REVIEW_APP_ID" = "none" ] && REVIEW_APP_ID=""
 case "$REVIEW_APP_ID" in
-  ''|*[!0-9]*) [ -z "$REVIEW_APP_ID" ] || { echo "--review-app-id must be a number: $REVIEW_APP_ID" >&2; exit 1; } ;;
+  ''|*[!0-9]*) [ -z "$REVIEW_APP_ID" ] || { echo "--review-app-id must be a number or none: $REVIEW_APP_ID" >&2; exit 1; } ;;
 esac
 
 # Required approving reviews. GitHub forbids approving your own PR, so with 1 required a
@@ -184,8 +187,69 @@ while i < len(text):
 REVIEW_CHECK="independent-review"
 ACTIONS_APP_ID=15368
 
+# The protection read back from the API, re-shaped as a PUT payload with the required
+# checks replaced by $1. GET returns `{"enabled": bool}` objects and user/team/app
+# objects; PUT takes bools and logins/slugs. Every setting is carried over unchanged, so
+# the PUT moves the required checks and nothing else.
+put_from_current() {
+  local raw
+  raw="$(gh api "repos/$REPO/branches/$BRANCH/protection" 2>/dev/null)" || return 1
+  printf '%s' "$raw" | "$PYBIN" -c '
+import json, sys
+g = json.load(sys.stdin)
+if not isinstance(g, dict) or "message" in g:
+    sys.exit(1)
+def on(k):
+    v = g.get(k)
+    return bool(v.get("enabled")) if isinstance(v, dict) else bool(v)
+def who(d):
+    if not d:
+        return None
+    return {"users": [u["login"] for u in d.get("users") or []],
+            "teams": [t["slug"] for t in d.get("teams") or []],
+            "apps": [a["slug"] for a in d.get("apps") or []]}
+out = {"required_status_checks": json.loads(sys.argv[1]),
+       "enforce_admins": on("enforce_admins"),
+       "restrictions": who(g.get("restrictions"))}
+r = g.get("required_pull_request_reviews")
+if r:
+    rr = {k: r[k] for k in ("dismiss_stale_reviews", "require_code_owner_reviews",
+                            "required_approving_review_count", "require_last_push_approval")
+          if k in r}
+    for k in ("dismissal_restrictions", "bypass_pull_request_allowances"):
+        if r.get(k):
+            rr[k] = who(r[k])
+    out["required_pull_request_reviews"] = rr
+else:
+    out["required_pull_request_reviews"] = None
+for k in ("required_linear_history", "allow_force_pushes", "allow_deletions",
+          "required_conversation_resolution", "block_creations", "lock_branch",
+          "allow_fork_syncing"):
+    if k in g:
+        out[k] = on(k)
+print(json.dumps(out))' "$1"
+}
+
 # PROT_JSON is built in step 4; --checks-only never builds it (and never PUTs it).
 PROT_JSON=""
+
+# The gate plan, decided once, before anything is written, so that step 4's payload
+# (and a dry run's printout of it) already carries the gate. GATE_PLAN is one of:
+#   none     no App id (`--review-app-id none`)
+#   actions  the App is github-actions: refused
+#   unseen   the App has not posted a check run here: refused (L0010)
+#   ok       require $REVIEW_CHECK pinned to $REVIEW_APP_ID
+SLUG=""
+if [ -z "$REVIEW_APP_ID" ]; then
+  GATE_PLAN="none"
+elif [ "$REVIEW_APP_ID" = "$ACTIONS_APP_ID" ]; then
+  GATE_PLAN="actions"
+else
+  SLUG="$(review_app_slug "$REVIEW_APP_ID")"
+  if [ "$SLUG" = "github-actions" ]; then GATE_PLAN="actions"
+  elif [ -z "$SLUG" ]; then GATE_PLAN="unseen"
+  else GATE_PLAN="ok"; fi
+fi
 
 # --checks-only skips steps 1 to 4b and 7: it changes the merge gate and nothing else.
 if [ "$CHECKS_ONLY" = "0" ]; then
@@ -287,7 +351,8 @@ if [ "$MODE" = "solo" ]; then
   info "    - quarterly external review of a random sample"
 fi
 info ""
-info "Status checks are added in step 5, after they have run at least once."
+info "Required checks: the existing ones are kept, and $REVIEW_CHECK is added (step 5"
+info "says why, if it is not)."
 confirm
 
 # DEFECT FIXED 2026-08-08: this always sent `required_status_checks: null`, so every re-run
@@ -304,6 +369,9 @@ confirm
 # independent-review, and a workflow job named independent-review would then satisfy it.
 # Keep `checks`, app ids included. Read with python: jq is not assumed (see step 6).
 EXISTING_CHECKS="$(existing_checks)"
+if [ "$GATE_PLAN" = "ok" ]; then
+  EXISTING_CHECKS="$(printf '%s' "$EXISTING_CHECKS" | with_review_check "$REVIEW_APP_ID")"
+fi
 
 PROT_JSON=$(cat <<JSON
 {
@@ -328,7 +396,11 @@ JSON
 )
 
 if [ "$DRY" = "1" ]; then
-  info "would apply branch protection (enforce_admins=true)"
+  info "would apply branch protection (enforce_admins=true), PUT with this payload:"
+  printf '%s\n' "--- protection payload ---"
+  printf '%s' "$PROT_JSON" | "$PYBIN" -c 'import json, sys; print(json.dumps(json.load(sys.stdin), indent=2))' 2>/dev/null \
+    || printf '%s\n' "$PROT_JSON"
+  printf '%s\n' "--- end payload ---"
 else
   if printf '%s' "$PROT_JSON" | gh api -X PUT "repos/$REPO/branches/$BRANCH/protection" \
        -H "Accept: application/vnd.github+json" --input - >/dev/null 2>&1; then
@@ -436,48 +508,58 @@ fi  # end of: [ "$CHECKS_ONLY" = "0" ] (steps 1 to 4b)
 # (ci/pipeline.yml), so a pull request never carries it.
 say "5. Required status checks (the merge gate)"
 RSC_PATH="repos/$REPO/branches/$BRANCH/protection/required_status_checks"
-if [ -z "$REVIEW_APP_ID" ]; then
-  warn "no --review-app-id (or KEEL_REVIEW_APP_ID): $REVIEW_CHECK is not required."
-  warn "  Nothing automated gates a merge. With MyKronos, pass its GitHub App id; the"
-  warn "  app.id of any check run it posted here (e.g. library-allowlist) is that id."
-  warn "  Existing required checks are left as they are."
-elif [ "$REVIEW_APP_ID" = "$ACTIONS_APP_ID" ]; then
-  bad "App $REVIEW_APP_ID is github-actions: any workflow can post a check named $REVIEW_CHECK. Not required."
-else
-  SLUG="$(review_app_slug "$REVIEW_APP_ID")"
-  if [ "$SLUG" = "github-actions" ]; then
-    bad "App $REVIEW_APP_ID is github-actions: any workflow can post a check named $REVIEW_CHECK. Not required."
-  elif [ -z "$SLUG" ]; then
+case "$GATE_PLAN" in
+  none)
+    if [ "$CHECKS_ONLY" = "1" ]; then
+      bad "--checks-only with --review-app-id none: there is no merge gate to apply."
+    else
+      warn "--review-app-id none: $REVIEW_CHECK is not required."
+    fi
+    warn "  Nothing automated gates a merge. With MyKronos, pass its GitHub App id; the"
+    warn "  app.id of any check run it posted here (e.g. library-allowlist) is that id."
+    warn "  Existing required checks are left as they are." ;;
+  actions)
+    bad "App $REVIEW_APP_ID is github-actions: any workflow can post a check named $REVIEW_CHECK. Not required." ;;
+  unseen)
     # L0010: never enable a control nothing can satisfy. A required check from an App
     # that cannot post here never arrives, and every pull request blocks.
     bad "App $REVIEW_APP_ID has not posted a check run on $BRANCH or an open PR head here. $REVIEW_CHECK NOT required."
     warn "  Install the App on this repository and onboard it in MyKronos, wait for one of"
     warn "  its checks on a PR, then re-run. Until then nothing automated gates a merge."
-  elif [ "$DRY" = "1" ]; then
-    info "would require $REVIEW_CHECK pinned to App $REVIEW_APP_ID ($SLUG), strict off"
-  else
-    WANT="$(existing_checks | with_review_check "$REVIEW_APP_ID")"
-    # PATCH on the sub-resource 404s when required_status_checks has never been set:
-    # the parent object does not exist yet. Then the whole protection must be PUT.
-    if printf '%s' "$WANT" | gh api -X PATCH "$RSC_PATH" \
-         -H "Accept: application/vnd.github+json" --input - >/dev/null 2>&1; then
-      info "$REVIEW_CHECK required, pinned to App $REVIEW_APP_ID ($SLUG)"
-    elif [ -n "$PROT_JSON" ] && printf '%s' "$PROT_JSON" | "$PYBIN" -c '
+    warn "  A fork without MyKronos: --review-app-id none." ;;
+  ok)
+    if [ "$DRY" = "1" ]; then
+      info "would require $REVIEW_CHECK pinned to App $REVIEW_APP_ID ($SLUG), strict off"
+    else
+      WANT="$(existing_checks | with_review_check "$REVIEW_APP_ID")"
+      # PATCH on the sub-resource 404s when required_status_checks has never been set:
+      # the parent object does not exist yet (keel's main on 2026-11-04). Then the whole
+      # protection is PUT: step 4's payload on a full run, or, under --checks-only, the
+      # protection read back from the API with only the required checks replaced.
+      if [ -n "$PROT_JSON" ]; then
+        FULL="$(printf '%s' "$PROT_JSON" | "$PYBIN" -c '
 import json, sys
 d = json.load(sys.stdin)
 d["required_status_checks"] = json.loads(sys.argv[1])
-print(json.dumps(d))' "$WANT" \
-       | gh api -X PUT "repos/$REPO/branches/$BRANCH/protection" \
+print(json.dumps(d))' "$WANT" 2>/dev/null || true)"
+      else
+        FULL="$(put_from_current "$WANT" 2>/dev/null || true)"
+      fi
+      if printf '%s' "$WANT" | gh api -X PATCH "$RSC_PATH" \
            -H "Accept: application/vnd.github+json" --input - >/dev/null 2>&1; then
-      info "$REVIEW_CHECK required, pinned to App $REVIEW_APP_ID ($SLUG) (via full protection PUT)"
-    elif [ -z "$PROT_JSON" ]; then
-      bad "could not set required checks: $BRANCH requires no status checks yet, and"
-      warn "  enabling them needs the full protection PUT. Re-run without --checks-only."
-    else
-      bad "could not require $REVIEW_CHECK. CIS 1.1.7 is NOT satisfied."
-    fi
-  fi
-fi
+        info "$REVIEW_CHECK required, pinned to App $REVIEW_APP_ID ($SLUG)"
+      elif [ -n "$FULL" ] && printf '%s' "$FULL" \
+           | gh api -X PUT "repos/$REPO/branches/$BRANCH/protection" \
+               -H "Accept: application/vnd.github+json" --input - >/dev/null 2>&1; then
+        info "$REVIEW_CHECK required, pinned to App $REVIEW_APP_ID ($SLUG) (via full protection PUT)"
+      elif [ -z "$FULL" ]; then
+        bad "could not read the protection on $BRANCH to add $REVIEW_CHECK to it."
+        warn "  An unprotected branch needs the full run: drop --checks-only."
+      else
+        bad "could not require $REVIEW_CHECK. CIS 1.1.7 is NOT satisfied."
+      fi
+    fi ;;
+esac
 
 # ── 6. Verify (CA-2: test beats examine) ─────────────────────────────────────
 #
@@ -571,7 +653,7 @@ else:
     ok\ *)    info "[ok]   $REVIEW_CHECK required, pinned to App ${GATE#ok }" ;;
     other\ *) bad "$REVIEW_CHECK is pinned to App ${GATE#other }, not $REVIEW_APP_ID" ;;
     unpinned) bad "$REVIEW_CHECK is required from ANY app: a workflow job of that name satisfies it" ;;
-    absent)   if [ -n "$REVIEW_APP_ID" ]; then
+    absent)   if [ -n "$REVIEW_APP_ID" ] || [ "$CHECKS_ONLY" = "1" ]; then
                 bad "$REVIEW_CHECK is not required: nothing automated gates a merge"
               else
                 warn "$REVIEW_CHECK is not required (no --review-app-id): nothing automated gates a merge"
