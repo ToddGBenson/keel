@@ -29,6 +29,13 @@ second run sees what the first one wrote:
     since any workflow can post a check run with that name;
   * verification reports the pin, and FAILS an `independent-review` pinned to no app;
   * --dry-run writes nothing; --checks-only writes only the required checks.
+  * the App id defaults to the documented MyKronos App (`--review-app-id none` opts
+    out); `--dry-run` prints the protection payload, enforce_admins and the pin in it;
+  * team mode requires the same gate and keeps one approving review;
+  * on keel's live state (protection set, required checks never set) --checks-only
+    PUTs the protection it read with only the required checks changed, because the
+    PATCH on the sub-resource 404s there;
+  * --checks-only with no App id fails rather than reporting the gate configured.
 
     python test/configure-github.test.py
 """
@@ -103,7 +110,8 @@ def gh_shape(p):
     """What GET returns after a PUT of payload p."""
     out = dict(p)
     for k in ("enforce_admins", "required_linear_history", "allow_force_pushes",
-              "allow_deletions", "required_conversation_resolution"):
+              "allow_deletions", "required_conversation_resolution", "block_creations",
+              "lock_branch", "allow_fork_syncing"):
         if isinstance(p.get(k), bool):
             out[k] = {"enabled": p[k]}
     out["required_status_checks"] = rsc_shape(p.get("required_status_checks"))
@@ -235,6 +243,44 @@ def enabled():
     return protection_with([])
 
 
+def live_keel():
+    """keel main's protection as the API returned it on 2026-11-04: no required checks."""
+    return {
+        "required_pull_request_reviews": {"dismiss_stale_reviews": True,
+                                          "require_code_owner_reviews": False,
+                                          "require_last_push_approval": False,
+                                          "required_approving_review_count": 1},
+        "required_signatures": {"enabled": False},
+        "enforce_admins": {"enabled": False},
+        "required_linear_history": {"enabled": True},
+        "allow_force_pushes": {"enabled": False},
+        "allow_deletions": {"enabled": False},
+        "block_creations": {"enabled": False},
+        "required_conversation_resolution": {"enabled": True},
+        "lock_branch": {"enabled": False},
+        "allow_fork_syncing": {"enabled": False},
+    }
+
+
+PAYLOAD_START, PAYLOAD_END = "--- protection payload ---", "--- end payload ---"
+
+
+def payload(out):
+    """The protection payload a --dry-run prints, parsed; None if it printed none."""
+    s, e = out.find(PAYLOAD_START), out.find(PAYLOAD_END)
+    if s < 0 or e < s:
+        return None
+    try:
+        return json.loads(out[s + len(PAYLOAD_START):e])
+    except ValueError:
+        return None
+
+
+def payload_pins(p, app=APP):
+    checks = ((p or {}).get("required_status_checks") or {}).get("checks") or []
+    return {"context": CHECK, "app_id": app} in checks
+
+
 # Full runs are slow on Windows (one process per gh call and per JSON read), so only
 # the cases about steps 1 to 4 run the whole script; the rest use --checks-only.
 print("configure-github.sh: the merge gate is MyKronos independent-review (TheHub #60978)")
@@ -275,8 +321,9 @@ names = [c["context"] for c in required(st).get("checks") or []]
 check("an unpinned independent-review is re-pinned, not duplicated",
       pinned(st) and names.count(CHECK) == 1, required(st))
 
-# 5. No App id: a fork without MyKronos requires nothing and says so.
-rc, out, writes, st = run(["--yes", "--checks-only"], protection=enabled(), runs_on="main")
+# 5. No App id (`--review-app-id none`): a fork without MyKronos requires nothing and says so.
+rc, out, writes, st = run(["--yes", "--checks-only", "--review-app-id", "none"],
+                          protection=enabled(), runs_on="main")
 check("without an App id nothing is required", not required(st).get("checks"), required(st))
 check("without an App id the script says the merge gate is not configured",
       "--review-app-id" in out and "not required" in out, out[-2500:])
@@ -322,6 +369,63 @@ check("--checks-only writes only the required status checks",
       paths)
 check("--checks-only applies the pin", pinned(st), required(st))
 check("--checks-only verifies the checks and exits 0", rc == 0, out[-2500:])
+
+# 12. The App id defaults to the documented MyKronos App: no flag needed (AC1).
+rc, out, writes, st = run(["--yes", "--checks-only"], protection=enabled(), runs_on="main")
+check("with no --review-app-id the App id defaults to the MyKronos App", pinned(st), out[-2000:])
+
+# 13. `--solo --dry-run` prints the protection payload: enforce_admins on, gate pinned (AC1).
+rc, out, writes, st = run(["--yes", "--solo", "--dry-run"], runs_on="main")
+p = payload(out)
+check("--solo --dry-run prints the protection payload", p is not None, out[-2500:])
+check("... with enforce_admins true", (p or {}).get("enforce_admins") is True, p)
+check("... and required_status_checks.checks pinning independent-review to the App",
+      payload_pins(p), p)
+check("... and solo's review count of 0",
+      ((p or {}).get("required_pull_request_reviews") or {}).get(
+          "required_approving_review_count") == 0, p)
+check("... and the dry run still writes nothing", writes == [], writes)
+
+# 14. Team mode: the same gate, and the review count stays 1 (AC2).
+rc, out, writes, st = run(["--yes", "--team", "--dry-run"], runs_on="main")
+p = payload(out)
+check("team --dry-run payload pins independent-review too", payload_pins(p), p or out[-2000:])
+check("team --dry-run payload keeps one approving review",
+      ((p or {}).get("required_pull_request_reviews") or {}).get(
+          "required_approving_review_count") == 1, p)
+rc, out, writes, st = run(["--yes", "--team"], runs_on="main")
+rpr = (st.get("protection") or {}).get("required_pull_request_reviews") or {}
+check("a team run requires independent-review, pinned", pinned(st), required(st) or out[-2500:])
+check("a team run keeps the review count at 1 and CODEOWNER review on",
+      rpr.get("required_approving_review_count") == 1 and rpr.get("require_code_owner_reviews") is True,
+      rpr)
+check("a team run requires exactly one check", len(required(st).get("checks") or []) == 1,
+      required(st))
+
+# 15. keel's live state: protection exists, required checks were never set. The PATCH on the
+#     sub-resource 404s there, so --checks-only must PUT the protection it read, with only
+#     the required checks changed.
+rc, out, writes, st = run(["--yes", "--checks-only"], protection=live_keel(), runs_on="prhead")
+prot = st.get("protection") or {}
+rpr = prot.get("required_pull_request_reviews") or {}
+check("--checks-only on a branch with no required checks yet requires the pinned gate",
+      pinned(st) and rc == 0, out[-2500:])
+check("... and changes nothing else: enforce_admins stays off, one review, linear history",
+      (prot.get("enforce_admins") or {}).get("enabled") is False
+      and rpr.get("required_approving_review_count") == 1
+      and rpr.get("dismiss_stale_reviews") is True
+      and (prot.get("required_linear_history") or {}).get("enabled") is True
+      and (prot.get("required_conversation_resolution") or {}).get("enabled") is True
+      and (prot.get("allow_force_pushes") or {}).get("enabled") is False, prot)
+check("... and does not tell the operator to re-run without --checks-only",
+      "Re-run without --checks-only" not in out, out[-2500:])
+
+# 16. --checks-only with no App id must not report a configured gate, even when some
+#     other check is required.
+rc, out, writes, st = run(["--yes", "--checks-only", "--review-app-id", "none"],
+                          protection=protection_with([{"context": "own-check", "app_id": 99}]))
+check("--checks-only with no App id fails instead of reporting the gate configured",
+      rc != 0 and "configured and verified" not in out, out[-2500:])
 
 print()
 if failures:
