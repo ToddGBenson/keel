@@ -636,27 +636,35 @@ jobs:
       - get: daily-0400
         trigger: true
         timeout: 15m
+      # One language at a time (#169). Each CodeQL evaluator budgets 2048 MB
+      # (CodeQL's floor) plus JVM overhead, and a worker is capped at 3 GiB.
+      # A bare in_parallel let placement put both on one worker: build 141's
+      # javascript analysis was OOM-killed (exit 137) beside python's.
+      # `limit: 1` runs them in turn; fail_fast stays false, so javascript
+      # still runs when python's gate fails, and both suites are kept.
       - in_parallel:
-          - task: codeql-python
-            timeout: 3h
-            file: repo/ci/tasks/codeql.yml
-            output_mapping: { mykronos-results: results-python }
-            params:
-              CODEQL_LANGUAGE: python
-              CODEQL_QUERIES: security-extended,security-and-quality
-              CODEQL_BUNDLE_VERSION: ((codeql_bundle_version))
-              CODEQL_BUNDLE_SHA256: ((codeql_bundle_sha256))
-              FAIL_ON_SECURITY_FINDING: "true"
-          - task: codeql-javascript
-            timeout: 3h
-            file: repo/ci/tasks/codeql.yml
-            output_mapping: { mykronos-results: results-javascript }
-            params:
-              CODEQL_LANGUAGE: javascript-typescript
-              CODEQL_QUERIES: security-extended,security-and-quality
-              CODEQL_BUNDLE_VERSION: ((codeql_bundle_version))
-              CODEQL_BUNDLE_SHA256: ((codeql_bundle_sha256))
-              FAIL_ON_SECURITY_FINDING: "true"
+          limit: 1
+          steps:
+            - task: codeql-python
+              timeout: 3h
+              file: repo/ci/tasks/codeql.yml
+              output_mapping: { mykronos-results: results-python }
+              params:
+                CODEQL_LANGUAGE: python
+                CODEQL_QUERIES: security-extended,security-and-quality
+                CODEQL_BUNDLE_VERSION: ((codeql_bundle_version))
+                CODEQL_BUNDLE_SHA256: ((codeql_bundle_sha256))
+                FAIL_ON_SECURITY_FINDING: "true"
+            - task: codeql-javascript
+              timeout: 3h
+              file: repo/ci/tasks/codeql.yml
+              output_mapping: { mykronos-results: results-javascript }
+              params:
+                CODEQL_LANGUAGE: javascript-typescript
+                CODEQL_QUERIES: security-extended,security-and-quality
+                CODEQL_BUNDLE_VERSION: ((codeql_bundle_version))
+                CODEQL_BUNDLE_SHA256: ((codeql_bundle_sha256))
+                FAIL_ON_SECURITY_FINDING: "true"
 
   # ── DAILY, NOT PER-COMMIT ───────────────────────────────────────────────────
   # `main` cannot be reached except through a pull request that already ran
