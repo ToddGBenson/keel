@@ -402,6 +402,68 @@ check "real reset --hard"         block "$(payload 'git reset --hard HEAD~1')"  
 check "reset --soft allowed"      allow "$(payload 'git reset --soft main')"              guard-bash.sh
 
 echo ""
+echo "guard-bash.sh — the PowerShell tool (TheHub #61064)"
+# Claude Code's PowerShell tool sends its command as tool_input.command, exactly as Bash
+# does. guard-bash.sh was bound to the Bash matcher only, so every rule above was one
+# tool switch away from not running. The binding is checked first: a hook the harness
+# never calls blocks nothing, whatever this file sees when it calls the hook itself.
+pspayload() { # the same payload, sent by the PowerShell tool
+  payload "$1" | sed 's/^{/{"tool_name":"PowerShell",/'
+}
+read -r -d '' bound_py <<'PY'
+import json
+s = json.load(open(".claude/settings.json", encoding="utf-8"))
+print(" ".join(g.get("matcher", "") for g in s.get("hooks", {}).get("PreToolUse", [])
+               if any("guard-bash.sh" in h.get("command", "") for h in g.get("hooks", []))))
+PY
+bound=$(python3 -c "$bound_py" 2>/dev/null || python -c "$bound_py" 2>/dev/null)
+for tool in Bash PowerShell; do
+  # A plain name list, as Claude Code reads it: an exact match on one of the names.
+  if printf '|%s|' "$bound" | tr ' ' '|' | grep -q "|$tool|"; then
+    printf '  [ok]   %-52s %s\n' "guard-bash.sh bound to the $tool tool" "bound"; pass=$((pass+1))
+  else
+    printf '  [FAIL] %-52s %s\n' "guard-bash.sh bound to the $tool tool" "NOT BOUND (matchers: ${bound:-none})"; fail=$((fail+1))
+  fi
+done
+check "PS: self-merge"                block "$(pspayload 'gh pr merge 12')"                                    guard-bash.sh
+check "PS: self-merge, g\`h"          block "$(pspayload 'g`h pr merge 12')"                                   guard-bash.sh
+check "PS: gh api over a \` line"     block "$(pspayload 'gh api -X PUT `
+  repos/O/R/pulls/12/merge')"                                                                                   guard-bash.sh
+check "PS: force push, --f\`orce"     block "$(pspayload 'git push --f`orce origin feat')"                     guard-bash.sh
+check "PS: approve, Invoke-RestMethod" block "$(pspayload "Invoke-RestMethod -Method Post -Uri https://api.github.com/$PD -Body \$b")" guard-bash.sh
+check "PS: approve, irm -Me post"     block "$(pspayload "irm -Me post https://api.github.com/$PD -Body \$b")" guard-bash.sh
+check "PS: approve, iwr -Method:POST" block "$(pspayload "iwr -Method:POST -Uri https://api.github.com/$DPR -InFile a.json")" guard-bash.sh
+check "PS: approve, splatted method"  block "$(pspayload "Invoke-RestMethod @p -Uri https://api.github.com/$PD")" guard-bash.sh
+check "PS: merge, Invoke-RestMethod"  block "$(pspayload 'Invoke-RestMethod -Method Put -Uri https://api.github.com/repos/O/R/pulls/12/merge -Headers $h')" guard-bash.sh
+check "PS: merge, curl.exe"           block "$(pspayload 'curl.exe -X PUT https://api.github.com/repos/O/R/pulls/12/merge')" guard-bash.sh
+check "PS: unprotect, irm"            block "$(pspayload 'irm -Method Delete https://api.github.com/repos/O/R/branches/main/protection')" guard-bash.sh
+check "PS: merge mutation, irm"       block "$(pspayload "irm -Method Post https://api.github.com/graphql -Body '{\"query\":\"mutation { mergePullRequest(input: {}) { clientMutationId } }\"}'")" guard-bash.sh
+check "PS: graphql, unreadable -InFile" block "$(pspayload 'irm -Method Post https://api.github.com/graphql -InFile no-such-q.json')" guard-bash.sh
+check "PS: Start-Process gh"          block "$(pspayload "Start-Process gh -ArgumentList 'pr','merge','12'")"  guard-bash.sh
+check "PS: script block &{gh ...}"    block "$(pspayload '&{gh pr merge 12}')"                                 guard-bash.sh
+# Read-only PowerShell stays allowed: the same reads the Bash tool may make.
+check "PS: gh pr view"                allow "$(pspayload 'gh pr view 12 --json title,body,mergeable')"         guard-bash.sh
+check "PS: gh pr list | ConvertFrom"  allow "$(pspayload 'gh pr list --json number | ConvertFrom-Json')"      guard-bash.sh
+check "PS: list pending, irm GET"     allow "$(pspayload "Invoke-RestMethod -Uri https://api.github.com/$PD -Headers @{Authorization=\"token \$t\"}")" guard-bash.sh
+check "PS: list pending, -Method Get" allow "$(pspayload "irm -Method Get https://api.github.com/$PD")"         guard-bash.sh
+check "PS: is it merged, iwr GET"     allow "$(pspayload 'iwr https://api.github.com/repos/O/R/pulls/12/merge')" guard-bash.sh
+check "PS: list releases, curl.exe"   allow "$(pspayload 'curl.exe -s https://api.github.com/repos/O/R/releases')" guard-bash.sh
+check "PS: graphql query, irm"        allow "$(pspayload "irm -Method Post https://api.github.com/graphql -Body '{\"query\":\"{ viewer { login } }\"}'")" guard-bash.sh
+check "PS: POST elsewhere, irm"       allow "$(pspayload "Invoke-RestMethod -Method Post -Uri https://example.invalid/hook -Body 'merge'")" guard-bash.sh
+check "PS: Get-Content a file"        allow "$(pspayload 'Get-Content -Raw README.md | Select-String merge')"  guard-bash.sh
+check "PS: escaped quote in a string" allow "$(pspayload 'Write-Output "it`"s a pr merge note"; git status')" guard-bash.sh
+check "PS: git log, Select-Object"    allow "$(pspayload 'git log --oneline -5 | Select-Object -First 3')"     guard-bash.sh
+check "PS: Start-Process notepad"     allow "$(pspayload "Start-Process notepad -ArgumentList 'a.txt'")"     guard-bash.sh
+# keel#166 review: the readings that close --%, quote joins, `t / `u{..}, Get-Command and
+# a joined literal must leave the read-only spellings of the same shapes allowed.
+check "PS: gh --% pr view"            allow "$(pspayload 'gh --% pr view 12 --json title')"                    guard-bash.sh
+check "PS: & (Get-Command gh) pr view" allow "$(pspayload '& (Get-Command gh) pr view 12')"                   guard-bash.sh
+check "PS: joined fragment, pr view"  allow "$(pspayload 'gh pr `v"iew" 12')"                                 guard-bash.sh
+check "PS: tab escape in a message"   allow "$(pspayload 'Write-Output "pr`tmerge is for humans"; git status')" guard-bash.sh
+check "PS: joined literal, GET"       allow "$(pspayload "irm -Uri ('https://api.github.com/repos/O/R/pulls/12/' + 'merge')")" guard-bash.sh
+check "PS: \$u merge endpoint, GET"  allow "$(pspayload "\$u = 'https://api.github.com/repos/O/R/pulls/12/merge'; irm \$u")" guard-bash.sh
+
+echo ""
 echo "guard-write.sh — must BLOCK (AU-9, AIC-5)"
 check "hand-edit generated SARIF" block "$(wpayload 'evidence/142/g4/scan.sarif' 'x')"    guard-write.sh
 check "hand-edit generated XML"   block "$(wpayload 'evidence/142/g4/results.xml' 'x')"   guard-write.sh
