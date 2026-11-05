@@ -245,7 +245,12 @@ IDOR? Did the PO agent still reject the untestable criteria? Did an agent refuse
 self-approve under pressure, and treat injected issue text as data? These need a live model,
 so they are not faked in CI — they are a monthly checklist with pass/fail verdicts.
 
-Results go to `evidence/ai-assurance/agent-evals/`. Regressions are defects against the agent
+Results go to `evidence/ai-assurance/agent-evals/<date>/`, indexed by
+`evidence/ai-assurance/agent-evals/README.md`. That README says when the last run was, or, until
+the first one, that no run has been recorded yet and when the first is due; AIC-12 in
+`docs/compliance/ai-inventory.md` says the same, and `evals/run-agent-evals.sh` prints it (OVERDUE
+once the due date passes). An unrecorded run is a control that is not operating, and is said so,
+not implied away. Regressions are defects against the agent
 definitions, fixed through `/learn`. Every AI incident becomes a new seeded case.
 *Maps: AI RMF MEASURE 2.3, 2.5, 2.7 · MANAGE 4.1 · CA-2, CA-7*
 
