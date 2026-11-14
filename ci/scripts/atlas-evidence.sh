@@ -76,7 +76,10 @@ if [ -f osv-json/osv.json ]; then
 else
   echo "WARNING: no osv.json — the scan did not complete. Reporting empty counts" >&2
   echo "so this run still registers, rather than leaving stale evidence in place." >&2
-  ECOSYSTEMS='{}'
+  # A LIST, as `mykronos.atlas_counts` prints for an unreadable report: the
+  # platform takes `ecosystems` as a list and answers `{}` with a 422, which on
+  # build 78 (#167) turned "the scan did not complete" into no record at all.
+  ECOSYSTEMS='[]'
 fi
 
 # Provenance names Concourse, because that is what built it. Keeping the old
@@ -93,7 +96,7 @@ import json, os, platform
 
 body = {
     "commit_sha": os.environ["COMMIT_SHA"],
-    "ecosystems": json.loads(os.environ["ECOSYSTEMS"] or "{}"),
+    "ecosystems": json.loads(os.environ["ECOSYSTEMS"] or "[]"),
     "provenance": {
         "builder_id": "concourse",
         "source_repo": os.environ.get("REPO_SLUG", ""),

@@ -134,12 +134,16 @@ PYEOF
   # 5b. The allowlist itself. A green secret scan means nothing if .gitleaks.toml has
   #     quietly stopped the scanner from reporting — which has happened here once already.
   if [ -f .gitleaks.toml ]; then
-    if bash scripts/test-gitleaks-allowlist.sh 2>/dev/null | grep -q 'BOTH directions'; then
+    #     Run it once and keep stdout AND stderr, so a failure says why instead of
+    #     leaving the reader to re-run the script (TheHub #61098).
+    gl_out="$(bash scripts/test-gitleaks-allowlist.sh 2>&1)"; gl_rc=$?
+    if [ "$gl_rc" -eq 0 ] && printf '%s\n' "$gl_out" | grep -q 'BOTH directions'; then
       ok "gitleaks allowlist still detects real secrets"
-    elif bash scripts/test-gitleaks-allowlist.sh 2>/dev/null | grep -q '\[skip\]'; then
+    elif [ "$gl_rc" -eq 0 ] && printf '%s\n' "$gl_out" | grep -q '\[skip\]'; then
       warn "gitleaks allowlist NOT verified (no gitleaks or docker) — CI verifies it"
     else
-      warn "gitleaks allowlist failed verification — run scripts/test-gitleaks-allowlist.sh"; fail=1
+      warn "gitleaks allowlist failed verification (exit $gl_rc) — run scripts/test-gitleaks-allowlist.sh"; fail=1
+      printf '%s\n' "$gl_out" | tail -n 15 | sed 's/^/      | /'
     fi
   fi
 

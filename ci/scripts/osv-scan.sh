@@ -17,7 +17,14 @@ set -euo pipefail
 # OSV-Scanner is a Go binary released on GitHub; pin the version and verify the
 # published checksum so a swapped artifact cannot land in the one lane whose job
 # is catching swapped artifacts.
-curl -sSfL -o /usr/local/bin/osv-scanner \
+#
+# Retried, because one dropped connection is not a reason to skip the scan: on
+# build 78 (#167) this download died on `curl: (56) Recv failure: Connection
+# timed out`, the run before it passed, and nothing tried again.
+# `--retry-all-errors` is what makes a mid-transfer failure retryable at all.
+# The checksum below still decides whether what arrived is the binary.
+curl -sSfL --retry 4 --retry-delay 10 --retry-all-errors --connect-timeout 30 --max-time 300 \
+  -o /usr/local/bin/osv-scanner \
   "https://github.com/google/osv-scanner/releases/download/v${OSV_VERSION}/osv-scanner_linux_amd64"
 echo "${OSV_SHA256}  /usr/local/bin/osv-scanner" | sha256sum -c -
 chmod +x /usr/local/bin/osv-scanner

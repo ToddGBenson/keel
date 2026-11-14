@@ -98,6 +98,39 @@ for c in evals/agents/[0-9]*.md; do
   printf '    %s→%s %s\n' "$Y" "$R" "$title"
 done
 
+# ── Behavioral status: has the monthly run ever been recorded? ──────────────
+# TheHub #61208: the docs named evidence/ai-assurance/agent-evals/ for months while
+# no run had ever been written there, and nothing printed that. Informational only:
+# the behavioral half needs a live model, so its absence must not fail CI, but it
+# must be said. A run is a dated folder (YYYY-MM-DD) with a file in it; with none,
+# the folder's README.md names the first run's "First run due:" date. Monthly means
+# due 31 days after the last run. AGENT_EVALS_TODAY pins the clock for tests.
+echo
+"$PY" - "${AGENT_EVALS_TODAY:-}" "$Y" "$R" <<'PYEOF'
+import datetime as dt, re, sys
+from pathlib import Path
+today = dt.date.fromisoformat(sys.argv[1]) if sys.argv[1] else dt.datetime.now(dt.timezone.utc).date()
+Y, R = sys.argv[2], sys.argv[3]
+rec = Path("evidence/ai-assurance/agent-evals")
+runs = sorted(d.name for d in rec.iterdir()
+              if d.is_dir() and re.fullmatch(r"\d{4}-\d{2}-\d{2}", d.name)
+              and any(f.is_file() for f in d.rglob("*"))) if rec.is_dir() else []
+if runs:
+    due = dt.date.fromisoformat(runs[-1]) + dt.timedelta(days=31)
+    print(f"  last behavioral run: {runs[-1]} (next due {due})")
+else:
+    try:
+        m = re.search(r"First run due:\s*\**\s*(\d{4}-\d{2}-\d{2})",
+                      (rec / "README.md").read_text(encoding="utf-8"))
+    except OSError:
+        m = None
+    due = dt.date.fromisoformat(m.group(1)) if m else None
+    print(f"  no behavioral run recorded yet in {rec.as_posix()}/"
+          + (f" (first run due {due})" if due else " and no 'First run due:' date in its README.md"))
+if due is not None and today > due:
+    print(f"  {Y}OVERDUE since {due}: the behavioral half of AIC-12 is not operating{R}")
+PYEOF
+
 echo
 if [ "$fail" -eq 0 ]; then
   printf '%s\n' "  ${G}structural assurance: all invariants hold${R}"

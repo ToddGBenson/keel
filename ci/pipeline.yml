@@ -39,6 +39,7 @@
 # the results have nowhere to go — and silently skipping is not an option.
 mykronos_preflight: &mykronos_preflight
   task: mykronos-preflight
+  timeout: 3h
   file: repo/ci/tasks/mykronos-preflight.yml
   params:
     MYKRONOS_INGESTION_URL: ((mykronos_ingestion_url))
@@ -377,6 +378,14 @@ groups:
 # Every task also yields CPU: ci/tasks/*.yml declare container_limits.cpu 512
 # shares and no memory limit (mykronos D-174). test/container-limits.test.py
 # holds that.
+#
+# And every task step times out within 3h, so a hung job frees its lane. A lane
+# makes a hang everyone's problem: on 2026-10-31 the run of 9699ecb started one
+# job per lane at 03:47Z (iac, mykronos-secrets, sast), all three hung, and they
+# errored at 13:30Z, with every keel lane shut for 9.7 hours. The longest keel
+# job that ever SUCCEEDED took 139 minutes (mykronos-sast, in the pre-lane
+# storms; median 17), so 3h fails nothing that passes. The check-run hooks keep
+# their own 5m. test/task-timeouts.test.py holds it.
 
 jobs:
 
@@ -416,9 +425,11 @@ jobs:
     plan:
       - get: repo
         trigger: true
+        timeout: 15m
       - set_pipeline: self
         file: repo/ci/pipeline.yml
         var_files: [repo/ci/vars.example.yml]
+        timeout: 15m
 
   # ── PREMISE CHANGED 2026-08-13: THESE ARE NOW THE ONLY VERIFICATION ─────────
   # These lanes were moved to a daily cadence because re-running a deterministic
@@ -460,8 +471,10 @@ jobs:
     plan:
       - get: repo
         trigger: true
+        timeout: 15m
       - get: daily-0300
         trigger: true
+        timeout: 15m
       # `Concourse / keel` goes in_progress on this commit. On the daily re-run
       # of a commit that already has a verdict, MyKronos leaves the verdict
       # alone (a start never reopens one).
@@ -470,6 +483,7 @@ jobs:
         timeout: 5m
         params: { <<: *check_run_params, JOB: build, PHASE: start }
       - task: build
+        timeout: 3h
         file: repo/ci/tasks/ci-stage.yml
         params: { STAGE: build }
 
@@ -491,13 +505,16 @@ jobs:
     plan:
       - get: repo
         trigger: true
+        timeout: 15m
       - get: daily-0300
         trigger: true
+        timeout: 15m
       # Separate task because shellcheck ships its own Alpine image and the rest
       # of the lint stage needs Python. Its report is an input to the stage
       # below, which fails if it is missing — so the linter cannot be skipped
       # silently.
       - task: shellcheck
+        timeout: 3h
         file: repo/ci/tasks/shellcheck.yml
         # ── ITS RESULTS REACH MYKRONOS (#105, B-051) ──────────────────────────
         # Shell is most of this repository and CodeQL reads none of it, so
@@ -520,6 +537,7 @@ jobs:
         # both `repo` and `daily-0300`.
         ensure:
           task: upload-shellcheck
+          timeout: 3h
           file: repo/ci/tasks/mykronos-upload.yml
           params:
             <<: *mykronos_upload_params
@@ -528,6 +546,7 @@ jobs:
             # The tag ci/tasks/shellcheck.yml pins. Two places, one value.
             TOOL_VERSION: "0.10.0"
       - task: lint
+        timeout: 3h
         file: repo/ci/tasks/ci-stage.yml
         params: { STAGE: lint }
 
@@ -549,13 +568,16 @@ jobs:
     plan:
       - get: repo
         trigger: true
+        timeout: 15m
       - get: daily-0300
         trigger: true
+        timeout: 15m
       # No COVERAGE_THRESHOLD (TheHub #60850). It was "80" and nothing measured
       # against it: the coverage step echoed "ADAPT: assert coverage >= 80%" and
       # exited 0. keel has no application code to cover. A fork that has some
       # adds a real coverage gate and its threshold together, in one change.
       - task: test
+        timeout: 3h
         file: repo/ci/tasks/ci-stage.yml
         params: { STAGE: test }
 
@@ -610,27 +632,39 @@ jobs:
     plan:
       - get: repo
         trigger: true
+        timeout: 15m
       - get: daily-0400
         trigger: true
+        timeout: 15m
+      # One language at a time (#169). Each CodeQL evaluator budgets 2048 MB
+      # (CodeQL's floor) plus JVM overhead, and a worker is capped at 3 GiB.
+      # A bare in_parallel let placement put both on one worker: build 141's
+      # javascript analysis was OOM-killed (exit 137) beside python's.
+      # `limit: 1` runs them in turn; fail_fast stays false, so javascript
+      # still runs when python's gate fails, and both suites are kept.
       - in_parallel:
-          - task: codeql-python
-            file: repo/ci/tasks/codeql.yml
-            output_mapping: { mykronos-results: results-python }
-            params:
-              CODEQL_LANGUAGE: python
-              CODEQL_QUERIES: security-extended,security-and-quality
-              CODEQL_BUNDLE_VERSION: ((codeql_bundle_version))
-              CODEQL_BUNDLE_SHA256: ((codeql_bundle_sha256))
-              FAIL_ON_SECURITY_FINDING: "true"
-          - task: codeql-javascript
-            file: repo/ci/tasks/codeql.yml
-            output_mapping: { mykronos-results: results-javascript }
-            params:
-              CODEQL_LANGUAGE: javascript-typescript
-              CODEQL_QUERIES: security-extended,security-and-quality
-              CODEQL_BUNDLE_VERSION: ((codeql_bundle_version))
-              CODEQL_BUNDLE_SHA256: ((codeql_bundle_sha256))
-              FAIL_ON_SECURITY_FINDING: "true"
+          limit: 1
+          steps:
+            - task: codeql-python
+              timeout: 3h
+              file: repo/ci/tasks/codeql.yml
+              output_mapping: { mykronos-results: results-python }
+              params:
+                CODEQL_LANGUAGE: python
+                CODEQL_QUERIES: security-extended,security-and-quality
+                CODEQL_BUNDLE_VERSION: ((codeql_bundle_version))
+                CODEQL_BUNDLE_SHA256: ((codeql_bundle_sha256))
+                FAIL_ON_SECURITY_FINDING: "true"
+            - task: codeql-javascript
+              timeout: 3h
+              file: repo/ci/tasks/codeql.yml
+              output_mapping: { mykronos-results: results-javascript }
+              params:
+                CODEQL_LANGUAGE: javascript-typescript
+                CODEQL_QUERIES: security-extended,security-and-quality
+                CODEQL_BUNDLE_VERSION: ((codeql_bundle_version))
+                CODEQL_BUNDLE_SHA256: ((codeql_bundle_sha256))
+                FAIL_ON_SECURITY_FINDING: "true"
 
   # ── DAILY, NOT PER-COMMIT ───────────────────────────────────────────────────
   # `main` cannot be reached except through a pull request that already ran
@@ -659,13 +693,17 @@ jobs:
     plan:
       - get: repo
         trigger: true
+        timeout: 15m
       - get: daily-0400
         trigger: true
+        timeout: 15m
       - task: gitleaks
+        timeout: 3h
         file: repo/ci/tasks/gitleaks.yml
       # Any hit fails. If one fires, the correct response is to ROTATE the
       # credential, then remove it. A deleted commit is not a rotated credential.
       - task: gate
+        timeout: 3h
         file: repo/ci/tasks/gitleaks-gate.yml
 
   - name: sca
@@ -686,9 +724,12 @@ jobs:
     plan:
       - get: repo
         trigger: true
+        timeout: 15m
       - get: daily-0500
         trigger: true
+        timeout: 15m
       - task: grype
+        timeout: 3h
         file: repo/ci/tasks/grype.yml
         params:
           GRYPE_VERSION: ((grype_version))
@@ -737,16 +778,20 @@ jobs:
     plan:
       - get: repo
         trigger: true
+        timeout: 15m
       - get: daily-0500
         trigger: true
+        timeout: 15m
       - do:
           - *mykronos_preflight
           - task: checkov
+            timeout: 3h
             file: repo/ci/tasks/checkov.yml
             params:
               CHECKOV_VERSION: ((checkov_version))
         ensure:
           task: upload
+          timeout: 3h
           file: repo/ci/tasks/mykronos-upload.yml
           input_mapping: { mykronos-results: iac-results }
           params:
@@ -768,7 +813,9 @@ jobs:
     serial_groups: [ingest]
     plan:
       - get: repo
+        timeout: 15m
       - task: trivy
+        timeout: 3h
         file: repo/ci/tasks/trivy.yml
         params:
           TRIVY_VERSION: ((trivy_version))
@@ -780,9 +827,12 @@ jobs:
     plan:
       - get: repo
         trigger: true
+        timeout: 15m
       - get: daily-0600
         trigger: true
+        timeout: 15m
       - task: suppression-audit
+        timeout: 3h
         file: repo/ci/tasks/suppression-audit.yml
 
   # ── Mykronos ────────────────────────────────────────────────────────────────
@@ -797,8 +847,10 @@ jobs:
     plan:
       - get: repo
         trigger: true
+        timeout: 15m
       - get: weekly
         trigger: true
+        timeout: 15m
       # BOTH languages, in one lane. There used to be a second `sast` job running
       # CodeQL over javascript-typescript and then throwing the SARIF away
       # (POAM-012) — a duplicate analysis whose results reached nothing. This is
@@ -811,6 +863,7 @@ jobs:
       - do:
           - *mykronos_preflight
           - task: codeql-python
+            timeout: 3h
             file: repo/ci/tasks/codeql.yml
             output_mapping: { mykronos-results: results-python }
             params:
@@ -820,6 +873,7 @@ jobs:
               CODEQL_BUNDLE_SHA256: ((codeql_bundle_sha256))
               UPLOAD_TO_MYKRONOS: "true"
           - task: codeql-javascript
+            timeout: 3h
             file: repo/ci/tasks/codeql.yml
             output_mapping: { mykronos-results: results-javascript }
             params:
@@ -831,6 +885,7 @@ jobs:
         ensure:
           do:
             - task: upload-python
+              timeout: 3h
               file: repo/ci/tasks/mykronos-upload.yml
               input_mapping: { mykronos-results: results-python }
               params:
@@ -840,6 +895,7 @@ jobs:
                 TRIGGERED_BY: schedule
               ensure:
                 task: upload-javascript
+                timeout: 3h
                 file: repo/ci/tasks/mykronos-upload.yml
                 input_mapping: { mykronos-results: results-javascript }
                 params:
@@ -854,17 +910,21 @@ jobs:
     plan:
       - get: repo
         trigger: true
+        timeout: 15m
       - get: weekly
         trigger: true
+        timeout: 15m
       - do:
           - *mykronos_preflight
           # Never fails the step itself: exit codes are the upload step's job,
           # which applies this repo's configured threshold and blocking policy.
           # A scanner deciding CI outcomes on its own bypasses that.
           - task: gitleaks
+            timeout: 3h
             file: repo/ci/tasks/gitleaks.yml
         ensure:
           task: upload
+          timeout: 3h
           file: repo/ci/tasks/mykronos-upload.yml
           params:
             <<: *mykronos_upload_params
@@ -901,11 +961,14 @@ jobs:
     plan:
       - get: repo
         trigger: true
+        timeout: 15m
       - get: weekly
         trigger: true
+        timeout: 15m
       - do:
           - *mykronos_preflight
           - task: grype
+            timeout: 3h
             file: repo/ci/tasks/grype.yml
             params:
               GRYPE_VERSION: ((grype_version))
@@ -914,6 +977,7 @@ jobs:
               GATE: "false"
         ensure:
           task: upload
+          timeout: 3h
           file: repo/ci/tasks/mykronos-upload.yml
           input_mapping: { mykronos-results: sca-results }
           params:
@@ -929,6 +993,7 @@ jobs:
     plan:
       - get: repo
         trigger: true
+        timeout: 15m
       # `github-release` removed 2026-08-14. It resolved to
       #   GET /repos/ToddGBenson/keel/releases -> 404 Not Found
       # because the repository is private and ((github_token)) is empty, and an
@@ -946,9 +1011,11 @@ jobs:
       # back. Do not add it back without the token.
       - get: weekly
         trigger: true
+        timeout: 15m
       - do:
           - *mykronos_preflight
           - task: osv-scan
+            timeout: 3h
             file: repo/ci/tasks/osv-scan.yml
           # CycloneDX, fixed. The Actions template had a format switch, but it
           # rendered to a hardcoded "cyclonedx" for this repo and the other
@@ -956,8 +1023,10 @@ jobs:
           # the switch has nowhere useful to live here — change the task if you
           # need SPDX.
           - task: sbom
+            timeout: 3h
             file: repo/ci/tasks/sbom.yml
           - task: sbom-check
+            timeout: 3h
             file: repo/ci/tasks/sbom-check.yml
         ensure:
           # `ensure:` guarantees the BLOCK runs, not each step in it — and `do:`
@@ -971,6 +1040,7 @@ jobs:
           # applied one level down.
           do:
             - task: upload
+              timeout: 3h
               file: repo/ci/tasks/mykronos-upload.yml
               params:
                 <<: *mykronos_upload_params
@@ -979,6 +1049,7 @@ jobs:
                 TRIGGERED_BY: schedule
               ensure:
                 task: atlas-evidence
+                timeout: 3h
                 file: repo/ci/tasks/atlas-evidence.yml
                 params:
                   MYKRONOS_INGESTION_URL: ((mykronos_ingestion_url))
@@ -997,9 +1068,12 @@ jobs:
     plan:
       - get: repo
         trigger: true
+        timeout: 15m
       - get: daily-0600
         trigger: true
+        timeout: 15m
       - task: platform-integrity
+        timeout: 3h
         file: repo/ci/tasks/platform-integrity.yml
 
   # ── AI assurance ────────────────────────────────────────────────────────────
@@ -1020,9 +1094,12 @@ jobs:
     serial_groups: [ingest]
     plan:
       - get: repo
+        timeout: 15m
       - get: weekly
         trigger: true
+        timeout: 15m
       - task: agent-assurance
+        timeout: 3h
         file: repo/ci/tasks/ai.yml
         params: { STAGE: agent-assurance }
 
@@ -1048,9 +1125,12 @@ jobs:
     serial_groups: [ingest]
     plan:
       - get: repo
+        timeout: 15m
       - get: weekly
         trigger: true
+        timeout: 15m
       - task: compliance
+        timeout: 3h
         file: repo/ci/tasks/compliance.yml
         params:
           PERIOD: monthly
@@ -1085,6 +1165,7 @@ jobs:
       - get: repo
         trigger: true
         passed: [build, lint, test, sast, secrets, sca, iac]
+        timeout: 15m
       # The SBOM is generated HERE, in this job. It was previously taken as an
       # optional input, which could never arrive: syft runs in `mykronos-atlas`,
       # and Concourse does not pass task outputs between jobs. So the branch was
@@ -1092,10 +1173,13 @@ jobs:
       # green. Generating it in-job also makes the inventory describe the tree
       # that was actually built, which is what CM-8 asks for.
       - task: sbom
+        timeout: 3h
         file: repo/ci/tasks/sbom.yml
       - task: sbom-check
+        timeout: 3h
         file: repo/ci/tasks/sbom-check.yml
       - task: build-and-attest
+        timeout: 3h
         file: repo/ci/tasks/supply-chain.yml
         params:
           STAGE: build-and-attest
@@ -1126,7 +1210,9 @@ jobs:
       - get: repo
         passed: [build-and-attest]
         trigger: true
+        timeout: 15m
       - task: verify
+        timeout: 3h
         file: repo/ci/tasks/supply-chain.yml
         params:
           STAGE: verify

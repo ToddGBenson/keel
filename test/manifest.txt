@@ -18,6 +18,8 @@ test/gate-record.test.py            lint         gate records: key validation, f
 test/validate-platform.test.py      lint         platform validator: gate commands name evidence/ (TheHub #60981)
 test/serial-lanes.test.py           lint         pipeline: at most 3 heavy jobs at once, verdict replayed (TheHub #61062)
 test/container-limits.test.py       lint         tasks: cpu shares below 1024, no memory limit (TheHub #61062, D-174)
+test/codeql-limits.test.py          lint         CodeQL held to --ram=1024 --threads=2 (TheHub #61062)
+test/task-timeouts.test.py          lint         task steps time out within 3h, gets within 15m, so a hang frees its lane (TheHub #61062, #61238)
 # test
 test/dashboard.test.py              test,quick   dashboard generator tests
 test/control-liveness.test.py       test         control liveness counts records, not directories (TheHub #60981)
@@ -26,9 +28,10 @@ test/grype-gate.test.py             test         SCA lane gate tests: gate by de
 test/trivy-gate.test.py             test         container-scan lane: no image is a failure, not a pass (#60935)
 test/poam.test.py                   test         POA&M due dates: parse, count, overdue, --check (#60977)
 test/poam-wiring.test.py            test         keel's own wiring of the POA&M due-date check (#153)
+test/agent-evals-record.test.py     test         AIC-12 behavioral record: README, ai-inventory and run-agent-evals agree (TheHub #61208)
 test/junit-suite.test.py            test         JUnit wrapper tests (unit results to MyKronos)
 test/mykronos-preflight.test.py     test         Mykronos preflight retries transient failures, never a 401
-test/mykronos-pins.test.py          test,quick   MyKronos workflow pins: one commit, none predating #1036 (TheHub #61212)
+test/atlas-evidence.test.py         test         atlas evidence: no osv.json posts an empty list, the OSV download retries (#167)
 test/test-manifest.test.py          test         this list: an unlisted test file or a missing entry fails CI (TheHub #60980)
 test/gitleaks-allowlist.test.py     test         gitleaks allowlist check caps its containers (keel #147 review)
 # selftest.sh was green while the keel#93 bypasses worked. This replays every

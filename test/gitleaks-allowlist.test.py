@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 scripts/test-gitleaks-allowlist.sh starts every gitleaks container capped.
-Refs: keel #147 review, TheHub #60980
+Refs: keel #147 review, TheHub #60980, TheHub #61098
 
 On 2026-10-23 eight uncapped test containers on the operator's host took TheHub
 production down. `./keel check` runs scripts/test-gitleaks-allowlist.sh, which,
@@ -84,6 +84,53 @@ try:
               ("--cpus", "1") in pairs or "--cpus=1" in opts, f"({opts})")
         check(f"docker run #{i} is memory-capped (--memory 1g)",
               ("--memory", "1g") in pairs or "--memory=1g" in opts, f"({opts})")
+finally:
+    shutil.rmtree(tmp, ignore_errors=True)
+
+# ── A copy with no .git, run from another directory (TheHub #61098) ─────────
+# test/test-manifest.test.py runs `./keel check` on a copy of this repository
+# that has no .git. The script began `cd "$(git rev-parse --show-toplevel)" ||
+# exit 1`; outside a work tree that is `cd ""`, which bash 5.2 on ubuntu-latest
+# rejects ("cd: null directory"), so the script exited 1 with neither verdict
+# and keel check went red on every Unit results run since 2026-10-28. It must
+# find its repository from its own location instead, and, with no git history
+# to read, scan the files (--no-git) rather than report a vacuous "clean".
+print("gitleaks allowlist test: a copy with no .git")
+tmp = Path(tempfile.mkdtemp(prefix="gl-nogit-"))
+try:
+    copy = tmp / "copy"
+    (copy / "scripts").mkdir(parents=True)
+    shutil.copy2(SCRIPT, copy / "scripts" / SCRIPT.name)
+    shutil.copy2(ROOT / ".gitleaks.toml", copy / ".gitleaks.toml")
+    elsewhere = tmp / "elsewhere"
+    elsewhere.mkdir()
+    stubs = tmp / "stubs"
+    stubs.mkdir()
+    log = tmp / "gitleaks.log"
+    # A gitleaks that finds the two planted secrets only when the canary carries
+    # this repository's .gitleaks.toml, and nothing in the repository scan.
+    (stubs / "gitleaks").write_text(
+        "#!/usr/bin/env bash\n"
+        "src=; rep=\n"
+        "for a in \"$@\"; do case \"$prev\" in --source) src=$a;; --report-path) rep=$a;; esac; prev=$a; done\n"
+        "printf '%s\n' \"$*\" >> \"$GL_LOG\"\n"
+        "if [ -f \"$src/planted.py\" ] && [ -f \"$src/.gitleaks.toml\" ]; then echo '[{},{}]' > \"$rep\"\n"
+        "else echo '[]' > \"$rep\"; fi\n"
+        "exit 0\n", newline="\n")
+    (stubs / "gitleaks").chmod(0o755)
+    env = dict(os.environ, PATH=stubs.as_posix() + os.pathsep + os.environ["PATH"],
+               GL_LOG=log.as_posix())
+    p = subprocess.run([BASH, (copy / "scripts" / SCRIPT.name).as_posix()],
+                       cwd=elsewhere, capture_output=True, text=True,
+                       encoding="utf-8", errors="replace", env=env, timeout=300)
+    out = p.stdout + p.stderr
+    calls = log.read_text(encoding="utf-8").splitlines() if log.is_file() else []
+    check("no .git: the script exits 0", p.returncode == 0, f"(exit {p.returncode})\n{out}")
+    check("no .git: the allowlist is verified in BOTH directions",
+          "BOTH directions" in out, out)
+    check("no .git: the repository scan reads the files (--no-git), not a missing history",
+          len(calls) == 2 and "--no-git" in calls[1].split() and "--no-git" not in calls[0].split(),
+          f"({calls})")
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
 
