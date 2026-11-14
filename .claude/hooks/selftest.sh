@@ -345,6 +345,27 @@ check "approve, curl ./"              block "$(payload "curl -X POST https://api
 check "approve, curl {s} glob"        block "$(payload "curl -X POST 'https://api.github.com/repos/O/R/actions/runs/1/pending_deployment{s}' -d @a.json")" guard-bash.sh
 check "approve, curl [s-s] glob"      block "$(payload "curl -X POST 'https://api.github.com/repos/O/R/actions/runs/1/pending_deployment[s-s]' -d @a.json")" guard-bash.sh
 check "curl POST to a run's rerun"    allow "$(payload 'curl -X POST https://api.github.com/repos/O/R/actions/runs/1/rerun')" guard-bash.sh
+# TheHub #61048: curl reaches every endpoint the gh api rules guard, not only the
+# deployment review. The full set of spellings is in test/hook-bypass-corpus.yml.
+GHR='https://api.github.com/repos/O/R'
+check "merge, curl -X PUT"            block "$(payload "curl -X PUT -H 'Authorization: Bearer x' $GHR/pulls/12/merge")"      guard-bash.sh
+check "approve a PR, curl body"       block "$(payload "curl $GHR/pulls/12/reviews -d '{\"event\":\"APPROVE\"}'")"          guard-bash.sh
+check "release, curl"                 block "$(payload "curl -X POST $GHR/releases -d @r.json")"                             guard-bash.sh
+check "branch protection, curl"       block "$(payload "curl -X DELETE $GHR/branches/main/protection")"                      guard-bash.sh
+check "contents to main, curl"        block "$(payload "curl -X PUT $GHR/contents/a.txt -d '{\"message\":\"m\",\"content\":\"eA==\"}'")" guard-bash.sh
+check "merges into main, curl"        block "$(payload "curl $GHR/merges -d '{\"base\":\"main\",\"head\":\"feat\"}'")"      guard-bash.sh
+check "mergePullRequest, curl"        block "$(payload "curl https://api.github.com/graphql -d '{\"query\":\"mutation { mergePullRequest(input: {pullRequestId: 1}) { clientMutationId } }\"}'")" guard-bash.sh
+check "merge, curl in \$(...) over lines" block "$(payload "x=\$(curl -X PUT \\
+  $GHR/pulls/12/merge)")"                                                                                                   guard-bash.sh
+check "curl GET a PR's merge status"  allow "$(payload "curl -s $GHR/pulls/12/merge")"                                       guard-bash.sh
+check "curl GET reviews and releases" allow "$(payload "curl -s $GHR/pulls/12/reviews && curl -sSL -o r.json $GHR/releases")" guard-bash.sh
+check "curl -X GET protection"        allow "$(payload "curl -X GET $GHR/branches/main/protection")"                         guard-bash.sh
+check "curl -G rulesets query"        allow "$(payload "curl -G $GHR/rulesets -d per_page=5")"                               guard-bash.sh
+check "curl POST a PR comment"        allow "$(payload "curl -X POST $GHR/issues/12/comments -d '{\"body\":\"looks good\"}'")" guard-bash.sh
+check "curl POST a review comment"    allow "$(payload "curl $GHR/pulls/12/comments -d @comment.json")"                      guard-bash.sh
+check "curl contents to a feature"    allow "$(payload "curl -X PUT $GHR/contents/a.txt -d '{\"message\":\"m\",\"content\":\"eA==\",\"branch\":\"feat-x\"}'")" guard-bash.sh
+check "curl merges into a feature"    allow "$(payload "curl $GHR/merges -d '{\"base\":\"feat-x\",\"head\":\"main\"}'")"    guard-bash.sh
+check "curl graphql PR read"          allow "$(payload "curl https://api.github.com/graphql -d '{\"query\":\"query { repository(owner: \\\"O\\\", name: \\\"R\\\") { pullRequest(number: 1) { mergeable } } }\"}'")" guard-bash.sh
 # 6. A gh alias body is a gh command.
 check "approve, gh alias set"         block "$(payload "gh alias set ok 'api -X POST $PD -f state=approved'")"                 guard-bash.sh
 check "merge, gh alias set"           block "$(payload "gh alias set m 'pr merge'")"                                           guard-bash.sh
