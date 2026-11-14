@@ -111,7 +111,7 @@ jobs:
       - name: Upload results to MyKronos
         # The action and ref every mykronos-*.yml lane in this repository uses.
         if: always()
-        uses: ToddGBenson/mykronos/actions/upload-results@cce7495afafb3f22b014847bd91624ced9b8e2dd
+        uses: ToddGBenson/mykronos/actions/upload-results@603e0f0febeee576fcc33ee69732c85f404ac9c1
         with:
           capability: unit
           tool: junit
@@ -120,7 +120,7 @@ jobs:
           token: ${{ secrets.MYKRONOS_INGESTION_TOKEN }}
           severity-threshold: low
           blocking: "false"
-          mykronos-ref: cce7495afafb3f22b014847bd91624ced9b8e2dd
+          mykronos-ref: 603e0f0febeee576fcc33ee69732c85f404ac9c1
 
       - name: Fail the job if a suite failed
         # Last, so the run is recorded first.
