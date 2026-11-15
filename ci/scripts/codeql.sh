@@ -115,8 +115,26 @@ codeql version --format=terse
 # Actions `autobuild` step was doing. If you enable one, pass it explicitly
 # rather than relying on autodetection — a silent autobuild failure produces an
 # empty database and a clean-looking report.
-echo "Building CodeQL database for ${cli_lang}"
+# ── Memory and cores: stay well inside the worker's cap ───────────────────────
+# Tasks carry no memory limit (they cannot be created with one on these
+# workers, mykronos D-174); the worker container is capped instead, and every
+# build on that worker shares the cap. CodeQL sizes its evaluator from the
+# memory and cores it can SEE, and inside a container /proc/meminfo and nproc
+# report the HOST's, so left alone it plans for the whole VM that also runs
+# production, pushes its worker into swap or OOM, and a worker OOM kills every
+# task on it.
+# 2048 MB is CodeQL's floor, not a choice (#169): v2.26.3 logs "rounding --ram
+# up to the minimum of 2048" for create and analyze, so the 1024 this used to
+# pass was never in force. One evaluator is 2048 MB plus JVM overhead, which
+# fits a 3 GiB worker once; two do not. So both `sast` and `mykronos-sast` run
+# their languages one at a time, and the `codeql` lane keeps those two jobs
+# apart. test/codeql-limits.test.py holds all three. Refs: TheHub #61062
+CODEQL_RAM="${CODEQL_RAM:-2048}"
+CODEQL_THREADS="${CODEQL_THREADS:-2}"
+
+echo "Building CodeQL database for ${cli_lang} (--ram=${CODEQL_RAM} --threads=${CODEQL_THREADS})"
 codeql database create codeql-db \
+  --ram="${CODEQL_RAM}" --threads="${CODEQL_THREADS}" \
   --language="${cli_lang}" \
   --source-root=repo \
   --overwrite
@@ -140,6 +158,7 @@ fi
 
 echo "Analysing with: ${suites[*]}"
 codeql database analyze codeql-db \
+  --ram="${CODEQL_RAM}" --threads="${CODEQL_THREADS}" \
   --format=sarif-latest \
   --output="mykronos-results/codeql.sarif" \
   --sarif-category="/language:${CODEQL_LANGUAGE}" \

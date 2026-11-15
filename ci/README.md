@@ -10,7 +10,29 @@ approve anything. Gate approval stays a human act recorded in GitHub (PD-2).
 
 ## What runs where, after the port
 
-> ## ⚠️ READ THIS FIRST — the Concourse check run is the gate; PR Governance is retired
+> ## ⚠️ READ THIS FIRST — the merge gate is MyKronos `independent-review`; PR Governance is retired
+>
+> **2026-11-04 (TheHub #60978).** The gate is **`independent-review`**, not `Concourse / keel`.
+> MyKronos posts it on every pull request head through its GitHub App, App-pinned, and opens
+> the approval request itself on a repository whose `main` requires it.
+> `scripts/configure-github.sh` requires it, pinned to the MyKronos App id **4551328**
+> (`mykronos-platform`, the default; `--checks-only` changes nothing else). **Not yet
+> applied:** on 2026-11-04 `main` still required no checks, so a human review is still the
+> only gate (POAM-014). `Concourse / keel` stays a post-merge verdict on `main` commits; it
+> cannot be required, for the reason below.
+>
+> **Requesting the review:** `POST /api/approvals/pull-requests` on the MyKronos API, body `{repo, number, statement}`.
+> MyKronos reads the diff, posts `independent-review` `in_progress` on the head, and turns it
+> green or red on the approver's decision. The approval covers that head only. Once `main`
+> requires the check, MyKronos also opens a request for every open pull request on its own.
+>
+> **`scripts/selfreview-check.js` and `test/selfreview-check.test.js` are fork-only.** Their
+> only consumer is `pr-governance.yml`, which keel runs on `workflow_dispatch` only, so keel
+> has no consumer of either. They stay because they are platform-owned
+> (`platform/MANIFEST.yml`): a fork that restores PR Governance on Actions gets them working.
+> keel's own self-review record is read by its reviewers, not by this script.
+>
+> The rest of this box is the earlier reading.
 >
 > **Re-read 2026-10-22 (TheHub #60935).** The repository is **public** again, and Actions runs
 > on pull requests: `Unit results`, `Mykronos sast` and `Mykronos secrets` ran on #142's head.
@@ -164,6 +186,31 @@ share of the host:
   containers instead (mykronos D-174). `test/container-limits.test.py` is the limits half of
   binnacle's test of the same name. It fails on a task step with no CPU share below 1024,
   or with any memory limit.
+
+- **CodeQL sized to the worker, not the host.** Inside a container CodeQL reads the
+  host's memory and cores, so `ci/scripts/codeql.sh` passes `--ram=2048 --threads=2` to
+  both `database create` and `database analyze`. 2048 is CodeQL's floor: it rounds a
+  smaller value up, so the 1024 used before #169 was never in force. Both `sast` and
+  `mykronos-sast` run python and javascript one at a time (`sast` with `in_parallel`
+  `limit: 1`), so the `codeql` lane holds one 2048 MB evaluator plus JVM overhead on one
+  3 GiB worker. Running two at once got the javascript one OOM-killed (#169).
+  `test/codeql-limits.test.py` fails if either command loses a flag, the default moves off
+  2048, a pipeline step overrides it, or a job runs two CodeQL steps at once.
+
+- **Every task step times out within 3h.** A lane turns one hung job into a shut lane: on
+  2026-10-31 the run of 9699ecb started one job per lane (iac, mykronos-secrets, sast), all
+  three hung, and they errored 9.7 hours later with every keel lane closed. The longest keel
+  job that ever succeeded took 139 minutes (mykronos-sast, in the pre-lane storms; median
+  17), so `timeout: 3h` on every task step fails nothing that passes. The check-run hooks
+  keep their 5m. `test/task-timeouts.test.py` fails on a task step without a timeout, or
+  with one above 3h.
+
+- **Every get and set_pipeline step times out within 15m** (TheHub #61238). A git get
+  that stalls on the network, or any get whose credential sits behind a sealed Vault,
+  would hold its lane exactly as a hung task does. The longest get (resource or task
+  image) in the last 4 builds of 12 keel jobs, read from Concourse on 2026-11-03, took
+  55 s, so `timeout: 15m` on every `get` and on `set_pipeline: self` fails nothing that
+  passes. The same test fails on a get or set_pipeline step without one, or above 15m.
 
 ### Trying a pipeline change on a branch
 
@@ -366,6 +413,11 @@ tracks `main`, and Concourse never sees a pull request's head. So:
 - **A commit Concourse skips stays in progress.** When two commits land close
   together, the chain takes the newer one, and the older commit's check stays
   `in_progress`.
+
+> **Superseded 2026-11-04 (TheHub #60978).** keel's merge gate is MyKronos
+> `independent-review`, which does arrive on PR heads, and `scripts/configure-github.sh`
+> requires it. `Concourse / keel` is not required. The 2026-10-20 plan below is kept as
+> written; do **not** run its `PUT`, which would block every pull request.
 
 **Requiring it: decided, not yet applied (TheHub #60849, option C).** This is
 keel's merge gate. It is switched on when TheHub #60580 lands, by #60580 or by

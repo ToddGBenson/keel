@@ -94,10 +94,13 @@ which model version produced any given artifact. A model upgrade is a **Normal c
 impact assessed, behavior spot-checked against the regression set of past gate decisions,
 human-approved, recorded.
 
-**Agent evaluation (AIC-12).** Monthly regression run at
+**Agent evaluation (AIC-12).** Monthly regression run, recorded at
 `evidence/ai-assurance/agent-evals/`. Did the security agent still catch the seeded findings?
 Did the PO agent still reject untestable criteria? Did any agent attempt an action outside
 its grant? Regressions are defects against the agent definitions, fixed through `/learn`.
+No behavioral run has been recorded yet, so the behavioral half of AIC-12 is not operating;
+only the structural half (`evals/run-agent-evals.sh`, every CI run) is. First run due:
+2026-11-12, by the operator (TheHub #61208).
 
 ---
 

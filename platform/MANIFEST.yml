@@ -50,15 +50,10 @@ platform_owned:
   # reads travel with it (keel #146 review).
   - test/poam.test.py
   - test/fixtures/poam-af878f1.md
-  # scripts/configure-github.sh --verify-only and scripts/protection-drift.py
-  # (TheHub #60979) compare a repository's live branch protection with its
-  # .sdlc/protection.yaml. The test and the recorded API responses it replays
-  # travel with them; it reads no ci/ file. keel's pipeline wiring is asserted
-  # by the project-owned test/protection-drift-wiring.test.py.
-  - test/protection-drift.test.py
-  - test/fixtures/protection-live-match.json
-  - test/fixtures/protection-live-enforce-admins-drift.json
-  - test/fixtures/protection-declared.yaml
+  # scripts/configure-github.sh sets the merge gate a fork runs on, so the test that
+  # proves it pins independent-review to an App and never requires a dead check
+  # travels with it (TheHub #60978).
+  - test/configure-github.test.py
   - docs/00-overview.md
   - docs/01-roles.md
   - docs/02-intake-and-discovery.md
