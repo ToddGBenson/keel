@@ -122,13 +122,14 @@ codeql version --format=terse
 # memory and cores it can SEE, and inside a container /proc/meminfo and nproc
 # report the HOST's, so left alone it plans for the whole VM that also runs
 # production, pushes its worker into swap or OOM, and a worker OOM kills every
-# task on it. `sast` runs two of these at once (python and javascript in
-# parallel; `mykronos-sast` runs them in turn), and the `codeql` lane keeps
-# those two jobs apart.
-# 1024 MB, not more: the JVM adds overhead on top of --ram. The same values
-# as binnacle's codeql.sh (#61040); raise them only together with the worker
-# cap. test/codeql-limits.test.py holds them. Refs: TheHub #61062
-CODEQL_RAM="${CODEQL_RAM:-1024}"
+# task on it.
+# 2048 MB is CodeQL's floor, not a choice (#169): v2.26.3 logs "rounding --ram
+# up to the minimum of 2048" for create and analyze, so the 1024 this used to
+# pass was never in force. One evaluator is 2048 MB plus JVM overhead, which
+# fits a 3 GiB worker once; two do not. So both `sast` and `mykronos-sast` run
+# their languages one at a time, and the `codeql` lane keeps those two jobs
+# apart. test/codeql-limits.test.py holds all three. Refs: TheHub #61062
+CODEQL_RAM="${CODEQL_RAM:-2048}"
 CODEQL_THREADS="${CODEQL_THREADS:-2}"
 
 echo "Building CodeQL database for ${cli_lang} (--ram=${CODEQL_RAM} --threads=${CODEQL_THREADS})"

@@ -211,7 +211,7 @@ resources:
   #   03:00  build, lint, test                 the commit chain, cheap
   #   04:00  sast, secrets
   #   05:00  sca, iac
-  #   06:00  suppression-audit, platform-integrity
+  #   06:00  suppression-audit, platform-integrity, protection-drift
 
   - name: daily-0300
     type: time
@@ -302,6 +302,7 @@ groups:
     jobs:
       - platform-integrity
       - suppression-audit
+      - protection-drift
       - compliance-monthly
 
   # The agents are a system that can regress.
@@ -331,6 +332,7 @@ groups:
     jobs:
       - agent-assurance
       - compliance-monthly
+      - protection-drift
 
   - name: all
     jobs: ["*"]
@@ -358,6 +360,7 @@ groups:
 #   codeql   sast mykronos-sast
 #   ingest   mykronos-secrets mykronos-sca mykronos-atlas
 #            agent-assurance compliance-monthly container-scan
+#            protection-drift
 #
 # `codeql` holds the two CodeQL jobs, so keel never has two 846MB bundles and
 # two CodeQL evaluators on the workers at once. `sast` is the longest job in
@@ -636,27 +639,35 @@ jobs:
       - get: daily-0400
         trigger: true
         timeout: 15m
+      # One language at a time (#169). Each CodeQL evaluator budgets 2048 MB
+      # (CodeQL's floor) plus JVM overhead, and a worker is capped at 3 GiB.
+      # A bare in_parallel let placement put both on one worker: build 141's
+      # javascript analysis was OOM-killed (exit 137) beside python's.
+      # `limit: 1` runs them in turn; fail_fast stays false, so javascript
+      # still runs when python's gate fails, and both suites are kept.
       - in_parallel:
-          - task: codeql-python
-            timeout: 3h
-            file: repo/ci/tasks/codeql.yml
-            output_mapping: { mykronos-results: results-python }
-            params:
-              CODEQL_LANGUAGE: python
-              CODEQL_QUERIES: security-extended,security-and-quality
-              CODEQL_BUNDLE_VERSION: ((codeql_bundle_version))
-              CODEQL_BUNDLE_SHA256: ((codeql_bundle_sha256))
-              FAIL_ON_SECURITY_FINDING: "true"
-          - task: codeql-javascript
-            timeout: 3h
-            file: repo/ci/tasks/codeql.yml
-            output_mapping: { mykronos-results: results-javascript }
-            params:
-              CODEQL_LANGUAGE: javascript-typescript
-              CODEQL_QUERIES: security-extended,security-and-quality
-              CODEQL_BUNDLE_VERSION: ((codeql_bundle_version))
-              CODEQL_BUNDLE_SHA256: ((codeql_bundle_sha256))
-              FAIL_ON_SECURITY_FINDING: "true"
+          limit: 1
+          steps:
+            - task: codeql-python
+              timeout: 3h
+              file: repo/ci/tasks/codeql.yml
+              output_mapping: { mykronos-results: results-python }
+              params:
+                CODEQL_LANGUAGE: python
+                CODEQL_QUERIES: security-extended,security-and-quality
+                CODEQL_BUNDLE_VERSION: ((codeql_bundle_version))
+                CODEQL_BUNDLE_SHA256: ((codeql_bundle_sha256))
+                FAIL_ON_SECURITY_FINDING: "true"
+            - task: codeql-javascript
+              timeout: 3h
+              file: repo/ci/tasks/codeql.yml
+              output_mapping: { mykronos-results: results-javascript }
+              params:
+                CODEQL_LANGUAGE: javascript-typescript
+                CODEQL_QUERIES: security-extended,security-and-quality
+                CODEQL_BUNDLE_VERSION: ((codeql_bundle_version))
+                CODEQL_BUNDLE_SHA256: ((codeql_bundle_sha256))
+                FAIL_ON_SECURITY_FINDING: "true"
 
   # ── DAILY, NOT PER-COMMIT ───────────────────────────────────────────────────
   # `main` cannot be reached except through a pull request that already ran
@@ -1067,6 +1078,32 @@ jobs:
       - task: platform-integrity
         timeout: 3h
         file: repo/ci/tasks/platform-integrity.yml
+
+  # ── Branch-protection drift (TheHub #60979) ─────────────────────────────────
+  # GitHub's settings are the controls; this repository's docs are claims about
+  # them. Nothing re-read the settings after setup, so OPERATING.md said
+  # signatures were enforced while the API said they were off, and only a manual
+  # audit found it. This job compares main's live protection with
+  # .sdlc/protection.yaml every morning and goes red on any DRIFT.
+  #
+  # GET only: it detects drift and never changes protection. Its token is a
+  # fine-grained one with Administration: read-only on this repository, from
+  # Vault as ((github_protection_token)). Vault seals on reboot; an empty token
+  # fails the task rather than passing it. Triggered by the timer alone: a commit
+  # does not change GitHub's settings. Out of the commit chain, so its red never
+  # reaches `Concourse / keel`. The `ingest` lane: it reports and decides nothing.
+  - name: protection-drift
+    public: true
+    serial_groups: [ingest]
+    plan:
+      - get: repo
+      - get: daily-0600
+        trigger: true
+      - task: protection-drift
+        file: repo/ci/tasks/protection-drift.yml
+        params:
+          GH_TOKEN: ((github_protection_token))
+          REPO_SLUG: ((github_owner))/((github_repo))
 
   # ── AI assurance ────────────────────────────────────────────────────────────
   # A prompt change is a code change. The scheduled run is the control that
