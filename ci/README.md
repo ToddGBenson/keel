@@ -10,7 +10,29 @@ approve anything. Gate approval stays a human act recorded in GitHub (PD-2).
 
 ## What runs where, after the port
 
-> ## ⚠️ READ THIS FIRST — the Concourse check run is the gate; PR Governance is retired
+> ## ⚠️ READ THIS FIRST — the merge gate is MyKronos `independent-review`; PR Governance is retired
+>
+> **2026-11-04 (TheHub #60978).** The gate is **`independent-review`**, not `Concourse / keel`.
+> MyKronos posts it on every pull request head through its GitHub App, App-pinned, and opens
+> the approval request itself on a repository whose `main` requires it.
+> `scripts/configure-github.sh` requires it, pinned to the MyKronos App id **4551328**
+> (`mykronos-platform`, the default; `--checks-only` changes nothing else). **Not yet
+> applied:** on 2026-11-04 `main` still required no checks, so a human review is still the
+> only gate (POAM-014). `Concourse / keel` stays a post-merge verdict on `main` commits; it
+> cannot be required, for the reason below.
+>
+> **Requesting the review:** `POST /api/approvals/pull-requests` on the MyKronos API, body `{repo, number, statement}`.
+> MyKronos reads the diff, posts `independent-review` `in_progress` on the head, and turns it
+> green or red on the approver's decision. The approval covers that head only. Once `main`
+> requires the check, MyKronos also opens a request for every open pull request on its own.
+>
+> **`scripts/selfreview-check.js` and `test/selfreview-check.test.js` are fork-only.** Their
+> only consumer is `pr-governance.yml`, which keel runs on `workflow_dispatch` only, so keel
+> has no consumer of either. They stay because they are platform-owned
+> (`platform/MANIFEST.yml`): a fork that restores PR Governance on Actions gets them working.
+> keel's own self-review record is read by its reviewers, not by this script.
+>
+> The rest of this box is the earlier reading.
 >
 > **Re-read 2026-10-22 (TheHub #60935).** The repository is **public** again, and Actions runs
 > on pull requests: `Unit results`, `Mykronos sast` and `Mykronos secrets` ran on #142's head.
@@ -392,6 +414,11 @@ tracks `main`, and Concourse never sees a pull request's head. So:
   together, the chain takes the newer one, and the older commit's check stays
   `in_progress`.
 
+> **Superseded 2026-11-04 (TheHub #60978).** keel's merge gate is MyKronos
+> `independent-review`, which does arrive on PR heads, and `scripts/configure-github.sh`
+> requires it. `Concourse / keel` is not required. The 2026-10-20 plan below is kept as
+> written; do **not** run its `PUT`, which would block every pull request.
+
 **Requiring it: decided, not yet applied (TheHub #60849, option C).** This is
 keel's merge gate. It is switched on when TheHub #60580 lands, by #60580 or by
 the owner. It is never switched on before then, for the reason in the first
@@ -465,7 +492,10 @@ in the credential manager instead:
 ```
 github_token · webhook_token · mykronos_ingestion_token
 registry_user · registry_password
+github_protection_token
 ```
+
+`github_protection_token` is read by `protection-drift` alone (section 5).
 
 `anthropic_api_key` is needed only by a fork that wires the `ai-evals` template
 lane. keel's own pipeline no longer references it.
@@ -505,6 +535,47 @@ gh api repos/ToddGBenson/keel/branches/main/protection   --jq '{checks: .require
 
 `Concourse / keel` is the check that will be required, once TheHub #60580 lands.
 The section above gives the command and says why it must not be applied sooner.
+
+#### `protection-drift`: the settings are re-read every morning (TheHub #60979)
+
+Reading it by hand is what kept failing: this section, `OPERATING.md` and
+`configure-github.sh` each made a claim about these settings that was false for
+weeks. `.sdlc/protection.yaml` now declares the intended values on `main`
+(`enforce_admins`, `required_approving_review_count`, `required_signatures`,
+`required_linear_history`, `allow_force_pushes`, the required status checks).
+Each value that differs from `configure-github.sh`'s default carries a `reason:`
+citing the decision or Hub story behind it. The job `protection-drift` runs
+
+```sh
+bash scripts/configure-github.sh --verify-only
+```
+
+on the `daily-0600` timer. It makes GET requests only, prints one `match` or
+`DRIFT <field> declared=<x> live=<y>` line per field, and goes red on any DRIFT
+or when the protection cannot be read. It changes nothing. Run the same command
+locally with your own `gh` login to read the state at any time.
+
+On drift, either GitHub moved (put it back, then confirm the job goes green) or
+the intent changed (edit `.sdlc/protection.yaml` with a `reason:`, in the same
+pull request as any doc that describes the setting). To require signed commits
+again: `gh api -X POST repos/ToddGBenson/keel/branches/main/protection/required_signatures`,
+then set `required_signatures` to `true` in the declaration and restore the claim
+in `OPERATING.md`. `test/protection-drift.test.py` fails if the two disagree.
+
+**Its token.** A fine-grained personal access token, not a classic one:
+
+- Resource owner: the repository's owner. Repository access: **only this repository**.
+- Repository permissions: **Administration: Read-only** (Metadata: Read-only is added
+  automatically). Nothing else.
+- An expiry date, and a calendar reminder to rotate it before then.
+
+Store it in the credential manager as `github_protection_token`; with Vault at the
+default paths that is `/concourse/<team>/keel/github_protection_token` (field
+`value`). The task passes it to `curl` on stdin, so it is in no process's
+arguments, and nothing in `ci/scripts/protection-drift.sh` traces or prints it.
+Vault seals on every reboot: until it is unsealed the variable does not resolve,
+and the build errors. An empty value fails the task with
+`GH_TOKEN is empty`. Neither reads as "no drift".
 
 ---
 

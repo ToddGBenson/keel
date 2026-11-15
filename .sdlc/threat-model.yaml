@@ -154,10 +154,27 @@ controls:
       main requires one approving review before merge (API read 2026-10-18).
       enforce_admins is false, so the owner can bypass it, and no required
       status checks appear on the classic protection; the PR governance checks
-      are therefore advisory to an admin.
-    evidence_ref: scripts/configure-github.sh
+      are therefore advisory to an admin. Re-read 2026-11-04 unchanged. The
+      intended values are declared in .sdlc/protection.yaml, and the
+      protection-drift job compares them with the API every morning (TheHub
+      #60979).
+    evidence_ref: .sdlc/protection.yaml
     applies_to: github-repository
-    reviewed_at: 2026-10-18
+    reviewed_at: 2026-11-04
+
+  - id: protection-drift-token
+    kind: secrets_management
+    stride: information_disclosure
+    description: >-
+      The protection-drift job reads branch protection with a fine-grained
+      token limited to this repository with Administration read-only, so a
+      leaked token reads settings and changes none. It is stored in Vault as
+      ((github_protection_token)), reaches curl on stdin rather than argv, and
+      the task script neither traces nor prints it. An unresolved or empty token
+      fails the job; it never reports "no drift" (TheHub #60979).
+    evidence_ref: ci/scripts/protection-drift.sh
+    applies_to: concourse-pipeline
+    reviewed_at: 2026-11-04
 
   - id: agent-guard-hooks
     kind: authorization
