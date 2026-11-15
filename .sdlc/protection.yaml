@@ -1,0 +1,56 @@
+# keel's intended branch protection on `main`. Refs: TheHub #60979
+#
+# The DECLARED state. `bash scripts/configure-github.sh --verify-only` reads the
+# live settings with GET requests only and compares every field below, one
+# `match` or `DRIFT <field> declared=<x> live=<y>` line each, exit 1 on any
+# DRIFT. The Concourse job `protection-drift` runs it every morning on the
+# daily-0600 timer and goes red on drift (ci/README.md).
+#
+# This file is what keel's docs may claim about GitHub's settings. A doc that
+# says more than this says is wrong, and test/protection-drift.test.py holds
+# OPERATING.md to it for `required_signatures`.
+#
+# A value that differs from configure-github.sh's default needs a `reason:`
+# citing a decision id (D-123, ADR-0005) or a Hub story (TheHub #12345), or the
+# check refuses the declaration. Without one, this file would be a snapshot of
+# whatever is live, and a drift check against a snapshot detects nothing.
+#
+# Changing a value here does not change GitHub. Change GitHub deliberately (the
+# command for each is in ci/README.md, "Branch protection"), then this file, in
+# the same pull request as any doc that describes it.
+#
+# Project-owned (platform/MANIFEST.yml): a fork's protection is its own, and sync
+# must never overwrite what a fork has declared about itself.
+#
+# Values recorded from the API on 2026-11-04 and unchanged since the 2026-10-22
+# reading in TheHub #60979: {checks: null, enforce_admins: false, reviews: 1,
+# signatures: false}.
+version: 1
+branch: main
+fields:
+  enforce_admins:
+    value: false
+    reason: >-
+      TheHub #60849 option C (2026-10-20): the decided protection body in
+      ci/README.md keeps enforce_admins off until Concourse / keel is required
+      (TheHub #60580). The owner's merges can bypass protection meanwhile.
+  required_approving_review_count:
+    value: 1
+  required_signatures:
+    value: false
+    reason: >-
+      TheHub #60979: off on main since at least 2026-10-22, against
+      POAM-009's 2026-08-08 closure note, and no decision re-enabled it.
+      Declared as it is so OPERATING.md stops claiming it. Turning it back on
+      is the owner's call (ci/README.md gives the command); flip this to true
+      in the same change.
+  required_linear_history:
+    value: true
+  allow_force_pushes:
+    value: false
+  required_status_checks:
+    value: []
+    reason: >-
+      TheHub #60849 option C (2026-10-20): no check is required until
+      Concourse / keel can arrive on a pull request head (TheHub #60580).
+      POAM-014 is open at High for exactly this.

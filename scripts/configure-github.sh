@@ -37,6 +37,9 @@ REVIEW_APP_ID_DEFAULT=4551328
 REVIEW_APP_ID="${KEEL_REVIEW_APP_ID:-$REVIEW_APP_ID_DEFAULT}"
 while [ $# -gt 0 ]; do
   case "$1" in
+    --verify-only) VERIFY_ONLY=1; shift ;;
+    --repo)     VERIFY_REPO="${2:?--repo needs OWNER/NAME}"; shift 2 ;;
+    --declared) DECLARED="${2:?--declared needs a file}"; shift 2 ;;
     --dry-run) DRY=1; shift ;;
     --yes|-y)  YES=1; shift ;;
     --solo)    MODE="solo"; shift ;;
