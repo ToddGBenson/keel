@@ -6,6 +6,9 @@
 #   bash scripts/configure-github.sh --dry-run    # show what would change
 #   bash scripts/configure-github.sh --review-app-id <id|none>   # another App, or no gate
 #   bash scripts/configure-github.sh --checks-only  # the merge gate only; nothing else changes
+#   bash scripts/configure-github.sh --verify-only [--repo OWNER/NAME] [--declared FILE]
+#                                    # GET only: compare live protection with
+#                                    # .sdlc/protection.yaml, exit 1 on any DRIFT
 #
 # ── THE MERGE GATE (TheHub #60978) ───────────────────────────────────────────
 # The required check is `independent-review`, posted on each pull request head by the
@@ -30,7 +33,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-DRY=0; YES=0; MODE="team"; CHECKS_ONLY=0
+DRY=0; YES=0; MODE="team"; CHECKS_ONLY=0; VERIFY_ONLY=0; VERIFY_REPO=""; DECLARED=".sdlc/protection.yaml"
 # The MyKronos GitHub App (`mykronos-platform`): the app.id on every check run it posts
 # here, e.g. library-allowlist. Documented in ci/README.md and SETUP.md section 2.
 REVIEW_APP_ID_DEFAULT=4551328
@@ -47,10 +50,85 @@ while [ $# -gt 0 ]; do
     --checks-only) CHECKS_ONLY=1; shift ;;
     --review-app-id) [ $# -ge 2 ] || { echo "--review-app-id needs a value" >&2; exit 1; }
                REVIEW_APP_ID="$2"; shift 2 ;;
-    -h|--help) sed -n '2,32p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,35p' "$0"; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 1 ;;
   esac
 done
+
+# ── --verify-only: drift check, GET requests only (TheHub #60979) ─────────────
+# The verification in step 6 runs only after this script has just APPLIED the
+# settings, so nothing re-read them afterwards: OPERATING.md said signatures were
+# enforced and the API said they were not, and only a manual audit noticed. This
+# mode applies nothing. It makes one GET of the declared branch's protection and
+# compares every field .sdlc/protection.yaml declares, one `match` or
+# `DRIFT <field> declared=<x> live=<y>` line each (scripts/protection-drift.py).
+#
+#   exit 0  every declared field matches
+#   exit 1  any DRIFT, or a declaration that is not one (a field missing, or a
+#           value off this script's default with no reason citing a decision)
+#   exit 2  the protection could not be read: no credential, 403, 404. Never 0.
+#
+# Credential: `gh` if it is on PATH (its own auth, or GH_TOKEN). Without gh, curl
+# with GH_TOKEN, passed on curl's stdin so it is in no process's argv. The
+# Concourse job `protection-drift` uses a fine-grained token with Administration:
+# read-only on this repository and nothing else (ci/README.md).
+if [ "$VERIFY_ONLY" = "1" ]; then
+  VPY=""
+  for cand in python3 python; do
+    if command -v "$cand" >/dev/null 2>&1 && "$cand" -c 'import sys' >/dev/null 2>&1; then
+      VPY="$cand"; break
+    fi
+  done
+  [ -n "$VPY" ] || { echo "ERROR: python not found" >&2; exit 2; }
+  [ -f "$DECLARED" ] || { echo "ERROR: no declared state: $DECLARED not found" >&2; exit 2; }
+
+  api_get() { # path -> response body on stdout; non-zero unless HTTP 2xx
+    if command -v gh >/dev/null 2>&1; then
+      gh api "$1"
+      return
+    fi
+    if [ -z "${GH_TOKEN:-}" ]; then
+      echo '{"message":"no gh CLI on PATH and GH_TOKEN is empty"}'
+      return 1
+    fi
+    local body code
+    body="$(mktemp)"
+    # printf is a builtin: the token reaches curl on stdin, never in argv.
+    code="$(printf 'header = "Authorization: Bearer %s"\n' "$GH_TOKEN" \
+      | curl -sS -K - -o "$body" -w '%{http_code}' \
+          -H 'Accept: application/vnd.github+json' \
+          -H 'X-GitHub-Api-Version: 2022-11-28' \
+          "https://api.github.com/$1")" || code="000"
+    cat "$body"; rm -f "$body"
+    case "$code" in 2??) return 0 ;; *) return 1 ;; esac
+  }
+
+  if [ -z "$VERIFY_REPO" ]; then
+    VERIFY_REPO="$(gh repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null)" || {
+      echo "ERROR: cannot tell which repository; pass --repo OWNER/NAME" >&2; exit 2; }
+  fi
+  VBRANCH="$("$VPY" scripts/protection-drift.py branch "$DECLARED")" || exit 2
+  printf 'Branch protection drift: %s %s against %s\n' "$VERIFY_REPO" "$VBRANCH" "$DECLARED"
+
+  LIVE="$(mktemp)"
+  if ! api_get "repos/$VERIFY_REPO/branches/$VBRANCH/protection" > "$LIVE" 2>/dev/null; then
+    msg="$("$VPY" -c 'import json, sys
+try:
+    print(json.load(open(sys.argv[1], encoding="utf-8")).get("message", "no message"))
+except Exception:
+    print("no readable response")' "$LIVE" 2>/dev/null || echo unreadable)"
+    rm -f "$LIVE"
+    echo "ERROR: branch protection on $VBRANCH is not readable: $msg" >&2
+    echo "  This is not a pass. A missing or under-scoped token, or an unprotected branch," >&2
+    echo "  reads the same from here: check the credential, then the branch." >&2
+    exit 2
+  fi
+  rc=0
+  "$VPY" scripts/protection-drift.py compare "$DECLARED" "$LIVE" || rc=$?
+  rm -f "$LIVE"
+  exit "$rc"
+fi
+
 
 [ "$REVIEW_APP_ID" = "none" ] && REVIEW_APP_ID=""
 case "$REVIEW_APP_ID" in
