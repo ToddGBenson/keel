@@ -20,6 +20,8 @@ test/serial-lanes.test.py           lint         pipeline: at most 3 heavy jobs 
 test/container-limits.test.py       lint         tasks: cpu shares below 1024, no memory limit (TheHub #61062, D-174)
 test/codeql-limits.test.py          lint         CodeQL held to --ram=1024 --threads=2 (TheHub #61062)
 test/task-timeouts.test.py          lint         task steps time out within 3h, gets within 15m, so a hang frees its lane (TheHub #61062, #61238)
+test/protection-drift.test.py       lint         branch-protection drift: live settings against .sdlc/protection.yaml (TheHub #60979)
+test/protection-drift-wiring.test.py lint        keel's own wiring of the daily branch-protection drift check (TheHub #60979)
 # test
 test/dashboard.test.py              test,quick   dashboard generator tests
 test/control-liveness.test.py       test         control liveness counts records, not directories (TheHub #60981)
@@ -50,3 +52,6 @@ test/selfreview-check.test.js       test         self-review check tests (POAM-0
 # keel's own liveness numbers: the frozen G3 legacy list, POAM-018 states the baseline.
 # Project-owned; test/control-liveness.test.py (platform-owned) holds in any fork.
 test/control-liveness-keel.test.py  test         keel liveness: frozen legacy G3 list, POAM-018 = baseline (keel #148 review)
+# Added after #162-#166 merged without their manifest lines (a branch that merged main lost them).
+test/mykronos-pins.test.py          test         every MyKronos pin names one commit, none before mykronos #1036 (TheHub #61212)
+test/configure-github.test.py       test         configure-github.sh: the merge gate is MyKronos independent-review, App-pinned (TheHub #60978)

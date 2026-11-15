@@ -50,18 +50,8 @@ DEFAULTS = {
     "required_signatures": True,
     "required_linear_history": True,
     "allow_force_pushes": False,
-    "required_status_checks": sorted([
-        "Process compliance",
-        "Platform integrity (AIC-3, AIC-8, AU-9)",
-        "Dependency review (SR-3, SR-4, AIC-7)",
-        "Build", "Lint & static typing", "Test & coverage",
-        "SAST — CodeQL (SA-11(1))",
-        "Secret scanning (IA-5)",
-        "SCA — dependency vulnerabilities (RA-5, SR-3)",
-        "IaC & configuration (CM-6, CM-7)",
-        "Suppression audit",
-        "SAST — CodeQL (SA-11(1)) (javascript-typescript)",
-    ]),
+    # ONE required check since #163 (TheHub #60978): `independent-review`, pinned to the MyKronos App.
+    "required_status_checks": ["independent-review"],
 }
 FIELDS = tuple(DEFAULTS)
 CITATION = re.compile(r"\b(?:TheHub #\d+|D-\d+|ADR-\d{4})\b")
