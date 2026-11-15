@@ -247,8 +247,9 @@ def script_defaults():
         return None if not m else m.group(1) == "true"
 
     m = re.search(r'else REVIEW_COUNT=(\d+)', text)
-    checks = re.search(r"^CHECKS=\(\n(.*?)^\)", text, re.M | re.S)
-    contexts = re.findall(r'"([^"]+)"', re.sub(r"#.*", "", checks.group(1))) if checks else None
+    # since #163 the script requires ONE check, REVIEW_CHECK (the MyKronos independent-review)
+    rc = re.search(r'^REVIEW_CHECK="([^"]+)"', text, re.M)
+    contexts = [rc.group(1)] if rc else None
     return {
         "enforce_admins": json_bool("enforce_admins"),
         # team mode, the script's default MODE
