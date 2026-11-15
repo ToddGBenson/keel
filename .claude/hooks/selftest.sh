@@ -483,6 +483,24 @@ check "PS: joined fragment, pr view"  allow "$(pspayload 'gh pr `v"iew" 12')"   
 check "PS: tab escape in a message"   allow "$(pspayload 'Write-Output "pr`tmerge is for humans"; git status')" guard-bash.sh
 check "PS: joined literal, GET"       allow "$(pspayload "irm -Uri ('https://api.github.com/repos/O/R/pulls/12/' + 'merge')")" guard-bash.sh
 check "PS: \$u merge endpoint, GET"  allow "$(pspayload "\$u = 'https://api.github.com/repos/O/R/pulls/12/merge'; irm \$u")" guard-bash.sh
+# keel #165/#166 merge: the curl loop decided on curl_is_write (curl's -X only), so a
+# cmdlet's -Method write to these endpoints passed. It now decides on http_write and
+# reads an endpoint held in a variable from the whole command.
+check "PS: merge, irm -Method Put"    block "$(pspayload 'irm -Method Put https://api.github.com/repos/O/R/pulls/12/merge')" guard-bash.sh
+check "PS: merge, Invoke-RestMethod PUT" block "$(pspayload 'Invoke-RestMethod -Method PUT -Uri https://api.github.com/repos/O/R/pulls/12/merge')" guard-bash.sh
+check "PS: merges main, iwr -Method Post" block "$(pspayload "iwr -Method Post -Uri https://api.github.com/repos/O/R/merges -Body '{\"base\":\"main\",\"head\":\"feat\"}'")" guard-bash.sh
+check "PS: merge, Invoke-WebRequest Patch" block "$(pspayload 'Invoke-WebRequest -Method Patch -Uri https://api.github.com/repos/O/R/pulls/12/merge')" guard-bash.sh
+check "PS: contents, irm -Method Put" block "$(pspayload "irm -Method Put https://api.github.com/repos/O/R/contents/README.md -Body '{\"message\":\"x\",\"content\":\"eA==\"}'")" guard-bash.sh
+check "PS: contents main, Invoke-RestMethod PUT" block "$(pspayload "Invoke-RestMethod -Method PUT -Uri https://api.github.com/repos/O/R/contents/a.txt -Body '{\"branch\":\"main\",\"content\":\"eA==\"}'")" guard-bash.sh
+check "PS: \$u contents, irm -Method Put" block "$(pspayload "\$u = 'https://api.github.com/repos/O/R/contents/a.txt'; Invoke-RestMethod -Method Put -Uri \$u -Body \$b")" guard-bash.sh
+check "PS: \$m merges, iwr -Method Post" block "$(pspayload "\$m = 'https://api.github.com/repos/O/R/merges'; iwr -Method Post \$m -Body \$b")" guard-bash.sh
+check "PS: \$u merge, irm -Method Put"  block "$(pspayload "\$u = 'https://api.github.com/repos/O/R/pulls/12/merge'; irm -Method Put \$u")" guard-bash.sh
+check "PS: contents GET, irm"         allow "$(pspayload 'irm https://api.github.com/repos/O/R/contents/README.md')" guard-bash.sh
+check "PS: contents, -Method Get"     allow "$(pspayload 'Invoke-RestMethod -Method Get -Uri https://api.github.com/repos/O/R/contents/a.txt')" guard-bash.sh
+check "PS: merge GET, iwr -Method Get" allow "$(pspayload 'Invoke-WebRequest -Method Get -Uri https://api.github.com/repos/O/R/pulls/12/merge')" guard-bash.sh
+check "PS: \$u contents, GET"         allow "$(pspayload "\$u = 'https://api.github.com/repos/O/R/contents/a.txt'; irm \$u")" guard-bash.sh
+check "PS: contents feat, irm Put"    allow "$(pspayload "irm -Method Put https://api.github.com/repos/O/R/contents/a.txt -Body '{\"branch\":\"feat\",\"content\":\"eA==\"}'")" guard-bash.sh
+check "PS: merges feat, iwr Post"     allow "$(pspayload "iwr -Method Post -Uri https://api.github.com/repos/O/R/merges -Body '{\"base\":\"feat\",\"head\":\"x\"}'")" guard-bash.sh
 
 echo ""
 echo "guard-write.sh — must BLOCK (AU-9, AIC-5)"

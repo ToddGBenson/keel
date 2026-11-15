@@ -637,20 +637,24 @@ $curl_gql" " over curl"
 s#/\./#/#g
 s#/[^/[:space:]]+/\.\./#/#
 ta')
-  # Second review: curl, like gh, sends the LAST -X it is given (curl -XGET -XPOST
-  # is a POST). So a call is a write if ANY -X/--request on it is not GET or HEAD,
-  # or if it carries a body and gives no -X and no -G.
-  curl_m='(-[a-zA-Z]*X[[:space:]]*|--request[[:space:]=]+)[\"'"'"']*'
-  curl_is_write() { # $1 = one curl invocation
-    local ms
-    ms=$(printf '%s' "$1" | grep -oE "$curl_m"'[A-Za-z]+' | sed -E "s/^$curl_m//")
-    if [ -n "$ms" ]; then
-      printf '%s\n' "$ms" | grep -qvxE '[Gg][Ee][Tt]|[Hh][Ee][Aa][Dd]'
-      return
-    fi
-    printf '%s' "$1" | grep -qE '[[:space:]](-[a-zA-Z]*[dFTK]|--data|--json|--form|--upload-file|--config)' || return 1
-    ! printf '%s' "$1" | grep -qE '[[:space:]](-[a-zA-Z]*G|--get)([[:space:]]|$)'
-  }
+  # TheHub #61064: the write test is http_write (above), which reads a PowerShell
+  # cmdlet's -Method as well as curl's -X; curl's own reading of a call is
+  # unchanged. And, as the gh api rule reads pending_deployments, a protected
+  # endpoint named anywhere in the command counts for every write in it
+  # ($u = '.../pulls/12/merge'; irm -Method Put $u, or a URL piped to
+  # % { irm ... $_ }), so the command itself is judged beside each call. The
+  # contents and merges checks still read the branch from the call's own body.
+  # keel #165 and #166 merged with #165's loop below (curl_is_write, which reads
+  # only curl's -X and body flags) and dropped both of these, leaving http_write
+  # and HTTP_GH unused (shellcheck SC2034); binnacle #63 merged the same way and
+  # binnacle #74 is the same fix.
+  curl_ctx=""
+  if g "$DEPLOY_REVIEW" || g "$HTTP_GH"; then
+    curl_ctx=$(printf '%s\n' "$cmd" | sed -E ':a
+s#/\./#/#g
+s#/[^/[:space:]]+/\.\./#/#
+ta')
+  fi
   # TheHub #61048: the {} and [] globs are expanded (every alternative, every
   # character of a range) so pulls/1/merg{e} and mer[g-g]e are read as merge. The
   # line itself is kept too. A glob too large to expand here is refused below.
@@ -690,11 +694,12 @@ AWK
   # an explicit write method, or a body with no -X and no -G. A GET stays a read.
   while IFS= read -r seg; do
     [ -n "$seg" ] || continue
-    curl_is_write "$seg" || continue
+    http_write "$seg" || continue
     # Only the words that hold a / and a glob are expanded, each on its own: a JSON
     # body is full of braces and commas, and expanding it whole multiplies them.
     cu_text="$seg
-$(printf '%s\n' "$seg" | grep -oE '[^[:space:]]*/[^[:space:]]*' | grep -E '[][{}]' | LC_ALL=C awk "$curl_glob_awk" 2>/dev/null)"
+$(printf '%s\n' "$seg" | grep -oE '[^[:space:]]*/[^[:space:]]*' | grep -E '[][{}]' | LC_ALL=C awk "$curl_glob_awk" 2>/dev/null)
+$curl_ctx"
     cu() { printf '%s\n' "$cu_text" | grep -qE "$1"; }
     cu "$DEPLOY_REVIEW"'|/actions/runs/[^|;&/[:space:]]+/[^[:space:]]*[][{}]' \
       && block "approving or rejecting an environment deployment through curl. Only a human reviews a deployment; the environment's reviewers ARE the G5 authorization gate." "CM-3, AC-5, AIC-1, AIC-2"
