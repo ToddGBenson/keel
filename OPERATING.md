@@ -52,9 +52,25 @@ G0/G2; a chore skips most of it; only behavior/security/AI changes get the full 
 
 ## Merging
 
-**Squash merges only.** `required_signatures` is enforced on `main`, and GitHub cannot sign a
-rebase merge (it replays your commits rather than creating one). Squash produces a single
-GitHub-signed commit and still satisfies `required_linear_history`.
+**The merge gate is MyKronos `independent-review`** (TheHub #60978). MyKronos posts it on
+the pull request's head commit through its GitHub App (`mykronos-platform`), and branch
+protection requires it pinned to that App, so a workflow job with the same name cannot
+satisfy it. It goes green only when someone other than the requester approves that exact
+head. A new push needs a new approval.
+
+**To request it:** `POST /api/approvals/pull-requests` on the MyKronos API, body `{repo, number, statement}`.
+MyKronos reads the diff, computes the tier and posts the check `in_progress`; the approver
+decides in MyKronos. Once `main` requires the check, MyKronos also opens the request itself
+for every open pull request. An agent requests with its own MyKronos credential and never
+approves its own work.
+
+**`Concourse / keel` stays main-only.** It is the post-merge verdict on each `main` commit
+and never lands on a pull request head, so it is not, and cannot be, a required check.
+
+**Squash merges only.** `required_linear_history` is on, and a squash produces a single
+commit on `main`. `required_signatures` is **not** enforced on `main` (measured 2026-11-04:
+`required_signatures.enabled` is false). `scripts/configure-github.sh` turns it on only once
+the operator can sign (L0010); until then SI-7/CM-14 are open in the POA&M.
 
 ## The rules that never bend
 
