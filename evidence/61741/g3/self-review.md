@@ -1,7 +1,7 @@
 # Self-review — TheHub #61741
 
 Mode: solo (POAM-008); agent self-review per the operator's 2026-11-04 decision
-PR: #PRNUM   Author: Claude Opus 5.5 on the Linux runner laptop (AI-authored)   Date: 2026-11-16
+PR: #174   Author: Claude Opus 5.5 on the Linux runner laptop (AI-authored)   Date: 2026-11-16
 verdict: pass
 
 Corrects `ci/README.md`, which still said keel is private and that GitHub Actions does not start.
