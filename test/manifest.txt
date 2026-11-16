@@ -46,7 +46,7 @@ test/platform-release.test.py       test         platform release: signed, and a
 test/supply-chain.test.py           test         supply-chain lanes: verify-artifact, release floor, --tree (#145)
 # scripts/selfreview-check.js is loaded only by .github/workflows/pr-governance.yml.
 # Concourse's Python image has no node, so there this entry says it did not run;
-# GitHub Actions 'Unit suites' (unit-results.yml, every PR) and ./keel check run it
+# GitHub Actions 'unit-suites' (unit-results.yml, every PR) and ./keel check run it
 # (keel check fails without node).
 test/selfreview-check.test.js       test         self-review check tests (POAM-008)
 # keel's own liveness numbers: the frozen G3 legacy list, POAM-018 states the baseline.

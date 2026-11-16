@@ -48,7 +48,9 @@ concurrency:
 
 jobs:
   unit:
-    name: Unit suites → MyKronos
+    # [#61737] Plain ASCII, the same in keel and binnacle: this is the context branch
+    # protection requires. Renaming it again means changing protection in the same change.
+    name: unit-suites
     runs-on: ${{ fromJSON(vars.KEEL_RUNNER_LABELS || '["ubuntu-latest"]') }}
     timeout-minutes: 20
     if: >-
