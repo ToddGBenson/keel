@@ -20,6 +20,7 @@ test/serial-lanes.test.py           lint         pipeline: at most 3 heavy jobs 
 test/container-limits.test.py       lint         tasks: cpu shares below 1024, no memory limit (TheHub #61062, D-174)
 test/codeql-limits.test.py          lint         CodeQL held to --ram=1024 --threads=2 (TheHub #61062)
 test/task-timeouts.test.py          lint         task steps time out within 3h, gets within 15m, so a hang frees its lane (TheHub #61062, #61238)
+test/worker-tags.test.py            lint         every resource, get, put and task runs on a linux-tagged worker (TheHub #61830)
 test/protection-drift.test.py       lint         branch-protection drift: live settings against .sdlc/protection.yaml (TheHub #60979)
 test/protection-drift-wiring.test.py lint        keel's own wiring of the daily branch-protection drift check (TheHub #60979)
 # test

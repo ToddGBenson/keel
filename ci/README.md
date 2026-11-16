@@ -162,6 +162,17 @@ reviewer approves, and `authorize-release` refuses a run with no recorded approv
 POAM-010/016.
 
 
+### Every step runs on a `linux` worker (TheHub #61830)
+
+Every resource (its checks), every `get`/`put` and every task, hooks and the
+`mykronos_preflight` anchor included, carries `tags: [linux]`. Untagged, keel's steps could
+land only on the Windows host's untagged worker; on 2026-11-16 it sat at 120 containers with
+32 builds queued while the Linux workers ran nothing. Nothing here needs that host: MyKronos
+is reached at its public URL, and no step names `host.docker.internal`, the LAN, a local
+registry or Vault. `set_pipeline` runs on the web node and takes no tags.
+`test/worker-tags.test.py` fails on any step added without the tag. A fork with no
+`linux`-tagged workers changes the tag (or removes it) in one pass.
+
 ### Three lanes, and every task yields CPU (TheHub #61062)
 
 The two Concourse workers share one Docker host with production (TheHub, MyKronos,

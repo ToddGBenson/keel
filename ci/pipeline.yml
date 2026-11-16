@@ -39,6 +39,7 @@
 # the results have nowhere to go — and silently skipping is not an option.
 mykronos_preflight: &mykronos_preflight
   task: mykronos-preflight
+  tags: [linux]
   timeout: 3h
   file: repo/ci/tasks/mykronos-preflight.yml
   params:
@@ -113,6 +114,7 @@ check_run_params: &check_run_params
 resources:
 
   - name: repo
+    tags: [linux]
     type: git
     icon: git
     check_every: 1m
@@ -214,6 +216,7 @@ resources:
   #   06:00  suppression-audit, platform-integrity, protection-drift
 
   - name: daily-0300
+    tags: [linux]
     type: time
     icon: clock-outline
     source:
@@ -222,6 +225,7 @@ resources:
       stop: "3:30 AM"
 
   - name: daily-0400
+    tags: [linux]
     type: time
     icon: clock-outline
     source:
@@ -230,6 +234,7 @@ resources:
       stop: "4:30 AM"
 
   - name: daily-0500
+    tags: [linux]
     type: time
     icon: clock-outline
     source:
@@ -238,6 +243,7 @@ resources:
       stop: "5:30 AM"
 
   - name: daily-0600
+    tags: [linux]
     type: time
     icon: clock-outline
     source:
@@ -250,6 +256,7 @@ resources:
   # every ten minutes instead. A tick with nothing new is one `git ls-remote`
   # and a few `start` posts that MyKronos answers `unchanged`.
   - name: ten-minutes
+    tags: [linux]
     type: time
     icon: clock-fast
     source:
@@ -257,6 +264,7 @@ resources:
       interval: 10m
 
   - name: weekly
+    tags: [linux]
     type: time
     icon: clock-outline
     source: { interval: 168h }
@@ -440,6 +448,7 @@ jobs:
       - get: repo
         trigger: true
         timeout: 15m
+        tags: [linux]
       - set_pipeline: self
         file: repo/ci/pipeline.yml
         var_files: [repo/ci/vars.example.yml]
@@ -472,12 +481,14 @@ jobs:
     serial_groups: [verdict]
     on_failure:
       task: check-run
+      tags: [linux]
       file: repo/ci/tasks/check-run.yml
       # Three attempts of 45s plus two 5s delays is 145s; 5m is twice that.
       timeout: 5m
       params: { <<: *check_run_params, JOB: build, PHASE: end, CONCLUSION: failure }
     on_error:
       task: check-run
+      tags: [linux]
       file: repo/ci/tasks/check-run.yml
       # Three attempts of 45s plus two 5s delays is 145s; 5m is twice that.
       timeout: 5m
@@ -486,17 +497,21 @@ jobs:
       - get: repo
         trigger: true
         timeout: 15m
+        tags: [linux]
       - get: daily-0300
         trigger: true
         timeout: 15m
+        tags: [linux]
       # `Concourse / keel` goes in_progress on this commit. On the daily re-run
       # of a commit that already has a verdict, MyKronos leaves the verdict
       # alone (a start never reopens one).
       - task: check-run
+        tags: [linux]
         file: repo/ci/tasks/check-run.yml
         timeout: 5m
         params: { <<: *check_run_params, JOB: build, PHASE: start }
       - task: build
+        tags: [linux]
         timeout: 3h
         file: repo/ci/tasks/ci-stage.yml
         params: { STAGE: build }
@@ -506,12 +521,14 @@ jobs:
     serial_groups: [verdict]
     on_failure:
       task: check-run
+      tags: [linux]
       file: repo/ci/tasks/check-run.yml
       # Three attempts of 45s plus two 5s delays is 145s; 5m is twice that.
       timeout: 5m
       params: { <<: *check_run_params, JOB: lint, PHASE: end, CONCLUSION: failure }
     on_error:
       task: check-run
+      tags: [linux]
       file: repo/ci/tasks/check-run.yml
       # Three attempts of 45s plus two 5s delays is 145s; 5m is twice that.
       timeout: 5m
@@ -520,14 +537,17 @@ jobs:
       - get: repo
         trigger: true
         timeout: 15m
+        tags: [linux]
       - get: daily-0300
         trigger: true
         timeout: 15m
+        tags: [linux]
       # Separate task because shellcheck ships its own Alpine image and the rest
       # of the lint stage needs Python. Its report is an input to the stage
       # below, which fails if it is missing — so the linter cannot be skipped
       # silently.
       - task: shellcheck
+        tags: [linux]
         timeout: 3h
         file: repo/ci/tasks/shellcheck.yml
         # ── ITS RESULTS REACH MYKRONOS (#105, B-051) ──────────────────────────
@@ -551,6 +571,7 @@ jobs:
         # both `repo` and `daily-0300`.
         ensure:
           task: upload-shellcheck
+          tags: [linux]
           timeout: 3h
           file: repo/ci/tasks/mykronos-upload.yml
           params:
@@ -560,6 +581,7 @@ jobs:
             # The tag ci/tasks/shellcheck.yml pins. Two places, one value.
             TOOL_VERSION: "0.10.0"
       - task: lint
+        tags: [linux]
         timeout: 3h
         file: repo/ci/tasks/ci-stage.yml
         params: { STAGE: lint }
@@ -569,12 +591,14 @@ jobs:
     serial_groups: [verdict]
     on_failure:
       task: check-run
+      tags: [linux]
       file: repo/ci/tasks/check-run.yml
       # Three attempts of 45s plus two 5s delays is 145s; 5m is twice that.
       timeout: 5m
       params: { <<: *check_run_params, JOB: test, PHASE: end, CONCLUSION: failure }
     on_error:
       task: check-run
+      tags: [linux]
       file: repo/ci/tasks/check-run.yml
       # Three attempts of 45s plus two 5s delays is 145s; 5m is twice that.
       timeout: 5m
@@ -583,14 +607,17 @@ jobs:
       - get: repo
         trigger: true
         timeout: 15m
+        tags: [linux]
       - get: daily-0300
         trigger: true
         timeout: 15m
+        tags: [linux]
       # No COVERAGE_THRESHOLD (TheHub #60850). It was "80" and nothing measured
       # against it: the coverage step echoed "ADAPT: assert coverage >= 80%" and
       # exited 0. keel has no application code to cover. A fork that has some
       # adds a real coverage gate and its threshold together, in one change.
       - task: test
+        tags: [linux]
         timeout: 3h
         file: repo/ci/tasks/ci-stage.yml
         params: { STAGE: test }
@@ -633,12 +660,14 @@ jobs:
     serial: true
     on_failure:
       task: check-run
+      tags: [linux]
       file: repo/ci/tasks/check-run.yml
       # Three attempts of 45s plus two 5s delays is 145s; 5m is twice that.
       timeout: 5m
       params: { <<: *check_run_params, JOB: sast, PHASE: end, CONCLUSION: failure }
     on_error:
       task: check-run
+      tags: [linux]
       file: repo/ci/tasks/check-run.yml
       # Three attempts of 45s plus two 5s delays is 145s; 5m is twice that.
       timeout: 5m
@@ -647,9 +676,11 @@ jobs:
       - get: repo
         trigger: true
         timeout: 15m
+        tags: [linux]
       - get: daily-0400
         trigger: true
         timeout: 15m
+        tags: [linux]
       # One language at a time (#169). Each CodeQL evaluator budgets 2048 MB
       # (CodeQL's floor) plus JVM overhead, and a worker is capped at 3 GiB.
       # A bare in_parallel let placement put both on one worker: build 141's
@@ -660,6 +691,7 @@ jobs:
           limit: 1
           steps:
             - task: codeql-python
+              tags: [linux]
               timeout: 3h
               file: repo/ci/tasks/codeql.yml
               output_mapping: { mykronos-results: results-python }
@@ -670,6 +702,7 @@ jobs:
                 CODEQL_BUNDLE_SHA256: ((codeql_bundle_sha256))
                 FAIL_ON_SECURITY_FINDING: "true"
             - task: codeql-javascript
+              tags: [linux]
               timeout: 3h
               file: repo/ci/tasks/codeql.yml
               output_mapping: { mykronos-results: results-javascript }
@@ -694,12 +727,14 @@ jobs:
     serial_groups: [verdict]
     on_failure:
       task: check-run
+      tags: [linux]
       file: repo/ci/tasks/check-run.yml
       # Three attempts of 45s plus two 5s delays is 145s; 5m is twice that.
       timeout: 5m
       params: { <<: *check_run_params, JOB: secrets, PHASE: end, CONCLUSION: failure }
     on_error:
       task: check-run
+      tags: [linux]
       file: repo/ci/tasks/check-run.yml
       # Three attempts of 45s plus two 5s delays is 145s; 5m is twice that.
       timeout: 5m
@@ -708,15 +743,19 @@ jobs:
       - get: repo
         trigger: true
         timeout: 15m
+        tags: [linux]
       - get: daily-0400
         trigger: true
         timeout: 15m
+        tags: [linux]
       - task: gitleaks
+        tags: [linux]
         timeout: 3h
         file: repo/ci/tasks/gitleaks.yml
       # Any hit fails. If one fires, the correct response is to ROTATE the
       # credential, then remove it. A deleted commit is not a rotated credential.
       - task: gate
+        tags: [linux]
         timeout: 3h
         file: repo/ci/tasks/gitleaks-gate.yml
 
@@ -725,12 +764,14 @@ jobs:
     serial_groups: [verdict]
     on_failure:
       task: check-run
+      tags: [linux]
       file: repo/ci/tasks/check-run.yml
       # Three attempts of 45s plus two 5s delays is 145s; 5m is twice that.
       timeout: 5m
       params: { <<: *check_run_params, JOB: sca, PHASE: end, CONCLUSION: failure }
     on_error:
       task: check-run
+      tags: [linux]
       file: repo/ci/tasks/check-run.yml
       # Three attempts of 45s plus two 5s delays is 145s; 5m is twice that.
       timeout: 5m
@@ -739,10 +780,13 @@ jobs:
       - get: repo
         trigger: true
         timeout: 15m
+        tags: [linux]
       - get: daily-0500
         trigger: true
         timeout: 15m
+        tags: [linux]
       - task: grype
+        tags: [linux]
         timeout: 3h
         file: repo/ci/tasks/grype.yml
         params:
@@ -779,12 +823,14 @@ jobs:
     serial_groups: [verdict]
     on_failure:
       task: check-run
+      tags: [linux]
       file: repo/ci/tasks/check-run.yml
       # Three attempts of 45s plus two 5s delays is 145s; 5m is twice that.
       timeout: 5m
       params: { <<: *check_run_params, JOB: iac, PHASE: end, CONCLUSION: failure }
     on_error:
       task: check-run
+      tags: [linux]
       file: repo/ci/tasks/check-run.yml
       # Three attempts of 45s plus two 5s delays is 145s; 5m is twice that.
       timeout: 5m
@@ -793,18 +839,22 @@ jobs:
       - get: repo
         trigger: true
         timeout: 15m
+        tags: [linux]
       - get: daily-0500
         trigger: true
         timeout: 15m
+        tags: [linux]
       - do:
           - *mykronos_preflight
           - task: checkov
+            tags: [linux]
             timeout: 3h
             file: repo/ci/tasks/checkov.yml
             params:
               CHECKOV_VERSION: ((checkov_version))
         ensure:
           task: upload
+          tags: [linux]
           timeout: 3h
           file: repo/ci/tasks/mykronos-upload.yml
           input_mapping: { mykronos-results: iac-results }
@@ -828,7 +878,9 @@ jobs:
     plan:
       - get: repo
         timeout: 15m
+        tags: [linux]
       - task: trivy
+        tags: [linux]
         timeout: 3h
         file: repo/ci/tasks/trivy.yml
         params:
@@ -842,10 +894,13 @@ jobs:
       - get: repo
         trigger: true
         timeout: 15m
+        tags: [linux]
       - get: daily-0600
         trigger: true
         timeout: 15m
+        tags: [linux]
       - task: suppression-audit
+        tags: [linux]
         timeout: 3h
         file: repo/ci/tasks/suppression-audit.yml
 
@@ -862,9 +917,11 @@ jobs:
       - get: repo
         trigger: true
         timeout: 15m
+        tags: [linux]
       - get: weekly
         trigger: true
         timeout: 15m
+        tags: [linux]
       # BOTH languages, in one lane. There used to be a second `sast` job running
       # CodeQL over javascript-typescript and then throwing the SARIF away
       # (POAM-012) — a duplicate analysis whose results reached nothing. This is
@@ -877,6 +934,7 @@ jobs:
       - do:
           - *mykronos_preflight
           - task: codeql-python
+            tags: [linux]
             timeout: 3h
             file: repo/ci/tasks/codeql.yml
             output_mapping: { mykronos-results: results-python }
@@ -887,6 +945,7 @@ jobs:
               CODEQL_BUNDLE_SHA256: ((codeql_bundle_sha256))
               UPLOAD_TO_MYKRONOS: "true"
           - task: codeql-javascript
+            tags: [linux]
             timeout: 3h
             file: repo/ci/tasks/codeql.yml
             output_mapping: { mykronos-results: results-javascript }
@@ -899,6 +958,7 @@ jobs:
         ensure:
           do:
             - task: upload-python
+              tags: [linux]
               timeout: 3h
               file: repo/ci/tasks/mykronos-upload.yml
               input_mapping: { mykronos-results: results-python }
@@ -909,6 +969,7 @@ jobs:
                 TRIGGERED_BY: schedule
               ensure:
                 task: upload-javascript
+                tags: [linux]
                 timeout: 3h
                 file: repo/ci/tasks/mykronos-upload.yml
                 input_mapping: { mykronos-results: results-javascript }
@@ -925,19 +986,23 @@ jobs:
       - get: repo
         trigger: true
         timeout: 15m
+        tags: [linux]
       - get: weekly
         trigger: true
         timeout: 15m
+        tags: [linux]
       - do:
           - *mykronos_preflight
           # Never fails the step itself: exit codes are the upload step's job,
           # which applies this repo's configured threshold and blocking policy.
           # A scanner deciding CI outcomes on its own bypasses that.
           - task: gitleaks
+            tags: [linux]
             timeout: 3h
             file: repo/ci/tasks/gitleaks.yml
         ensure:
           task: upload
+          tags: [linux]
           timeout: 3h
           file: repo/ci/tasks/mykronos-upload.yml
           params:
@@ -976,12 +1041,15 @@ jobs:
       - get: repo
         trigger: true
         timeout: 15m
+        tags: [linux]
       - get: weekly
         trigger: true
         timeout: 15m
+        tags: [linux]
       - do:
           - *mykronos_preflight
           - task: grype
+            tags: [linux]
             timeout: 3h
             file: repo/ci/tasks/grype.yml
             params:
@@ -991,6 +1059,7 @@ jobs:
               GATE: "false"
         ensure:
           task: upload
+          tags: [linux]
           timeout: 3h
           file: repo/ci/tasks/mykronos-upload.yml
           input_mapping: { mykronos-results: sca-results }
@@ -1008,6 +1077,7 @@ jobs:
       - get: repo
         trigger: true
         timeout: 15m
+        tags: [linux]
       # `github-release` removed 2026-08-14. It resolved to
       #   GET /repos/ToddGBenson/keel/releases -> 404 Not Found
       # because the repository is private and ((github_token)) is empty, and an
@@ -1026,9 +1096,11 @@ jobs:
       - get: weekly
         trigger: true
         timeout: 15m
+        tags: [linux]
       - do:
           - *mykronos_preflight
           - task: osv-scan
+            tags: [linux]
             timeout: 3h
             file: repo/ci/tasks/osv-scan.yml
           # CycloneDX, fixed. The Actions template had a format switch, but it
@@ -1037,9 +1109,11 @@ jobs:
           # the switch has nowhere useful to live here — change the task if you
           # need SPDX.
           - task: sbom
+            tags: [linux]
             timeout: 3h
             file: repo/ci/tasks/sbom.yml
           - task: sbom-check
+            tags: [linux]
             timeout: 3h
             file: repo/ci/tasks/sbom-check.yml
         ensure:
@@ -1054,6 +1128,7 @@ jobs:
           # applied one level down.
           do:
             - task: upload
+              tags: [linux]
               timeout: 3h
               file: repo/ci/tasks/mykronos-upload.yml
               params:
@@ -1063,6 +1138,7 @@ jobs:
                 TRIGGERED_BY: schedule
               ensure:
                 task: atlas-evidence
+                tags: [linux]
                 timeout: 3h
                 file: repo/ci/tasks/atlas-evidence.yml
                 params:
@@ -1083,10 +1159,13 @@ jobs:
       - get: repo
         trigger: true
         timeout: 15m
+        tags: [linux]
       - get: daily-0600
         trigger: true
         timeout: 15m
+        tags: [linux]
       - task: platform-integrity
+        tags: [linux]
         timeout: 3h
         file: repo/ci/tasks/platform-integrity.yml
 
@@ -1109,11 +1188,14 @@ jobs:
     plan:
       - get: repo
         timeout: 15m
+        tags: [linux]
       - get: daily-0600
         trigger: true
         timeout: 15m
+        tags: [linux]
       # A handful of GitHub API reads (scripts/protection-drift.py); 15m bounds a hung call.
       - task: protection-drift
+        tags: [linux]
         file: repo/ci/tasks/protection-drift.yml
         timeout: 15m
         params:
@@ -1146,27 +1228,33 @@ jobs:
     # be the pull request's (TheHub #61778 review #1; test/check-run.test.py).
     on_success:
       task: check-run
+      tags: [linux]
       file: repo/ci/tasks/check-run.yml
       # Three attempts of 45s plus two 5s delays is 145s; 5m is twice that.
       timeout: 5m
       params: { <<: *check_run_params, JOB: pr-checks, PHASE: end, CONCLUSION: success, NO_COMMIT_OK: "1", HEAD_FILE: pr-sha/HEAD }
     on_failure:
       task: check-run
+      tags: [linux]
       file: repo/ci/tasks/check-run.yml
       timeout: 5m
       params: { <<: *check_run_params, JOB: pr-checks, PHASE: end, CONCLUSION: failure, NO_COMMIT_OK: "1", HEAD_FILE: pr-sha/HEAD }
     on_error:
       task: check-run
+      tags: [linux]
       file: repo/ci/tasks/check-run.yml
       timeout: 5m
       params: { <<: *check_run_params, JOB: pr-checks, PHASE: end, CONCLUSION: failure, NO_COMMIT_OK: "1", HEAD_FILE: pr-sha/HEAD }
     plan:
       - get: repo
         timeout: 15m
+        tags: [linux]
       - get: ten-minutes
         trigger: true
         timeout: 15m
+        tags: [linux]
       - task: pr-pick
+        tags: [linux]
         file: repo/ci/tasks/pr-pick.yml
         timeout: 15m
         params:
@@ -1174,6 +1262,7 @@ jobs:
           GIT_URI: ((git_uri))
           GIT_PRIVATE_KEY: ((git_private_key))
       - task: pr-checks
+        tags: [linux]
         file: repo/ci/tasks/pr-checks.yml
         # The unit suites take about 3 minutes on Actions. 20m bounds a hang so a
         # pull request cannot hold the verdict lane main's commits need (review #4).
@@ -1198,10 +1287,13 @@ jobs:
     plan:
       - get: repo
         timeout: 15m
+        tags: [linux]
       - get: weekly
         trigger: true
         timeout: 15m
+        tags: [linux]
       - task: agent-assurance
+        tags: [linux]
         timeout: 3h
         file: repo/ci/tasks/ai.yml
         params: { STAGE: agent-assurance }
@@ -1229,10 +1321,13 @@ jobs:
     plan:
       - get: repo
         timeout: 15m
+        tags: [linux]
       - get: weekly
         trigger: true
         timeout: 15m
+        tags: [linux]
       - task: compliance
+        tags: [linux]
         timeout: 3h
         file: repo/ci/tasks/compliance.yml
         params:
@@ -1250,12 +1345,14 @@ jobs:
     serial: true
     on_failure:
       task: check-run
+      tags: [linux]
       file: repo/ci/tasks/check-run.yml
       # Three attempts of 45s plus two 5s delays is 145s; 5m is twice that.
       timeout: 5m
       params: { <<: *check_run_params, JOB: build-and-attest, PHASE: end, CONCLUSION: failure }
     on_error:
       task: check-run
+      tags: [linux]
       file: repo/ci/tasks/check-run.yml
       # Three attempts of 45s plus two 5s delays is 145s; 5m is twice that.
       timeout: 5m
@@ -1269,6 +1366,7 @@ jobs:
         trigger: true
         passed: [build, lint, test, sast, secrets, sca, iac]
         timeout: 15m
+        tags: [linux]
       # The SBOM is generated HERE, in this job. It was previously taken as an
       # optional input, which could never arrive: syft runs in `mykronos-atlas`,
       # and Concourse does not pass task outputs between jobs. So the branch was
@@ -1276,12 +1374,15 @@ jobs:
       # green. Generating it in-job also makes the inventory describe the tree
       # that was actually built, which is what CM-8 asks for.
       - task: sbom
+        tags: [linux]
         timeout: 3h
         file: repo/ci/tasks/sbom.yml
       - task: sbom-check
+        tags: [linux]
         timeout: 3h
         file: repo/ci/tasks/sbom-check.yml
       - task: build-and-attest
+        tags: [linux]
         timeout: 3h
         file: repo/ci/tasks/supply-chain.yml
         params:
@@ -1299,12 +1400,14 @@ jobs:
     serial_groups: [verdict]
     on_failure:
       task: check-run
+      tags: [linux]
       file: repo/ci/tasks/check-run.yml
       # Three attempts of 45s plus two 5s delays is 145s; 5m is twice that.
       timeout: 5m
       params: { <<: *check_run_params, JOB: verify-artifact, PHASE: end, CONCLUSION: failure }
     on_error:
       task: check-run
+      tags: [linux]
       file: repo/ci/tasks/check-run.yml
       # Three attempts of 45s plus two 5s delays is 145s; 5m is twice that.
       timeout: 5m
@@ -1314,7 +1417,9 @@ jobs:
         passed: [build-and-attest]
         trigger: true
         timeout: 15m
+        tags: [linux]
       - task: verify
+        tags: [linux]
         timeout: 3h
         file: repo/ci/tasks/supply-chain.yml
         params:
@@ -1328,6 +1433,7 @@ jobs:
       # Last, so it runs only once the whole chain has passed on this commit:
       # this is the step that turns `Concourse / keel` green.
       - task: check-run
+        tags: [linux]
         file: repo/ci/tasks/check-run.yml
         timeout: 5m
         params: { <<: *check_run_params, JOB: verify-artifact, PHASE: end, CONCLUSION: success }
