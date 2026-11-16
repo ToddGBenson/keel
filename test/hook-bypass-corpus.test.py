@@ -342,8 +342,15 @@ def main() -> int:
                     print(f"  [FAIL] {tag} blocked, but the corpus records it as an open gap"
                           f" in {mode} -- remove '{mode}' from open_in so it stays closed")
                     failures.append(f"{mode}:{tool}:{e['id']}")
-                if verbose and err.strip():
-                    print("         " + err.strip().splitlines()[0])
+                wrong = (not blocked and not is_open) or (blocked and is_open)
+                if err.strip() and (wrong or verbose):
+                    # [TheHub #61794] A wrong verdict prints what the hook said, so an
+                    # intermittent one can be diagnosed from the log it happened in.
+                    lines = err.strip().splitlines()
+                    for line in (lines[:12] if wrong else lines[:1]):
+                        print("         | " + line)
+                elif wrong:
+                    print("         | (the hook wrote nothing to stderr)")
 
     print("\n" + "-" * 62)
     print(f"  {len(entries)} corpus entries, {ran} hook runs, "

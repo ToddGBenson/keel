@@ -41,6 +41,7 @@ platform_owned:
   # too: a fork that receives a hook without the corpus can regress it silently.
   - test/hook-bypass-corpus.test.py
   - test/hook-bypass-corpus.yml
+  - test/hook-fail-closed.test.py
   # scripts/platform-release.sh is the verifier a fork runs before trusting a
   # sync, so the test that proves it refuses an unsigned release travels with
   # it (#144, POAM-011).
