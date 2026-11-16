@@ -1,7 +1,7 @@
 # Self-review — TheHub #61737 (keel: the unit check is renamed `unit-suites`)
 
 Mode: solo (POAM-008); agent self-review per the operator's 2026-11-04 decision
-PR: #PRNUM   Author: Claude Opus 5.5 on the Linux runner laptop (AI-authored)   Date: 2026-11-16
+PR: #176   Author: Claude Opus 5.5 on the Linux runner laptop (AI-authored)   Date: 2026-11-16
 verdict: pass
 
 Step 1 of TheHub #61737: the GitHub Actions job in `.github/workflows/unit-results.yml` is renamed
