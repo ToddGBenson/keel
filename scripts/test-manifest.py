@@ -149,7 +149,7 @@ def run(root: Path, chosen: list[Entry], node_missing: str, quiet: bool) -> int:
             else:
                 print(f"── {e.desc} ──")
                 print(f"node is not installed here: {e.path} NOT RUN in this stage. It "
-                      f"runs where node is: GitHub Actions 'Unit suites' (unit-results.yml) and ./keel check.")
+                      f"runs where node is: GitHub Actions 'unit-suites' (unit-results.yml) and ./keel check.")
                 not_run.append(e.path)
             continue
         argv = [node, e.path] if js else [sys.executable, e.path]
