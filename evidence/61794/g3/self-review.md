@@ -29,7 +29,24 @@ trap turns an allow into a block when any were recorded.
 
 ## Agent findings
 
-None yet. An independent Opus review runs before the operator sees this (security-sensitive hook).
+Independent Opus review of keel #179 (9bacd77) / binnacle #79 (aad5b00), CHANGES NEEDED:
+
+- **#1 CRITICAL, fixed:** `printf ... | grep -q` under pipefail. grep -q exits at its first match,
+  the writer dies of SIGPIPE and the pipeline returns 141, so a MATCH read as "no match". A
+  command padded to ~390 KB (force push, KB-177, self-merge) was ALLOWED on 9bacd77 and on main, in
+  jq and no-jq modes. The grep wrapper drops -q/--quiet and discards output (grep reads all its
+  input), head drains the rest, and 141 returns 0. 12 padded cases added; red on both before.
+- **#2 HIGH, fixed:** Claude Code blocks only on exit 2. The EXIT trap now blocks on every code
+  but 0 and 2. 5 injected-exit cases (exit 1, 127, unbound variable, fault file emptied/removed).
+- **#3 MEDIUM, follow-up (not in this PR):** PATH is not pinned, so a planted helper earlier in
+  PATH could answer "no match". Pinning PATH removes the seam every hook test uses to swap tools
+  (corpus no-jq mode, this test's shims), so it needs its own design.
+- **Low #4, fixed:** a sentinel first line; an emptied or removed fault file is a fault. The trap
+  reads it with builtins only (a broken sed had hidden its own fault in the first attempt).
+- **Low #5:** most early-closing readers are gone with #1; not separately tested.
+- **guard-write.sh:** same structure, follow-up.
+
+Counts: test/hook-fail-closed.test.py 172 passed here; 17 failed on 9bacd77; 128 on main.
 
 ## Not verified
 
@@ -37,8 +54,8 @@ None yet. An independent Opus review runs before the operator sees this (securit
   failure under the corpus test's 8 parallel hooks on a 2-CPU runner is the best fit, and a failing
   `tr` reproduces it exactly, but it is unproven. The corpus test now prints the hook's stderr on a
   wrong verdict, so the next one is diagnosable.
-- **A failed fork.** If bash cannot fork a capture at all, no wrapper runs and nothing is recorded.
-  Not covered; unverified how often a runner refuses a fork rather than a helper failing.
+- **A failed fork** now mostly ends in a non-zero exit, which blocks (#2); one that leaves a
+  capture empty with exit 0 is still not caught. Unverified.
 - **guard-write.sh** has the same structure and was not changed. Follow-up.
 - Git Bash on Windows (where the hook also runs) was not exercised here.
 
