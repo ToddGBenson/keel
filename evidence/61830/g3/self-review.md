@@ -1,7 +1,7 @@
 # Self-review — TheHub #61830 (keel: every step runs on a linux-tagged worker)
 
 Mode: solo (POAM-008); agent self-review per the operator's 2026-11-04 decision
-PR: #PRNUM   Author: Claude Opus 5.5 on the Linux runner laptop (AI-authored)   Date: 2026-11-16
+PR: #180   Author: Claude Opus 5.5 on the Linux runner laptop (AI-authored)   Date: 2026-11-16
 verdict: pass
 
 ## Verified independently
