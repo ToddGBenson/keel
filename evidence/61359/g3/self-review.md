@@ -1,7 +1,7 @@
 # Self-review — TheHub #61359 (ci/vars.example.yml pins MyKronos v15)
 
 Mode: solo (POAM-008); agent self-review per the operator's 2026-11-04 decision
-PR: #PRNUM   Author: Claude Opus 5.5 on the Linux runner laptop (AI-authored)   Date: 2026-11-16
+PR: #177   Author: Claude Opus 5.5 on the Linux runner laptop (AI-authored)   Date: 2026-11-16
 verdict: pass
 
 `ci/vars.example.yml` pinned `mykronos_ref` to v15 (2dd4e44) while every `.github/workflows` pin is
