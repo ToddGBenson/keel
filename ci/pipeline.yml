@@ -1097,10 +1097,14 @@ jobs:
     serial_groups: [ingest]
     plan:
       - get: repo
+        timeout: 15m
       - get: daily-0600
         trigger: true
+        timeout: 15m
+      # A handful of GitHub API reads (scripts/protection-drift.py); 15m bounds a hung call.
       - task: protection-drift
         file: repo/ci/tasks/protection-drift.yml
+        timeout: 15m
         params:
           GH_TOKEN: ((github_protection_token))
           REPO_SLUG: ((github_owner))/((github_repo))
