@@ -462,6 +462,37 @@ Undo it with
 
 ---
 
+### `pr-checks`: `Concourse / keel` on pull request heads (TheHub #61778)
+
+The commit chain judges `main`. Nothing Concourse ran judged a pull request head, and
+GitHub Actions runs only where billing allows it: binnacle, which is private, has none.
+`pr-checks` closes that gap without a pull-request resource type and without a GitHub
+token:
+
+- **Every ten minutes** (`ten-minutes`), `pr-pick` lists `refs/pull/N/head` with
+  `git ls-remote`, using the same deploy key as `repo`. A head counts as **open** when
+  GitHub still keeps `refs/pull/N/merge` beside it. It counts as **ours** when it is the
+  tip of a branch in this repository, so a fork's head is never run. A head on `main` is
+  skipped, because the commit chain owns that check.
+- **Once per head:** it posts `start` for the newest head first.
+  - MyKronos answers `unchanged` for a head that already has a check run. A `completed`
+    one is skipped.
+  - An `in_progress` one, from a run that died, is judged again.
+  - At most 30 starts per run.
+- **The verdict** is the unit suites, the same ones Actions' `unit-suites` runs, executed
+  by main's `ci/scripts/pr-checks.sh` on the head's code. The job's
+  `on_success`/`on_failure`/`on_error` hooks report it as the `Concourse / keel` check
+  run on that head. The hooks use `input_mapping: { repo: pr }` so `check-run.sh` reads
+  the head's sha. `NO_COMMIT_OK=1` makes a run that picked nothing report nothing.
+- **Credentials:** `pr-pick` holds the deploy key and the ingestion token and executes no
+  pull-request code. `pr-checks` runs the pull request's code and gets **no params**.
+  `test/check-run.test.py` and `test/pr-pick.test.py` hold both properties.
+
+The PR's own tests run with the worker's network and no credential, as `main`'s commits
+already do. Only branches in this repository are run, which takes write access.
+Requiring `Concourse / keel` on `main` is the operator's call, once this job has gone
+green on a real pull request (TheHub #61737).
+
 ## Setting it up
 
 ### 1. Vars

@@ -245,6 +245,17 @@ resources:
       start: "6:00 AM"
       stop: "6:30 AM"
 
+  # [TheHub #61778] `pr-checks`' clock. The `repo` resource follows main, so
+  # nothing here is told when a pull request is opened or pushed; the job asks
+  # every ten minutes instead. A tick with nothing new is one `git ls-remote`
+  # and a few `start` posts that MyKronos answers `unchanged`.
+  - name: ten-minutes
+    type: time
+    icon: clock-fast
+    source:
+      location: ((scan_timezone))
+      interval: 10m
+
   - name: weekly
     type: time
     icon: clock-outline
@@ -1108,6 +1119,63 @@ jobs:
         params:
           GH_TOKEN: ((github_protection_token))
           REPO_SLUG: ((github_owner))/((github_repo))
+
+  # ── Pull request heads (TheHub #61778) ──────────────────────────────────────
+  # GitHub Actions only runs where billing allows it (binnacle, private, has none),
+  # so a pull request head had no check that Concourse ran. This job finds the
+  # open heads itself, judges ONE per run with the unit suites (the same suites
+  # as Actions' `unit-suites`), and reports the verdict as the `Concourse / keel`
+  # check run on that head through MyKronos, like the commit chain does on main.
+  #
+  # Which heads, once per head, and why a fork's head is never judged:
+  # ci/scripts/pr-pick.sh. The pick holds the deploy key and the ingestion token
+  # and runs no pull-request code; `pr-checks` runs the pull request's code and
+  # gets no params at all. Its script is main's copy, its code is the head's.
+  #
+  # Requiring `Concourse / keel` on main is the operator's call, after this job
+  # has gone green on a real pull request (TheHub #61737).
+  - name: pr-checks
+    public: true
+    serial: true
+    # The commit chain's lane: a unit run is short, and the lane cap (three) is
+    # what keeps the worker from being overloaded.
+    serial_groups: [verdict]
+    on_success:
+      task: check-run
+      file: repo/ci/tasks/check-run.yml
+      input_mapping: { repo: pr }
+      # Three attempts of 45s plus two 5s delays is 145s; 5m is twice that.
+      timeout: 5m
+      params: { <<: *check_run_params, JOB: pr-checks, PHASE: end, CONCLUSION: success, NO_COMMIT_OK: "1" }
+    on_failure:
+      task: check-run
+      file: repo/ci/tasks/check-run.yml
+      input_mapping: { repo: pr }
+      timeout: 5m
+      params: { <<: *check_run_params, JOB: pr-checks, PHASE: end, CONCLUSION: failure, NO_COMMIT_OK: "1" }
+    on_error:
+      task: check-run
+      file: repo/ci/tasks/check-run.yml
+      input_mapping: { repo: pr }
+      timeout: 5m
+      params: { <<: *check_run_params, JOB: pr-checks, PHASE: end, CONCLUSION: failure, NO_COMMIT_OK: "1" }
+    plan:
+      - get: repo
+        timeout: 15m
+      - get: ten-minutes
+        trigger: true
+        timeout: 15m
+      - task: pr-pick
+        file: repo/ci/tasks/pr-pick.yml
+        timeout: 15m
+        params:
+          <<: *check_run_params
+          GIT_URI: ((git_uri))
+          GIT_PRIVATE_KEY: ((git_private_key))
+      - task: pr-checks
+        file: repo/ci/tasks/pr-checks.yml
+        # The unit suites take minutes; 1h bounds a hang and frees the lane.
+        timeout: 1h
 
   # ── AI assurance ────────────────────────────────────────────────────────────
   # A prompt change is a code change. The scheduled run is the control that

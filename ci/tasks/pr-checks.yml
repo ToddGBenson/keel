@@ -1,0 +1,21 @@
+# Run the unit suites on the picked pull request head. Refs: TheHub #61778
+# See ci/scripts/pr-checks.sh. Runs pull-request code, so it takes NO params:
+# no key, no token. The script is the base branch's (repo/), the code is pr/.
+platform: linux
+
+container_limits:
+  cpu: 512
+
+image_resource:
+  type: registry-image
+  source:
+    repository: python
+    tag: "3.13"
+
+inputs:
+  - name: repo
+  - name: pr
+
+run:
+  path: bash
+  args: [repo/ci/scripts/pr-checks.sh]

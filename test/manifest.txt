@@ -28,6 +28,7 @@ test/control-liveness.test.py       test         control liveness counts records
 test/checkov-gate.test.py           test         IaC lane gate tests (#59989 / #60071)
 test/grype-gate.test.py             test         SCA lane gate tests: gate by default, report-only for upload (#133)
 test/trivy-gate.test.py             test         container-scan lane: no image is a failure, not a pass (#60935)
+test/pr-pick.test.py                test         pull request heads: which are judged, once each, reported on the head (TheHub #61778)
 test/poam.test.py                   test         POA&M due dates: parse, count, overdue, --check (#60977)
 test/poam-wiring.test.py            test         keel's own wiring of the POA&M due-date check (#153)
 test/agent-evals-record.test.py     test         AIC-12 behavioral record: README, ai-inventory and run-agent-evals agree (TheHub #61208)

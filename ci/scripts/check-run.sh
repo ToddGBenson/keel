@@ -34,6 +34,12 @@ case "$SHA" in
 esac
 if [ "${#SHA}" -ne 40 ]; then
   echo "No checked-out commit to report on, so ${JOB} posted nothing."
+  # [TheHub #61778] pr-checks: a run that found no pull request head to judge
+  # (or failed before checking one out) has nothing to report on, and that is
+  # not an error. Only that job sets this; the commit chain still refuses.
+  if [ "${NO_COMMIT_OK:-}" = "1" ]; then
+    exit 0
+  fi
   echo "The check stays as it was, and one still in progress blocks."
   exit 1
 fi

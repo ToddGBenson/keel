@@ -1,0 +1,31 @@
+# Pick one open pull request head to judge and check it out. Refs: TheHub #61778
+# See ci/scripts/pr-pick.sh. Holds the deploy key and the ingestion token; runs
+# no pull-request code.
+platform: linux
+
+container_limits:
+  cpu: 512
+
+image_resource:
+  type: registry-image
+  source:
+    repository: python
+    tag: "3.13"
+
+inputs:
+  - name: repo
+
+outputs:
+  - name: pr
+
+params:
+  REPO_SLUG: ""
+  GIT_URI: ""
+  GIT_PRIVATE_KEY: ""
+  MYKRONOS_INGESTION_URL: ""
+  MYKRONOS_INGESTION_TOKEN: ""
+  BASE_BRANCH: main
+
+run:
+  path: bash
+  args: [repo/ci/scripts/pr-pick.sh]

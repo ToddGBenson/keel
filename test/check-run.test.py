@@ -36,6 +36,9 @@ TASK_FILE = "repo/ci/tasks/check-run.yml"
 CHAIN = ["build", "lint", "test", "sast", "secrets", "sca", "iac",
          "build-and-attest", "verify-artifact"]
 FIRST, LAST = "build", "verify-artifact"
+# [TheHub #61778] The one reporter outside the commit chain: it judges pull request
+# heads and reports on the head it checked out (pr/), never on main's commit.
+PR_JOB = "pr-checks"
 SHA = "0123456789abcdef0123456789abcdef01234567"
 failures = []
 
@@ -109,11 +112,32 @@ def pipeline_checks():
                   h)
 
     for name, job in jobs.items():
-        if name not in CHAIN:
+        if name not in CHAIN and name != PR_JOB:
             check(f"{name} is outside the verdict and does not report", not reporters(job))
 
+    pr = jobs.get(PR_JOB) or {}
+    for hook, conclusion in (("on_success", "success"), ("on_failure", "failure"),
+                             ("on_error", "failure")):
+        h = pr.get(hook) or {}
+        p = h.get("params") or {}
+        check(f"{PR_JOB}.{hook} reports {conclusion} on the pull request head",
+              h.get("task") == "check-run"
+              and (p.get("JOB"), p.get("PHASE"), p.get("CONCLUSION")) == (PR_JOB, "end", conclusion)
+              and (h.get("input_mapping") or {}).get("repo") == "pr"
+              and p.get("NO_COMMIT_OK") == "1", h)
+    check(f"{PR_JOB} reports nothing from its plan (pr-pick posts the start)",
+          not reporters(pr.get("plan") or []))
+    check(f"{PR_JOB} never runs two at once", pr.get("serial") is True)
+    pr_tasks = {s.get("task"): s for s in pr.get("plan") or [] if "task" in s}
+    check(f"{PR_JOB}: the task that runs pull-request code gets no params",
+          "pr-checks" in pr_tasks and not pr_tasks["pr-checks"].get("params"), pr_tasks.get("pr-checks"))
+    for name, job in jobs.items():
+        for step in reporters(job):
+            if (step.get("params") or {}).get("NO_COMMIT_OK") and name != PR_JOB:
+                check(f"only {PR_JOB} may report with no commit ({name} does)", False)
+
     every = reporters(doc["jobs"])
-    expected = len(CHAIN) * 2 + 2
+    expected = len(CHAIN) * 2 + 2 + 3
     check(f"{len(CHAIN)} jobs x 2 hooks, one start, one success", len(every) == expected, len(every))
     for step in every:
         p = step.get("params") or {}
@@ -205,6 +229,15 @@ def script_checks():
         r, body, _ = run(head, JOB="test", PHASE="end", CONCLUSION="failure")
         check(f"no full sha ({head!r}) fails rather than guessing",
               r.returncode != 0 and body is None)
+
+    # [TheHub #61778] pr-checks: no head was picked, so there is nothing to report.
+    for head in (None, "ref: refs/heads/master"):
+        r, body, _ = run(head, JOB="pr-checks", PHASE="end", CONCLUSION="success", NO_COMMIT_OK="1")
+        check(f"NO_COMMIT_OK=1 with no commit ({head!r}) posts nothing and passes",
+              r.returncode == 0 and body is None, r.stdout + r.stderr)
+    r, body, _ = run(SHA, JOB="pr-checks", PHASE="end", CONCLUSION="failure", NO_COMMIT_OK="1")
+    check("NO_COMMIT_OK=1 with a commit still reports it", r.returncode == 0 and body
+          and (body["commit_sha"], body["conclusion"]) == (SHA, "failure"))
 
 
 def main():

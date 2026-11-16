@@ -33,6 +33,7 @@ params:
   PHASE: ""
   # success | failure, only with PHASE=end
   CONCLUSION: ""
+  NO_COMMIT_OK: ""
 
 run:
   path: sh
