@@ -28,6 +28,7 @@ test/control-liveness.test.py       test         control liveness counts records
 test/checkov-gate.test.py           test         IaC lane gate tests (#59989 / #60071)
 test/grype-gate.test.py             test         SCA lane gate tests: gate by default, report-only for upload (#133)
 test/trivy-gate.test.py             test         container-scan lane: no image is a failure, not a pass (#60935)
+test/pr-pick.test.py                test         pull request heads: which are judged, once each, reported on the head (TheHub #61778)
 test/poam.test.py                   test         POA&M due dates: parse, count, overdue, --check (#60977)
 test/poam-wiring.test.py            test         keel's own wiring of the POA&M due-date check (#153)
 test/agent-evals-record.test.py     test         AIC-12 behavioral record: README, ai-inventory and run-agent-evals agree (TheHub #61208)
@@ -47,7 +48,7 @@ test/platform-release.test.py       test         platform release: signed, and a
 test/supply-chain.test.py           test         supply-chain lanes: verify-artifact, release floor, --tree (#145)
 # scripts/selfreview-check.js is loaded only by .github/workflows/pr-governance.yml.
 # Concourse's Python image has no node, so there this entry says it did not run;
-# GitHub Actions 'Unit suites' (unit-results.yml, every PR) and ./keel check run it
+# GitHub Actions 'unit-suites' (unit-results.yml, every PR) and ./keel check run it
 # (keel check fails without node).
 test/selfreview-check.test.js       test         self-review check tests (POAM-008)
 # keel's own liveness numbers: the frozen G3 legacy list, POAM-018 states the baseline.

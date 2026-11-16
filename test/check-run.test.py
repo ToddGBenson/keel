@@ -17,6 +17,7 @@ Needs PyYAML (ci/requirements.txt) and `sh`.
     python test/check-run.test.py
 """
 import json
+import re
 import os
 import shutil
 import stat
@@ -36,6 +37,9 @@ TASK_FILE = "repo/ci/tasks/check-run.yml"
 CHAIN = ["build", "lint", "test", "sast", "secrets", "sca", "iac",
          "build-and-attest", "verify-artifact"]
 FIRST, LAST = "build", "verify-artifact"
+# [TheHub #61778] The one reporter outside the commit chain: it judges pull request
+# heads and reports on the head it checked out (pr/), never on main's commit.
+PR_JOB = "pr-checks"
 SHA = "0123456789abcdef0123456789abcdef01234567"
 failures = []
 
@@ -76,6 +80,106 @@ def upstream_of(jobs, target):
     return seen
 
 
+# [TheHub #61778 review #1] Artifacts that hold pull-request code. A task's `run:`
+# path names an INPUT, so a credentialed step given one of these as any input (by
+# input_mapping, or because its task config declares it) can run the pull request's
+# script with the credential. pr-sha holds only a sha, written by pr-pick.sh.
+PR_CODE = {"pr"}
+CREDENTIAL_NAME = re.compile(r"TOKEN|KEY|SECRET|PASSWORD", re.I)
+
+
+def task_steps_everywhere(node, out):
+    """Every task step in plans and hooks, whether it loads `file:` or inlines `config:`."""
+    if isinstance(node, dict):
+        if "task" in node and ("file" in node or "config" in node):
+            out.append(node)
+        for v in node.values():
+            task_steps_everywhere(v, out)
+    elif isinstance(node, list):
+        for v in node:
+            task_steps_everywhere(v, out)
+    return out
+
+
+def credentials(step):
+    """Params that hold a credential: by name, or (review nit a) by a `((var))` value."""
+    return sorted(k for k, v in (step.get("params") or {}).items()
+                  if CREDENTIAL_NAME.search(k) or "((" in str(v))
+
+
+def task_config(step, load):
+    """The step's task config: inline `config:`, or the `file:` loaded from main's repo/."""
+    if "config" in step:
+        return step.get("config") or {}
+    return load(str(step["file"])) or {}
+
+
+def pr_code_findings(doc, load):
+    """Every way a pipeline lets pull-request code near a credential. [] is clean."""
+    bad = []
+    for step in task_steps_everywhere(doc["jobs"], []):
+        cfg = task_config(step, load)
+        declared = {i["name"] for i in cfg.get("inputs") or []}
+        mapped = set((step.get("input_mapping") or {}).values())
+        sees_pr = (mapped | (declared - set(step.get("input_mapping") or {}))) & PR_CODE
+        creds = credentials(step)
+        where = step.get("file", "inline config")
+        if creds and sees_pr:
+            bad.append(f"{step['task']} holds {creds} and takes pull-request code {sorted(sees_pr)} ({where})")
+        if creds and "file" in step and not str(step["file"]).startswith("repo/"):
+            bad.append(f"{step['task']} holds {creds} and loads its task file from {step['file']}, not main's repo/")
+        # Review nit c: the task that runs pull-request code must not be able to write an
+        # artifact a later (credentialed) step reads in place of pr-pick's.
+        if sees_pr and (cfg.get("outputs") or step.get("output_mapping")):
+            bad.append(f"{step['task']} runs pull-request code and declares outputs "
+                       f"{[o.get('name') for o in cfg.get('outputs') or []]} / output_mapping "
+                       f"{step.get('output_mapping')}")
+    return bad
+
+
+def load_from_root(rel):
+    path = ROOT / rel.replace("repo/", "", 1)
+    return yaml.safe_load(path.read_text(encoding="utf-8")) if path.is_file() else None
+
+
+def credential_steps_never_see_pr_code(doc):
+    bad = pr_code_findings(doc, load_from_root)
+    check("no step holding a credential takes pull-request code as an input or loads a task "
+          "file from outside main's repo/, and the task running pull-request code writes no "
+          "outputs", not bad, bad)
+
+    # The rule must be able to fail: one deliberately bad pipeline per shape.
+    clean_cfg = {"inputs": [{"name": "repo"}, {"name": "pr"}], "run": {"path": "true"}}
+    files = {"repo/ci/tasks/x.yml": {"inputs": [{"name": "repo"}], "run": {"path": "repo/x.sh"}},
+             "repo/ci/tasks/runs-pr.yml": clean_cfg,
+             "repo/ci/tasks/runs-pr-out.yml": {**clean_cfg, "outputs": [{"name": "pr-sha"}]}}
+    load = files.get
+    def job(*steps):
+        return {"jobs": [{"name": "j", "plan": list(steps)}]}
+    fixtures = {
+        "a credential by name, with the pull request mapped over repo": job(
+            {"task": "t", "file": "repo/ci/tasks/x.yml", "input_mapping": {"repo": "pr"},
+             "params": {"MY_TOKEN": "x"}}),
+        "a credential only by its ((var)) value (nit a)": job(
+            {"task": "t", "file": "repo/ci/tasks/x.yml", "input_mapping": {"repo": "pr"},
+             "params": {"WHATEVER": "((github_protection_token))"}}),
+        "an inline config that declares pr, with a credential (nit b)": job(
+            {"task": "t", "config": {"inputs": [{"name": "pr"}], "run": {"path": "pr/x.sh"}},
+             "params": {"T": "((mykronos_ingestion_token))"}}),
+        "a credentialed task file loaded from pull-request code": job(
+            {"task": "t", "file": "pr/ci/tasks/x.yml", "params": {"MY_TOKEN": "x"}}),
+        "the pull-request task declaring an output (nit c)": job(
+            {"task": "t", "file": "repo/ci/tasks/runs-pr-out.yml"}),
+        "the pull-request task with an output_mapping (nit c)": job(
+            {"task": "t", "file": "repo/ci/tasks/runs-pr.yml", "output_mapping": {"pr-sha": "pr"}}),
+    }
+    for name, bad_doc in fixtures.items():
+        check(f"the rule catches {name}", bool(pr_code_findings(bad_doc, load)),
+              "(the deliberately bad fixture passed)")
+    check("and passes a pull-request task with no credential and no outputs",
+          not pr_code_findings(job({"task": "t", "file": "repo/ci/tasks/runs-pr.yml"}), load))
+
+
 def pipeline_checks():
     print("-- ci/pipeline.yml --")
     doc = yaml.safe_load(PIPELINE.read_text(encoding="utf-8"))
@@ -109,11 +213,34 @@ def pipeline_checks():
                   h)
 
     for name, job in jobs.items():
-        if name not in CHAIN:
+        if name not in CHAIN and name != PR_JOB:
             check(f"{name} is outside the verdict and does not report", not reporters(job))
 
+    pr = jobs.get(PR_JOB) or {}
+    for hook, conclusion in (("on_success", "success"), ("on_failure", "failure"),
+                             ("on_error", "failure")):
+        h = pr.get(hook) or {}
+        p = h.get("params") or {}
+        check(f"{PR_JOB}.{hook} reports {conclusion} on the pull request head",
+              h.get("task") == "check-run"
+              and (p.get("JOB"), p.get("PHASE"), p.get("CONCLUSION")) == (PR_JOB, "end", conclusion)
+              and p.get("HEAD_FILE") == "pr-sha/HEAD" and not h.get("input_mapping")
+              and p.get("NO_COMMIT_OK") == "1", h)
+    check(f"{PR_JOB} reports nothing from its plan (pr-pick posts the start)",
+          not reporters(pr.get("plan") or []))
+    check(f"{PR_JOB} never runs two at once", pr.get("serial") is True)
+    pr_tasks = {s.get("task"): s for s in pr.get("plan") or [] if "task" in s}
+    check(f"{PR_JOB}: the task that runs pull-request code gets no params",
+          "pr-checks" in pr_tasks and not pr_tasks["pr-checks"].get("params"), pr_tasks.get("pr-checks"))
+    for name, job in jobs.items():
+        for step in reporters(job):
+            if (step.get("params") or {}).get("NO_COMMIT_OK") and name != PR_JOB:
+                check(f"only {PR_JOB} may report with no commit ({name} does)", False)
+
+    credential_steps_never_see_pr_code(doc)
+
     every = reporters(doc["jobs"])
-    expected = len(CHAIN) * 2 + 2
+    expected = len(CHAIN) * 2 + 2 + 3
     check(f"{len(CHAIN)} jobs x 2 hooks, one start, one success", len(every) == expected, len(every))
     for step in every:
         p = step.get("params") or {}
@@ -157,6 +284,9 @@ def run(head, **params):
         if head is not None:
             (tmp / "repo" / ".git").mkdir()
             (tmp / "repo" / ".git" / "HEAD").write_text(head + "\n", encoding="utf-8")
+        if params.get("PR_SHA"):
+            (tmp / "pr-sha").mkdir()
+            (tmp / "pr-sha" / "HEAD").write_text(params["PR_SHA"] + "\n", encoding="utf-8")
         env = {
             **os.environ,
             "PATH": f"{stubs}{os.pathsep}{os.environ.get('PATH', '')}",
@@ -205,6 +335,22 @@ def script_checks():
         r, body, _ = run(head, JOB="test", PHASE="end", CONCLUSION="failure")
         check(f"no full sha ({head!r}) fails rather than guessing",
               r.returncode != 0 and body is None)
+
+    # [TheHub #61778] pr-checks: no head was picked, so there is nothing to report.
+    for head in (None, "ref: refs/heads/master"):
+        r, body, _ = run(head, JOB="pr-checks", PHASE="end", CONCLUSION="success", NO_COMMIT_OK="1")
+        check(f"NO_COMMIT_OK=1 with no commit ({head!r}) posts nothing and passes",
+              r.returncode == 0 and body is None, r.stdout + r.stderr)
+    r, body, _ = run(SHA, JOB="pr-checks", PHASE="end", CONCLUSION="failure", NO_COMMIT_OK="1")
+    check("NO_COMMIT_OK=1 with a commit still reports it", r.returncode == 0 and body
+          and (body["commit_sha"], body["conclusion"]) == (SHA, "failure"))
+
+    # [TheHub #61778 review #1] pr-checks names the head's sha in a file of its own,
+    # and repo/ stays main's checkout.
+    r, body, _ = run("ref: refs/heads/main", JOB="pr-checks", PHASE="end", CONCLUSION="success",
+                     NO_COMMIT_OK="1", HEAD_FILE="pr-sha/HEAD", PR_SHA=SHA)
+    check("HEAD_FILE: the sha is read from that file, not repo/.git/HEAD",
+          r.returncode == 0 and body and body["commit_sha"] == SHA, r.stdout + r.stderr)
 
 
 def main():

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Every MyKronos pin in .github/workflows names one commit, and it is not a
-commit known to lack mykronos #1036. Refs: TheHub #61212
+Every MyKronos pin in .github/workflows and ci/vars.example.yml names one
+commit, and it is not a commit known to lack mykronos #1036. Refs: TheHub #61212, #61359
 
 The generated workflows install the MyKronos uploader three ways: the
 `upload-results@<sha>` action, its `mykronos-ref:` input, and a
@@ -10,6 +10,10 @@ while the Concourse pin moved to v17. #1036 (13f5ab1) is the osv-scanner fix
 that reads a fixed version filed under the rule's GHSA alias; without it every
 atlas finding arrives with no fixed version and reads as having no fix. The
 uploader normalises findings, so the backend having the fix is not enough.
+
+ci/vars.example.yml's `mykronos_ref` is the Concourse pin a fork copies. It sat on
+v15 (2dd4e44) after the live pipeline moved to v17, because nothing read it
+(TheHub #61359); it is held to the same rules now.
 
 Tags v0.1.0 to v16 all predate #1036 and are refused by commit. Pins must also
 agree with each other: the first install in a job wins, so a second, older pin
@@ -23,6 +27,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 WORKFLOWS = ROOT / ".github" / "workflows"
+VARS_EXAMPLE = ROOT / "ci" / "vars.example.yml"
 failures = []
 
 #: mykronos tag commits that do not contain #1036 (13f5ab1).
@@ -52,7 +57,8 @@ LACKS_1036 = {
 PIN = re.compile(
     r"(?:ToddGBenson/mykronos/actions/upload-results@"
     r"|git\+https://github\.com/ToddGBenson/mykronos@"
-    r"|^\s*mykronos-ref:\s*)([0-9A-Za-z._-]+)",
+    r"|^\s*mykronos-ref:\s*"
+    r"|^\s*mykronos_ref:\s*)([0-9A-Za-z._-]+)",
     re.MULTILINE,
 )
 
@@ -67,7 +73,9 @@ def check(name, cond, detail=""):
 
 def pins():
     found = {}
-    for path in sorted(WORKFLOWS.glob("*.yml")):
+    for path in sorted(WORKFLOWS.glob("*.yml")) + [VARS_EXAMPLE]:
+        if not path.is_file():
+            continue
         text = path.read_text(encoding="utf-8")
         for match in PIN.finditer(text):
             line = text.count("\n", 0, match.start()) + 1
@@ -81,6 +89,12 @@ def main():
     check(
         "the atlas workflow is among them",
         any(where.startswith("mykronos-atlas.yml:") for where in found),
+        str(sorted(found)),
+    )
+
+    check(
+        "ci/vars.example.yml's mykronos_ref is among them",
+        any(where.startswith("vars.example.yml:") for where in found),
         str(sorted(found)),
     )
 
