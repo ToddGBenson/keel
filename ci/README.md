@@ -32,6 +32,17 @@ approve anything. Gate approval stays a human act recorded in GitHub (PD-2).
 > (`platform/MANIFEST.yml`): a fork that restores PR Governance on Actions gets them working.
 > keel's own self-review record is read by its reviewers, not by this script.
 >
+> **Re-read 2026-11-16 (TheHub #61741).** keel is **public**, and GitHub Actions **runs**.
+> On pull requests it runs `Unit results` (`unit-results.yml`, the `Unit suites → MyKronos`
+> check), `Mykronos sast`, `Mykronos secrets` and `Mykronos iac`; on `main` pushes those plus
+> `Mykronos atlas`, and `Mykronos oracle` after them. `ci.yml`, `security.yml`,
+> `sbom-and-sign.yml`, `release.yml`, `ai-evaluation.yml` and `compliance-evidence.yml` are
+> `workflow_dispatch` only: they were ported to Concourse, not stopped by billing.
+> `PR Governance` is still `disabled_manually` and retired. Live protection on `main`, read
+> 2026-11-16: one approving review, linear history, resolved conversations, **no required
+> status checks**, `enforce_admins` off. Every "private" or "Actions does not start" statement
+> below is history, superseded by this reading.
+>
 > The rest of this box is the earlier reading.
 >
 > **Re-read 2026-10-22 (TheHub #60935).** The repository is **public** again, and Actions runs
@@ -39,8 +50,9 @@ approve anything. Gate approval stays a human act recorded in GitHub (PD-2).
 > **None is required.** Branch protection is otherwise as described below. The rest of this box
 > is the 2026-10-20 reading, kept as written.
 >
-> **Read 2026-10-20.** The repository is **private**. GitHub Actions does not start, because of
-> billing. `PR Governance` (`.github/workflows/pr-governance.yml`) is `disabled_manually` and
+> **Read 2026-10-20 (superseded 2026-10-22: keel is public and Actions runs).** The repository
+> was then **private**, and GitHub Actions did not start, because of billing.
+> `PR Governance` (`.github/workflows/pr-governance.yml`) is `disabled_manually` and
 > **retired** (TheHub #60849, option C). Branch protection on `main` requires one approving
 > review, linear history and resolved conversations. It requires **no status checks**
 > (`required_status_checks: null`), and `enforce_admins` is **off**.
@@ -238,8 +250,11 @@ anything caught it.
 
 ### Repository access
 
-The repo is private, so the `repo` resource authenticates over **SSH with a
-read-only deploy key** (`((git_private_key))`), not HTTPS with a token. A personal
+The `repo` resource authenticates over **SSH with a read-only deploy key**
+(`((git_private_key))`), not HTTPS with a token. This was chosen while keel was
+private. keel is public now (2026-11-16), so an anonymous HTTPS clone would also
+work; the deploy key stays because it keeps working if the repository goes private
+again, and it is what binnacle (private) uses. A personal
 access token would work and would put a credential that can write to every
 repository the owner has into a pipeline whose need is to read one. The deploy
 key is scoped to this repository and registered `read_only`.
@@ -309,9 +324,10 @@ options are archived. Taking an unmaintained dependency into the pipeline that
 enforces SR-3/SR-4 would be worse than leaving GitHub-shaped checks on GitHub.
 That reasoning kept `pr-governance.yml` on Actions after the port.
 
-Two things changed. Actions stopped starting on billing, so the workflow was
-disabled and its checks stopped being required. And Concourse found a way to
-report to GitHub without a resource type: it posts to MyKronos, and MyKronos
+Two things changed. Actions stopped starting on billing while keel was private
+(2026-08-13), so the workflow was disabled and its checks stopped being required.
+(Actions runs again since keel went public; `pr-governance.yml` stays retired.)
+And Concourse found a way to report to GitHub without a resource type: it posts to MyKronos, and MyKronos
 posts the check run through its own GitHub App (#107, below). So on 2026-10-20
 the operator chose the Concourse check run as the gate and retired
 `PR Governance` (TheHub #60849, option C). The workflow file stays, with its
@@ -523,10 +539,11 @@ GitHub webhook pointing at:
 ### 5. Branch protection — read it, do not assume it
 
 This section used to say eleven required status checks protect `main`. **Read on
-2026-10-11 and again on 2026-10-20, none do:** `required_status_checks` is off,
-because Actions cannot run here and every required check was removed so that
-anything could merge (POAM-014). Reviews (one approval, `enforce_admins` off),
-linear history and conversation resolution are on. `PR Governance` is
+2026-10-11, 2026-10-20 and again on 2026-11-16, none do:** `required_status_checks`
+is off. They were removed in 2026-08 when Actions could not run on the then-private
+repository, so that anything could merge (POAM-014). keel is public and Actions runs
+now, but no check has been required again yet. Reviews (one approval,
+`enforce_admins` off), linear history and conversation resolution are on. `PR Governance` is
 `disabled_manually` and retired (TheHub #60849).
 
 ```sh
