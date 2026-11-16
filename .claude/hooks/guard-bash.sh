@@ -13,6 +13,62 @@
 
 set -uo pipefail
 
+# TheHub #61794: FAIL CLOSED. Every rule below reads the command through text tools
+# inside $(...) captures, and a capture does not report a helper that errored or was
+# killed: it is just empty, no rule matches, and the hook reached `exit 0`. On keel
+# #176's Actions run that let KB-177 (curl -T ... environments/production) through
+# once; a failing `tr` alone is enough (test/hook-fail-closed.test.py).
+#
+# So each helper runs through a wrapper that records a real error in a fault file,
+# and an EXIT trap turns an allow into a block when the file is not empty. Wrappers
+# are functions, so they reach every subshell, pipeline and capture. Not a fault:
+# grep's 1 (no match), and 141 (SIGPIPE: a reader such as `grep -q` closed the pipe
+# early). Everything else non-zero is. A fault file that cannot be made is a block.
+guard_faults="$(command mktemp 2>/dev/null)" || {
+  echo "BLOCKED by .claude/hooks/guard-bash.sh — internal error: cannot create its fault file, so it cannot tell whether its own checks ran. Retry the call." >&2
+  exit 2
+}
+export guard_faults
+# shellcheck disable=SC2317  # the wrappers are called indirectly, by name, from every rule below
+guard_fault() { printf '%s exited %s\n' "$1" "$2" >> "$guard_faults" 2>/dev/null; }
+guard_run() { # $1: tool, $2: highest exit status that is not an error; the rest: its args
+  local t=$1 ok=$2 rc; shift 2
+  command "$t" "$@"; rc=$?
+  if [ "$rc" -gt "$ok" ] && [ "$rc" -ne 141 ]; then guard_fault "$t" "$rc"; fi
+  return "$rc"
+}
+grep()    { guard_run grep 1 "$@"; }
+sed()     { guard_run sed 0 "$@"; }
+awk()     { guard_run awk 0 "$@"; }
+tr()      { guard_run tr 0 "$@"; }
+head()    { guard_run head 0 "$@"; }
+cat()     { guard_run cat 0 "$@"; }
+# shellcheck disable=SC2317  # wrapped for when a rule calls it
+cut()     { guard_run cut 0 "$@"; }
+jq()      { guard_run jq 0 "$@"; }
+# shellcheck disable=SC2317  # wrapped for when a rule calls it
+python3() { guard_run python3 0 "$@"; }
+# shellcheck disable=SC2317  # wrapped for when a rule calls it
+python()  { guard_run python 0 "$@"; }
+# shellcheck disable=SC2317  # run by the EXIT trap
+guard_exit() {
+  local rc=$?
+  if [ "$rc" -ne 2 ] && [ -s "$guard_faults" ]; then
+    {
+      echo "BLOCKED by .claude/hooks/guard-bash.sh — internal error: a helper this hook reads the command with failed, so it cannot tell whether the command is allowed:"
+      sed -n '1,5p' "$guard_faults" 2>/dev/null | command sed 's/^/  /'
+      echo ""
+      echo "This is the guard failing closed (TheHub #61794), not a rule. Retry the call; if it"
+      echo "keeps happening, the host is short of a tool or of resources."
+    } >&2
+    command rm -f "$guard_faults"
+    exit 2
+  fi
+  command rm -f "$guard_faults"
+  exit "$rc"
+}
+trap guard_exit EXIT
+
 payload="$(cat)"
 
 # Decode a JSON string body (the sed fallback below hands over the raw escapes).
@@ -35,7 +91,9 @@ END {
 AWK
 
 # Extract the command. Prefer jq; fall back to a tolerant sed for environments without it.
-if command -v jq >/dev/null 2>&1; then
+# `type -P`, not `command -v`: jq() is a wrapper function now (#61794), and `command -v`
+# would report it even where no jq binary exists.
+if type -P jq >/dev/null 2>&1; then
   cmd="$(printf '%s' "$payload" | jq -r '.tool_input.command // empty')"
 else
   # TheHub #61038 review: take the JSON string itself (not everything up to the
