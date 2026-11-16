@@ -1,7 +1,7 @@
 # Self-review — TheHub #61778 (Concourse posts PR-head checks: keel)
 
 Mode: solo (POAM-008); agent self-review per the operator's 2026-11-04 decision
-PR: #PRNUM   Author: Claude Opus 5.5 on the Linux runner laptop (AI-authored)   Date: 2026-11-16
+PR: #178   Author: Claude Opus 5.5 on the Linux runner laptop (AI-authored)   Date: 2026-11-16
 verdict: pass
 
 New `pr-checks` job: every ten minutes it picks the newest open same-repository pull request head
