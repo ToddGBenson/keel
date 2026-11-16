@@ -40,9 +40,9 @@ Independent review of 9f4a47f (Opus, standing in for Fable; relayed by the PO), 
   TOKEN/KEY/SECRET/PASSWORD param, an input mapped or declared from pull-request code, or a task file
   not from repo/. Run against 9f4a47f it fails 4 checks (the 3 hooks and the structural rule); it
   passes here.
-- **#3 MEDIUM, documented, not fixed in code:** the PR verdict and the chain's share the name
-  `Concourse / keel` (MyKronos names by repository). keel allows merge commits, which keep a PR
-  head's sha in main's history. Squash-only (operator setting) or a MyKronos naming change closes it.
+- **#3 MEDIUM, closed by the operator:** the PR verdict and the chain's share the name
+  `Concourse / <repo>`, and a merge commit keeps a PR head's sha in main's history. The operator made
+  keel and binnacle squash-only (2026-11-16); ci/README.md records it.
 - **#4 MEDIUM, fixed:** the pr-checks task timeout is 20m, not 1h. A separate serial group is ruled
   out by the three-lane cap (serial-lanes.test.py).
 - **#5 LOW, documented:** a pull request with conflicts has no merge ref and is not judged.
@@ -67,6 +67,12 @@ Independent review of 9f4a47f (Opus, standing in for Fable; relayed by the PO), 
   this repository (write access) are run; forks never are. Comparable to main's commits, which
   already run there.
 - binnacle needs the same files (ci/ is project-owned there); a separate PR.
+
+## Re-review (75049bc / 3131ec8): approve with nits
+
+- 3c, a, b taken: the structural rule in test/check-run.test.py now also catches a credential by its
+  `((var))` value, inline `config:` tasks, and a pull-request task that declares outputs or an
+  output_mapping. Each is shown catching a deliberately bad fixture; the real 9f4a47f still fails it.
 
 ## Not verified (added after the review)
 

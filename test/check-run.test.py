@@ -82,15 +82,16 @@ def upstream_of(jobs, target):
 
 # [TheHub #61778 review #1] Artifacts that hold pull-request code. A task's `run:`
 # path names an INPUT, so a credentialed step given one of these as any input (by
-# input_mapping, or because its task file declares it) can run the pull request's
+# input_mapping, or because its task config declares it) can run the pull request's
 # script with the credential. pr-sha holds only a sha, written by pr-pick.sh.
 PR_CODE = {"pr"}
-CREDENTIAL = re.compile(r"TOKEN|KEY|SECRET|PASSWORD", re.I)
+CREDENTIAL_NAME = re.compile(r"TOKEN|KEY|SECRET|PASSWORD", re.I)
 
 
 def task_steps_everywhere(node, out):
+    """Every task step in plans and hooks, whether it loads `file:` or inlines `config:`."""
     if isinstance(node, dict):
-        if "task" in node and "file" in node:
+        if "task" in node and ("file" in node or "config" in node):
             out.append(node)
         for v in node.values():
             task_steps_everywhere(v, out)
@@ -100,22 +101,83 @@ def task_steps_everywhere(node, out):
     return out
 
 
-def credential_steps_never_see_pr_code(doc):
+def credentials(step):
+    """Params that hold a credential: by name, or (review nit a) by a `((var))` value."""
+    return sorted(k for k, v in (step.get("params") or {}).items()
+                  if CREDENTIAL_NAME.search(k) or "((" in str(v))
+
+
+def task_config(step, load):
+    """The step's task config: inline `config:`, or the `file:` loaded from main's repo/."""
+    if "config" in step:
+        return step.get("config") or {}
+    return load(str(step["file"])) or {}
+
+
+def pr_code_findings(doc, load):
+    """Every way a pipeline lets pull-request code near a credential. [] is clean."""
     bad = []
     for step in task_steps_everywhere(doc["jobs"], []):
-        creds = [k for k in (step.get("params") or {}) if CREDENTIAL.search(k)]
-        if not creds:
-            continue
-        mapped = set((step.get("input_mapping") or {}).values()) & PR_CODE
-        task_file = ROOT / str(step["file"]).replace("repo/", "", 1)
-        declared = set()
-        if task_file.is_file():
-            declared = {i["name"] for i in (yaml.safe_load(task_file.read_text()) or {}).get("inputs") or []}
-        if mapped or (declared & PR_CODE) or not str(step["file"]).startswith("repo/"):
-            bad.append(f"{step['task']} ({', '.join(creds)}): "
-                       f"maps {sorted(mapped)}, declares {sorted(declared & PR_CODE)}, file {step['file']}")
-    check("no step holding a credential takes pull-request code as an input, or a task "
-          "file from anywhere but main's repo/", not bad, bad)
+        cfg = task_config(step, load)
+        declared = {i["name"] for i in cfg.get("inputs") or []}
+        mapped = set((step.get("input_mapping") or {}).values())
+        sees_pr = (mapped | (declared - set(step.get("input_mapping") or {}))) & PR_CODE
+        creds = credentials(step)
+        where = step.get("file", "inline config")
+        if creds and sees_pr:
+            bad.append(f"{step['task']} holds {creds} and takes pull-request code {sorted(sees_pr)} ({where})")
+        if creds and "file" in step and not str(step["file"]).startswith("repo/"):
+            bad.append(f"{step['task']} holds {creds} and loads its task file from {step['file']}, not main's repo/")
+        # Review nit c: the task that runs pull-request code must not be able to write an
+        # artifact a later (credentialed) step reads in place of pr-pick's.
+        if sees_pr and (cfg.get("outputs") or step.get("output_mapping")):
+            bad.append(f"{step['task']} runs pull-request code and declares outputs "
+                       f"{[o.get('name') for o in cfg.get('outputs') or []]} / output_mapping "
+                       f"{step.get('output_mapping')}")
+    return bad
+
+
+def load_from_root(rel):
+    path = ROOT / rel.replace("repo/", "", 1)
+    return yaml.safe_load(path.read_text(encoding="utf-8")) if path.is_file() else None
+
+
+def credential_steps_never_see_pr_code(doc):
+    bad = pr_code_findings(doc, load_from_root)
+    check("no step holding a credential takes pull-request code as an input or loads a task "
+          "file from outside main's repo/, and the task running pull-request code writes no "
+          "outputs", not bad, bad)
+
+    # The rule must be able to fail: one deliberately bad pipeline per shape.
+    clean_cfg = {"inputs": [{"name": "repo"}, {"name": "pr"}], "run": {"path": "true"}}
+    files = {"repo/ci/tasks/x.yml": {"inputs": [{"name": "repo"}], "run": {"path": "repo/x.sh"}},
+             "repo/ci/tasks/runs-pr.yml": clean_cfg,
+             "repo/ci/tasks/runs-pr-out.yml": {**clean_cfg, "outputs": [{"name": "pr-sha"}]}}
+    load = files.get
+    def job(*steps):
+        return {"jobs": [{"name": "j", "plan": list(steps)}]}
+    fixtures = {
+        "a credential by name, with the pull request mapped over repo": job(
+            {"task": "t", "file": "repo/ci/tasks/x.yml", "input_mapping": {"repo": "pr"},
+             "params": {"MY_TOKEN": "x"}}),
+        "a credential only by its ((var)) value (nit a)": job(
+            {"task": "t", "file": "repo/ci/tasks/x.yml", "input_mapping": {"repo": "pr"},
+             "params": {"WHATEVER": "((github_protection_token))"}}),
+        "an inline config that declares pr, with a credential (nit b)": job(
+            {"task": "t", "config": {"inputs": [{"name": "pr"}], "run": {"path": "pr/x.sh"}},
+             "params": {"T": "((mykronos_ingestion_token))"}}),
+        "a credentialed task file loaded from pull-request code": job(
+            {"task": "t", "file": "pr/ci/tasks/x.yml", "params": {"MY_TOKEN": "x"}}),
+        "the pull-request task declaring an output (nit c)": job(
+            {"task": "t", "file": "repo/ci/tasks/runs-pr-out.yml"}),
+        "the pull-request task with an output_mapping (nit c)": job(
+            {"task": "t", "file": "repo/ci/tasks/runs-pr.yml", "output_mapping": {"pr-sha": "pr"}}),
+    }
+    for name, bad_doc in fixtures.items():
+        check(f"the rule catches {name}", bool(pr_code_findings(bad_doc, load)),
+              "(the deliberately bad fixture passed)")
+    check("and passes a pull-request task with no credential and no outputs",
+          not pr_code_findings(job({"task": "t", "file": "repo/ci/tasks/runs-pr.yml"}), load))
 
 
 def pipeline_checks():

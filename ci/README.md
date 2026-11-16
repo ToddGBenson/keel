@@ -496,10 +496,10 @@ token:
 - **One name for both verdicts (`Concourse / keel`).** MyKronos keeps one check run per
   commit and names it after the repository, so the commit chain and `pr-checks` share it.
   A pull request head that reached `main` with its sha unchanged would show the PR's
-  unit-only verdict instead of the chain's. GitHub's squash and rebase merges always
-  write new commits; a **merge commit** keeps the head's sha in `main`'s history. keel
-  allows all three today. Squash-only merging (an operator setting) closes this; a
-  distinct name needs a MyKronos change.
+  unit-only verdict instead of the chain's. Only a **merge commit** keeps a head's sha in
+  `main`'s history (squash and rebase write new commits), so **keel and binnacle are
+  squash-only** (operator decision, 2026-11-16, TheHub #61778 review #3). Turning merge
+  commits back on reopens this; a distinct check name would need a MyKronos change.
 - **What it does not judge:**
   - A pull request with conflicts. GitHub keeps no `refs/pull/N/merge` for it, so it
     looks closed until the conflict is resolved.
