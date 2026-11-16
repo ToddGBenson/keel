@@ -1,7 +1,7 @@
 # Self-review — TheHub #61729 (keel main: fix the red unit suites)
 
 Mode: solo (POAM-008); agent self-review per the operator's 2026-11-04 decision
-PR: #PRNUM   Author: Claude Opus 5.5 on the Linux runner laptop (AI-authored)   Date: 2026-11-16
+PR: #175   Author: Claude Opus 5.5 on the Linux runner laptop (AI-authored)   Date: 2026-11-16
 verdict: pass
 
 The protection-drift job (keel #164) came in with no timeouts, so `test/task-timeouts.test.py` has
