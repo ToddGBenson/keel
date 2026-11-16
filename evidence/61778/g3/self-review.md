@@ -29,7 +29,26 @@ MyKronos. No GitHub token, no pull-request resource type.
 
 ## Agent findings
 
-None. No three-pass agent review was run.
+Independent review of 9f4a47f (Opus, standing in for Fable; relayed by the PO), CHANGES NEEDED:
+
+- **#1 CRITICAL, fixed:** the end hooks ran main's check-run.yml with `input_mapping: { repo: pr }`,
+  and that task's `run:` path is `repo/ci/scripts/check-run.sh`, so they ran the PULL REQUEST's
+  script with the ingestion token. Any same-repo branch could read the token or post any verdict.
+  Now: no input mapping; pr-pick.sh writes the sha alone to a `pr-sha` output; check-run.sh reads it
+  through `HEAD_FILE`; repo/ is main's checkout in every credentialed step.
+- **#2 HIGH, fixed:** check-run.test.py asserted the mapping. It now refuses, for every step with a
+  TOKEN/KEY/SECRET/PASSWORD param, an input mapped or declared from pull-request code, or a task file
+  not from repo/. Run against 9f4a47f it fails 4 checks (the 3 hooks and the structural rule); it
+  passes here.
+- **#3 MEDIUM, documented, not fixed in code:** the PR verdict and the chain's share the name
+  `Concourse / keel` (MyKronos names by repository). keel allows merge commits, which keep a PR
+  head's sha in main's history. Squash-only (operator setting) or a MyKronos naming change closes it.
+- **#4 MEDIUM, fixed:** the pr-checks task timeout is 20m, not 1h. A separate serial group is ruled
+  out by the three-lane cap (serial-lanes.test.py).
+- **#5 LOW, documented:** a pull request with conflicts has no merge ref and is not judged.
+- **#6 LOW, documented:** newest first can starve an older pull request during bursts.
+- **#7 LOW, not taken:** digest-pinning python:3.13 contradicts the policy recorded in
+  scripts/validate-pipeline.py (no base-image digest pins without a bump mechanism); kept by tag.
 
 ## Not verified
 
@@ -48,6 +67,12 @@ None. No three-pass agent review was run.
   this repository (write access) are run; forks never are. Comparable to main's commits, which
   already run there.
 - binnacle needs the same files (ci/ is project-owned there); a separate PR.
+
+## Not verified (added after the review)
+
+- That Concourse gives each task a copy-on-write view of its inputs, so pull-request code in the
+  pr-checks task cannot change the `repo/` the later hooks read. That is Concourse's documented
+  model; not tested here.
 
 ## Residual risk accepted
 

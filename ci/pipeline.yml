@@ -1140,25 +1140,26 @@ jobs:
     # The commit chain's lane: a unit run is short, and the lane cap (three) is
     # what keeps the worker from being overloaded.
     serial_groups: [verdict]
+    # The end reports run main's check-run.yml and check-run.sh from repo/ with the
+    # ingestion token, and read ONLY the head's sha, from pr-sha/HEAD. Never map the
+    # pull request's checkout into a credentialed step: its script path would then
+    # be the pull request's (TheHub #61778 review #1; test/check-run.test.py).
     on_success:
       task: check-run
       file: repo/ci/tasks/check-run.yml
-      input_mapping: { repo: pr }
       # Three attempts of 45s plus two 5s delays is 145s; 5m is twice that.
       timeout: 5m
-      params: { <<: *check_run_params, JOB: pr-checks, PHASE: end, CONCLUSION: success, NO_COMMIT_OK: "1" }
+      params: { <<: *check_run_params, JOB: pr-checks, PHASE: end, CONCLUSION: success, NO_COMMIT_OK: "1", HEAD_FILE: pr-sha/HEAD }
     on_failure:
       task: check-run
       file: repo/ci/tasks/check-run.yml
-      input_mapping: { repo: pr }
       timeout: 5m
-      params: { <<: *check_run_params, JOB: pr-checks, PHASE: end, CONCLUSION: failure, NO_COMMIT_OK: "1" }
+      params: { <<: *check_run_params, JOB: pr-checks, PHASE: end, CONCLUSION: failure, NO_COMMIT_OK: "1", HEAD_FILE: pr-sha/HEAD }
     on_error:
       task: check-run
       file: repo/ci/tasks/check-run.yml
-      input_mapping: { repo: pr }
       timeout: 5m
-      params: { <<: *check_run_params, JOB: pr-checks, PHASE: end, CONCLUSION: failure, NO_COMMIT_OK: "1" }
+      params: { <<: *check_run_params, JOB: pr-checks, PHASE: end, CONCLUSION: failure, NO_COMMIT_OK: "1", HEAD_FILE: pr-sha/HEAD }
     plan:
       - get: repo
         timeout: 15m
@@ -1174,8 +1175,9 @@ jobs:
           GIT_PRIVATE_KEY: ((git_private_key))
       - task: pr-checks
         file: repo/ci/tasks/pr-checks.yml
-        # The unit suites take minutes; 1h bounds a hang and frees the lane.
-        timeout: 1h
+        # The unit suites take about 3 minutes on Actions. 20m bounds a hang so a
+        # pull request cannot hold the verdict lane main's commits need (review #4).
+        timeout: 20m
 
   # ── AI assurance ────────────────────────────────────────────────────────────
   # A prompt change is a code change. The scheduled run is the control that

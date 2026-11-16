@@ -23,6 +23,9 @@ image_resource:
 
 inputs:
   - name: repo
+  # [TheHub #61778] pr-checks only: a file holding the pull request head's sha.
+  - name: pr-sha
+    optional: true
 
 params:
   MYKRONOS_INGESTION_URL: ""
@@ -34,6 +37,7 @@ params:
   # success | failure, only with PHASE=end
   CONCLUSION: ""
   NO_COMMIT_OK: ""
+  HEAD_FILE: ""
 
 run:
   path: sh

@@ -486,7 +486,26 @@ token:
   the head's sha. `NO_COMMIT_OK=1` makes a run that picked nothing report nothing.
 - **Credentials:** `pr-pick` holds the deploy key and the ingestion token and executes no
   pull-request code. `pr-checks` runs the pull request's code and gets **no params**.
-  `test/check-run.test.py` and `test/pr-pick.test.py` hold both properties.
+  The end reports run main's `check-run.yml` and `check-run.sh` from `repo/` with the
+  token, and read only the head's sha, from `pr-sha/HEAD` (`HEAD_FILE`).
+- **Never map pull-request code into a credentialed step.** A task's `run:` path names an
+  input, so `input_mapping: { repo: pr }` on a report would run the **pull request's**
+  `check-run.sh` with the token. The first version of this job did exactly that (TheHub
+  #61778 review). `test/check-run.test.py` refuses it for every step that holds a
+  `*TOKEN*`/`*KEY*`/`*SECRET*`/`*PASSWORD*` param.
+- **One name for both verdicts (`Concourse / keel`).** MyKronos keeps one check run per
+  commit and names it after the repository, so the commit chain and `pr-checks` share it.
+  A pull request head that reached `main` with its sha unchanged would show the PR's
+  unit-only verdict instead of the chain's. GitHub's squash and rebase merges always
+  write new commits; a **merge commit** keeps the head's sha in `main`'s history. keel
+  allows all three today. Squash-only merging (an operator setting) closes this; a
+  distinct name needs a MyKronos change.
+- **What it does not judge:**
+  - A pull request with conflicts. GitHub keeps no `refs/pull/N/merge` for it, so it
+    looks closed until the conflict is resolved.
+  - Fairness: newest first, one head per ten minutes, so a stream of pushes to new pull
+    requests can keep an older one waiting.
+- `test/check-run.test.py` and `test/pr-pick.test.py` hold all of the above.
 
 The PR's own tests run with the worker's network and no credential, as `main`'s commits
 already do. Only branches in this repository are run, which takes write access.

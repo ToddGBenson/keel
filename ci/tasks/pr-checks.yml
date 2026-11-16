@@ -10,6 +10,8 @@ image_resource:
   type: registry-image
   source:
     repository: python
+    # By tag, like every python:3.13 task: scripts/validate-pipeline.py records why a
+    # base image is not digest-pinned without a bump mechanism (patch currency).
     tag: "3.13"
 
 inputs:

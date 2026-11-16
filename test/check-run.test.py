@@ -17,6 +17,7 @@ Needs PyYAML (ci/requirements.txt) and `sh`.
     python test/check-run.test.py
 """
 import json
+import re
 import os
 import shutil
 import stat
@@ -79,6 +80,44 @@ def upstream_of(jobs, target):
     return seen
 
 
+# [TheHub #61778 review #1] Artifacts that hold pull-request code. A task's `run:`
+# path names an INPUT, so a credentialed step given one of these as any input (by
+# input_mapping, or because its task file declares it) can run the pull request's
+# script with the credential. pr-sha holds only a sha, written by pr-pick.sh.
+PR_CODE = {"pr"}
+CREDENTIAL = re.compile(r"TOKEN|KEY|SECRET|PASSWORD", re.I)
+
+
+def task_steps_everywhere(node, out):
+    if isinstance(node, dict):
+        if "task" in node and "file" in node:
+            out.append(node)
+        for v in node.values():
+            task_steps_everywhere(v, out)
+    elif isinstance(node, list):
+        for v in node:
+            task_steps_everywhere(v, out)
+    return out
+
+
+def credential_steps_never_see_pr_code(doc):
+    bad = []
+    for step in task_steps_everywhere(doc["jobs"], []):
+        creds = [k for k in (step.get("params") or {}) if CREDENTIAL.search(k)]
+        if not creds:
+            continue
+        mapped = set((step.get("input_mapping") or {}).values()) & PR_CODE
+        task_file = ROOT / str(step["file"]).replace("repo/", "", 1)
+        declared = set()
+        if task_file.is_file():
+            declared = {i["name"] for i in (yaml.safe_load(task_file.read_text()) or {}).get("inputs") or []}
+        if mapped or (declared & PR_CODE) or not str(step["file"]).startswith("repo/"):
+            bad.append(f"{step['task']} ({', '.join(creds)}): "
+                       f"maps {sorted(mapped)}, declares {sorted(declared & PR_CODE)}, file {step['file']}")
+    check("no step holding a credential takes pull-request code as an input, or a task "
+          "file from anywhere but main's repo/", not bad, bad)
+
+
 def pipeline_checks():
     print("-- ci/pipeline.yml --")
     doc = yaml.safe_load(PIPELINE.read_text(encoding="utf-8"))
@@ -123,7 +162,7 @@ def pipeline_checks():
         check(f"{PR_JOB}.{hook} reports {conclusion} on the pull request head",
               h.get("task") == "check-run"
               and (p.get("JOB"), p.get("PHASE"), p.get("CONCLUSION")) == (PR_JOB, "end", conclusion)
-              and (h.get("input_mapping") or {}).get("repo") == "pr"
+              and p.get("HEAD_FILE") == "pr-sha/HEAD" and not h.get("input_mapping")
               and p.get("NO_COMMIT_OK") == "1", h)
     check(f"{PR_JOB} reports nothing from its plan (pr-pick posts the start)",
           not reporters(pr.get("plan") or []))
@@ -135,6 +174,8 @@ def pipeline_checks():
         for step in reporters(job):
             if (step.get("params") or {}).get("NO_COMMIT_OK") and name != PR_JOB:
                 check(f"only {PR_JOB} may report with no commit ({name} does)", False)
+
+    credential_steps_never_see_pr_code(doc)
 
     every = reporters(doc["jobs"])
     expected = len(CHAIN) * 2 + 2 + 3
@@ -181,6 +222,9 @@ def run(head, **params):
         if head is not None:
             (tmp / "repo" / ".git").mkdir()
             (tmp / "repo" / ".git" / "HEAD").write_text(head + "\n", encoding="utf-8")
+        if params.get("PR_SHA"):
+            (tmp / "pr-sha").mkdir()
+            (tmp / "pr-sha" / "HEAD").write_text(params["PR_SHA"] + "\n", encoding="utf-8")
         env = {
             **os.environ,
             "PATH": f"{stubs}{os.pathsep}{os.environ.get('PATH', '')}",
@@ -238,6 +282,13 @@ def script_checks():
     r, body, _ = run(SHA, JOB="pr-checks", PHASE="end", CONCLUSION="failure", NO_COMMIT_OK="1")
     check("NO_COMMIT_OK=1 with a commit still reports it", r.returncode == 0 and body
           and (body["commit_sha"], body["conclusion"]) == (SHA, "failure"))
+
+    # [TheHub #61778 review #1] pr-checks names the head's sha in a file of its own,
+    # and repo/ stays main's checkout.
+    r, body, _ = run("ref: refs/heads/main", JOB="pr-checks", PHASE="end", CONCLUSION="success",
+                     NO_COMMIT_OK="1", HEAD_FILE="pr-sha/HEAD", PR_SHA=SHA)
+    check("HEAD_FILE: the sha is read from that file, not repo/.git/HEAD",
+          r.returncode == 0 and body and body["commit_sha"] == SHA, r.stdout + r.stderr)
 
 
 def main():

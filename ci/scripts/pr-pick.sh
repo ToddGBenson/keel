@@ -15,6 +15,8 @@
 #     is never judged: running an untrusted contributor's code on a worker inside
 #     the LAN is refused, and pushing a branch here takes write access.
 #   * Never a head on the base branch itself: the commit chain owns that check.
+#   * Not a pull request with merge conflicts: GitHub keeps no merge ref for one, so
+#     it reads as closed until the conflict is resolved (ci/README.md).
 #
 # Once per head. MyKronos keeps one check run per (repository, commit, name) and
 # answers a `start` on a head that already has one with `unchanged` and the
@@ -38,11 +40,14 @@ set -euo pipefail
 BASE_BRANCH="${BASE_BRANCH:-main}"
 PR_PICK_LIMIT="${PR_PICK_LIMIT:-30}"
 OUT="${PR_OUT:-pr}"
+# The head's sha alone, for the end report. A separate output, so the report
+# never needs the pull request's checkout as an input (TheHub #61778 review).
+SHA_OUT="${PR_SHA_OUT:-pr-sha}"
 GIT="${GIT:-git}"
 CURL="${CURL:-curl}"
 PY="${PY:-python3}"
 
-mkdir -p "$OUT"
+mkdir -p "$OUT" "$SHA_OUT"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
@@ -147,6 +152,8 @@ if [ "$got" != "$sha" ]; then
   exit 1
 fi
 "$GIT" -C "$OUT" -c advice.detachedHead=false checkout -q --detach "$sha"
-# check-run.sh reads the sha from .git/HEAD.
 [ "$(tr -d ' \n' < "$OUT/.git/HEAD")" = "$sha" ]
 printf '%s %s %s\n' "$number" "$sha" "$branch" > "$OUT/.pr"
+# check-run.sh reads the sha from here (HEAD_FILE), last, so it exists only
+# once the head is checked out and verified.
+printf '%s\n' "$sha" > "$SHA_OUT/HEAD"

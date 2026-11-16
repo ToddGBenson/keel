@@ -25,9 +25,15 @@ set -eu
 # The git resource leaves a detached HEAD, so .git/HEAD holds the sha itself.
 # Anything else (a branch ref, a short sha, no checkout) is refused, not guessed:
 # a check on the wrong commit is worse than none.
+#
+# [TheHub #61778] pr-checks reports on a pull request head, not on repo/'s commit.
+# It names a file holding only that sha (HEAD_FILE, written by pr-pick.sh) rather
+# than mapping the pull request's checkout over repo/: this script and its task file
+# always come from main's repo/, so no pull-request code runs with the token.
+HEAD_FILE="${HEAD_FILE:-repo/.git/HEAD}"
 SHA=""
-if [ -f repo/.git/HEAD ]; then
-  SHA=$(tr -d ' \n\r\t' < repo/.git/HEAD)
+if [ -f "$HEAD_FILE" ]; then
+  SHA=$(tr -d ' \n\r\t' < "$HEAD_FILE")
 fi
 case "$SHA" in
   *[!0-9a-f]*) SHA="" ;;

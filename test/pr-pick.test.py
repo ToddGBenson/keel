@@ -116,7 +116,7 @@ def pick(origin: Origin, tmp: Path, answers=None, **env_extra):
     r = subprocess.run(["bash", str(PICK)], cwd=run_dir, env=env, capture_output=True,
                        text=True, timeout=60)
     starts = [json.loads(line) for line in capture.read_text().splitlines() if line.strip()]
-    return r, run_dir / "pr", starts
+    return r, run_dir / "pr", starts, run_dir / "pr-sha" / "HEAD"
 
 
 def done(status="completed", conclusion="success"):
@@ -144,7 +144,7 @@ def main():
         o.pull(8, main_sha)             # a head that is the base branch itself
 
         print("which heads")
-        r, pr, starts = pick(o, tmp)
+        r, pr, starts, sha_file = pick(o, tmp)
         asked = [s["commit_sha"] for s in starts]
         check("the newest open same-repo head is judged first", r.returncode == 0 and asked == [b],
               f"rc={r.returncode} asked={asked}\n{r.stdout}{r.stderr}")
@@ -159,31 +159,35 @@ def main():
         check("pr/.pr names the pull request, sha and branch",
               (pr / ".pr").exists() and (pr / ".pr").read_text().split() == ["12", b, "feat-b"])
         check("nothing judged is marked .none", not (pr / ".none").exists())
+        check("pr-sha/HEAD holds the head's sha alone, for the end report (review #1)",
+              sha_file.exists() and sha_file.read_text().strip() == b)
 
         print("once per head")
-        r, pr, starts = pick(o, tmp, {b: done()})
+        r, pr, starts, sha_file = pick(o, tmp, {b: done()})
         asked = [s["commit_sha"] for s in starts]
         check("a head with a completed check is skipped and the next one judged",
               r.returncode == 0 and asked == [b, a]
               and (pr / ".git" / "HEAD").read_text().strip() == a, f"{asked}\n{r.stdout}{r.stderr}")
-        r, pr, starts = pick(o, tmp, {b: done("in_progress", None)})
+        r, pr, starts, sha_file = pick(o, tmp, {b: done("in_progress", None)})
         check("a head whose check is still in progress (a run that died) is judged again",
               r.returncode == 0 and (pr / ".git" / "HEAD").read_text().strip() == b, r.stdout + r.stderr)
-        r, pr, starts = pick(o, tmp, {b: done(), a: done(conclusion="failure")})
+        r, pr, starts, sha_file = pick(o, tmp, {b: done(), a: done(conclusion="failure")})
         check("every head judged: a pass that marks pr/.none and checks nothing out",
               r.returncode == 0 and (pr / ".none").exists() and not (pr / ".git").exists(),
               r.stdout + r.stderr)
-        r, pr, starts = pick(o, tmp, {b: done(), a: done()}, PR_PICK_LIMIT="1")
+        check("and writes no pr-sha/HEAD, so the end report posts nothing", not sha_file.exists())
+        r, pr, starts, sha_file = pick(o, tmp, {b: done(), a: done()}, PR_PICK_LIMIT="1")
         check("at most PR_PICK_LIMIT starts per run", len(starts) == 1 and (pr / ".none").exists(),
               f"{len(starts)} starts")
 
         print("refusals")
-        r, pr, _ = pick(o, tmp, {b: {"detail": "This token is scoped to another repo"}})
+        r, pr, _, sha_file = pick(o, tmp, {b: {"detail": "This token is scoped to another repo"}})
         check("an answer that is not created/updated/unchanged fails the step",
-              r.returncode != 0 and not (pr / ".pr").exists(), r.stdout + r.stderr)
-        r, pr, _ = pick(o, tmp, CURL_RC="22")
+              r.returncode != 0 and not (pr / ".pr").exists() and not sha_file.exists(),
+              r.stdout + r.stderr)
+        r, pr, _, sha_file = pick(o, tmp, CURL_RC="22")
         check("a refused report (curl fails) fails the step", r.returncode != 0 and not (pr / ".pr").exists())
-        r, _, _ = pick(o, tmp, GIT_URI="git@github.com:ToddGBenson/keel.git")
+        r, _, _, _ = pick(o, tmp, GIT_URI="git@github.com:ToddGBenson/keel.git")
         check("an SSH uri with no GIT_PRIVATE_KEY is refused before anything is asked",
               r.returncode != 0 and "GIT_PRIVATE_KEY" in r.stderr, r.stderr)
 
