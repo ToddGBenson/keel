@@ -1,7 +1,7 @@
 # Self-review — TheHub #61794 (guard-bash.sh fails closed when a helper fails)
 
 Mode: solo (POAM-008); agent self-review per the operator's 2026-11-04 decision
-PR: #PRNUM   Author: Claude Opus 5.5 on the Linux runner laptop (AI-authored)   Date: 2026-11-16
+PR: #179   Author: Claude Opus 5.5 on the Linux runner laptop (AI-authored)   Date: 2026-11-16
 verdict: pass
 
 On keel #176's Actions run the hook ALLOWED KB-177 (`curl -T env.json …/environments/production`)
