@@ -67,7 +67,12 @@ mykronos_ingestion_url: https://mykronos.toddbenson.net
 # 'atlas' with tool 'grype'" and nothing it found reached the lake. v15 is
 # the tag TheHub and mykronos already run, and it accepts every flag
 # mykronos-upload.sh passes.
-mykronos_ref: 2dd4e4465c21e4b6e8f2bf046c6ab565ba03b285
+#
+# Moved to v17 (603e0f0) on 2026-11-16 (TheHub #61359). The live pipeline and
+# every .github/workflows pin were already on v17; this example stayed on v15,
+# which predates mykronos #1036 (atlas findings arrive with no fixed version).
+# test/mykronos-pins.test.py now holds this line to the workflows' pin.
+mykronos_ref: 603e0f0febeee576fcc33ee69732c85f404ac9c1
 
 # ── CodeQL ────────────────────────────────────────────────────────────────────
 # The bundle is what actually performs the SAST analysis, so it is verified
