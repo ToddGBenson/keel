@@ -134,6 +134,74 @@ try:
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
 
+# ── A missing or unparsable report is an error, not "clean" (TheHub #61237) ──
+# count_findings used to echo 0 for a missing, empty or unparsable report, so a
+# gitleaks invocation that failed and wrote nothing satisfied step 2 ("the
+# fixture must NOT be reported"). A valid `[]` is the only clean answer.
+print("gitleaks allowlist test: a report that is not there fails, never reads clean")
+
+
+def run_with_stub(body):
+    """Run the real script with a gitleaks stub whose body decides the report."""
+    t = Path(tempfile.mkdtemp(prefix="gl-report-"))
+    try:
+        stubs = t / "stubs"
+        stubs.mkdir()
+        (stubs / "gitleaks").write_text(
+            "#!/usr/bin/env bash\n"
+            "src=; rep=\n"
+            "for a in \"$@\"; do case \"$prev\" in --source) src=$a;; --report-path) rep=$a;; esac; prev=$a; done\n"
+            + body + "exit 0\n", newline="\n")
+        (stubs / "gitleaks").chmod(0o755)
+        env = dict(os.environ, PATH=stubs.as_posix() + os.pathsep + os.environ["PATH"])
+        r = subprocess.run([BASH, SCRIPT.as_posix()], cwd=ROOT, capture_output=True,
+                           text=True, encoding="utf-8", errors="replace", env=env,
+                           timeout=300)
+        return r.returncode, r.stdout + r.stderr
+    finally:
+        shutil.rmtree(t, ignore_errors=True)
+
+
+FOUND = 'if [ -f "$src/planted.py" ]; then echo \'[{},{}]\' > "$rep"; else %s; fi\n'
+for label, repo_report in (
+        ("no report file at all", ":"),
+        ("an empty report file", ': > "$rep"'),
+        ("a report that is not JSON", 'echo "fatal: not a git repository" > "$rep"')):
+    code, out = run_with_stub(FOUND % repo_report)
+    check(f"{label}: the script exits non-zero", code != 0, f"(exit {code})\n{out}")
+    check(f"{label}: it is not reported as a clean repository",
+          "repository clean" not in out and "verified in BOTH" not in out, out)
+code, out = run_with_stub(FOUND % "echo '[]' > \"$rep\"")
+check("a valid empty list [] is still a clean repository", code == 0 and "repository clean" in out,
+      f"(exit {code})\n{out}")
+code, out = run_with_stub(": # canary report never written\n")
+check("no canary report: the script exits non-zero", code != 0, f"(exit {code})\n{out}")
+
+# ── The real scanner, --no-git, on a copy with no .git (TheHub #61237) ───────
+# Every check above uses a stub. This one runs the real gitleaks (binary, else
+# a capped container, exactly as the script does) and skips HONESTLY, with a
+# reason and no [ok], when neither is available.
+print("gitleaks allowlist test: the real scanner on a copy with no .git")
+have_real = bool(shutil.which("gitleaks"))
+if not have_real and shutil.which("docker"):
+    have_real = subprocess.run(["docker", "version"], capture_output=True).returncode == 0
+if not have_real:
+    print("  [skip] neither gitleaks nor a working docker is available: "
+          "the real --no-git path was NOT exercised this run")
+else:
+    tmp = Path(tempfile.mkdtemp(prefix="gl-real-"))
+    try:
+        copy = tmp / "copy"
+        shutil.copytree(ROOT, copy, ignore=shutil.ignore_patterns(".git", "node_modules"))
+        p = subprocess.run([BASH, (copy / "scripts" / SCRIPT.name).as_posix()],
+                           cwd=tmp, capture_output=True, text=True, encoding="utf-8",
+                           errors="replace", timeout=600)
+        out = p.stdout + p.stderr
+        check("real gitleaks, no .git: planted secrets found, allowlist verified",
+              p.returncode == 0 and "BOTH directions" in out, f"(exit {p.returncode})\n{out}")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
 print()
 if failures:
     print(f"{len(failures)} failed")
