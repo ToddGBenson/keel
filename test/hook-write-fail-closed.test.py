@@ -44,7 +44,7 @@ FAULTY = ("grep", "cat", "jq", "python3")
 # Credential-shaped values are built from parts so that this file holds no contiguous
 # literal for guard-write.sh or gitleaks to trip on (the trick selftest.sh's AKIA_FAKE uses).
 AKIA = "AKI" "A" "ABCDEFGHIJKLMNOP"
-ASSIGN = "api" "_key = abcdefghij0123456789"
+ASSIGN = "api" + "_k" + "ey = " + "abcdefghij" + "0123456789"
 PEM = "-----BEGIN RSA PRIVATE " "KEY-----\nMIIEow\n"
 MUST_BLOCK = {
     "a cloud key literal": ("src/config.py", AKIA),
