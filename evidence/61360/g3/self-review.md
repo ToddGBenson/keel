@@ -1,7 +1,7 @@
 # Self-review — TheHub #61360 (the building agent writes the self-review record)
 
 Mode: solo (POAM-008); agent self-review per the operator's 2026-11-04 decision
-PR: #PRNUM   Author: Claude Sonnet 5.5 (builder agent, AI-authored)   Date: 2026-11-16
+PR: #183   Author: Claude Sonnet 5.5 (builder agent, AI-authored)   Date: 2026-11-16
 verdict: pass
 
 Docs only. `.claude/commands/self-review.md`, `OPERATING.md`, `.github/PULL_REQUEST_TEMPLATE.md`
