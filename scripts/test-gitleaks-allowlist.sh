@@ -21,9 +21,10 @@
 set -uo pipefail
 # The repository is where this script lives, not wherever git says the cwd is:
 # ./keel check runs it in copies with no .git (test/test-manifest.test.py), and
-# there `cd "$(git rev-parse --show-toplevel)"` is `cd ""`, which bash 5.2 on
-# ubuntu-latest rejects ("cd: null directory"), so the script exited 1 with
-# neither verdict and keel check went red (TheHub #61098).
+# there `cd "$(git rev-parse --show-toplevel)"` is `cd ""`, which bash 5.3 (on
+# ubuntu-26.04, where ubuntu-latest now points; 5.2 tolerated it) rejects with
+# "line 22: cd: null directory", so the script exited 1 with neither verdict
+# and keel check went red (TheHub #61098, #61237).
 cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
 # With no git history to read, scan the files instead; gitleaks's default git
 # mode would fail, write no report, and read as a vacuous "clean".
@@ -73,22 +74,26 @@ git -C "$CANARY" init -q .
 git -C "$CANARY" add -A
 git -C "$CANARY" -c user.email=t@t -c user.name=t commit -qm canary >/dev/null 2>&1
 
+# Prints the number of findings. A report that is missing, empty or not a JSON
+# list is an ERROR (returns 1), never 0: gitleaks writes `[]` for a clean scan,
+# so anything else means the scan did not run, and reading that as "clean"
+# would pass step 2 on a failed invocation (TheHub #61237).
 count_findings() {
-  [ -s "$1" ] || { echo 0; return; }
-  python - "$1" 2>/dev/null <<'PY' || echo 0
+  [ -s "$1" ] || return 1
+  python - "$1" 2>/dev/null <<'PY'
 import json,sys
-try:
-    d=json.load(open(sys.argv[1]))
-    print(len(d) if isinstance(d,list) else 0)
-except Exception:
-    print(0)
+d=json.load(open(sys.argv[1]))
+if not isinstance(d,list):
+    sys.exit(1)
+print(len(d))
 PY
 }
 
 # 1. Real secrets must still be found, WITH this repo's allowlist loaded.
 run_gl "$CANARY" "$TMP/canary.json"
-n="$(count_findings "$TMP/canary.json")"
-if [ "$n" -ge 2 ]; then
+if ! n="$(count_findings "$TMP/canary.json")"; then
+  bad "no usable report from the canary scan — the scanner did not run, so nothing was verified"
+elif [ "$n" -ge 2 ]; then
   ok "planted secrets still detected ($n/2) — allowlist has not blinded the scanner"
 else
   bad "only $n/2 planted secrets detected — THE ALLOWLIST IS TOO BROAD"
@@ -97,8 +102,9 @@ fi
 
 # 2. The self-test fixture must NOT be reported.
 run_gl "." "$TMP/self.json" "$NO_GIT"
-m="$(count_findings "$TMP/self.json")"
-if [ "$m" -eq 0 ]; then
+if ! m="$(count_findings "$TMP/self.json")"; then
+  bad "no usable report from the repository scan — a failed scan is not a clean repository"
+elif [ "$m" -eq 0 ]; then
   ok "repository clean — the selftest.sh fixture is correctly allowlisted"
 else
   bad "$m finding(s) in this repository — triage them (scanner-triage), do not widen the allowlist"
