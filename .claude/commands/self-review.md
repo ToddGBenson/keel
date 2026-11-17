@@ -7,8 +7,22 @@ allowed-tools: Read, Grep, Glob, Bash, Task, Write
 # Self-review: `$ARGUMENTS`
 
 The solo-operator substitute for a second reviewer. Produces
-`evidence/<issue>/g3/self-review.md`, which `pr-governance.yml` requires before a PR with no
-approving review can merge.
+`evidence/<issue>/g3/self-review.md`.
+
+**Who runs it (operator decision 2026-11-04, TheHub #61360).** The agent that builds the PR
+writes `evidence/<issue>/g3/self-review.md` and the template sections before asking for
+review. The operator does not run `/self-review`, and MyKronos `independent-review` does not
+replace it.
+
+**Who reads it.** In keel the record is read by the reviewers; keel's `pr-governance.yml` was
+retired on 2026-10-20 (TheHub #60849) and runs on `workflow_dispatch` only, so nothing in keel
+blocks a merge on it. A fork that restores `pr-governance.yml` gets the shape check in
+`scripts/selfreview-check.js`, which counts a record only if it has a `verdict: pass|fail` line
+(`scripts/control-liveness.py`, POAM-018) and names the PR.
+
+**Which issue.** The record's `<issue>` is the issue the PR closes: `Closes`, `Fixes` or
+`Resolves #<n>` in the body (a PR that closes more than one fails the check). With none, the
+first `Refs #<n>`; with none, the first `#<n>` in the PR title.
 
 **Read `docs/13-solo-operation.md` first.** This is a compensating control for a declared gap
 (POAM-008), not an equivalent to independent human review. Treating it as equivalent is the
@@ -104,8 +118,9 @@ good, and neither is anyone else.
 - **"Unverified" is a valid and expected outcome.** Say it.
 - **If the agents find nothing at all**, be suspicious of the setup rather than pleased —
   usually the diff was passed without its context, or the charter was too narrow.
-- **Do not run this in the same session you wrote the code.** The cooling-off period is part
-  of the control, and `pr-governance.yml` records the interval.
+- **The three passes are fresh invocations; the cold read comes after them, not in the same
+  breath as writing the code.** The cooling-off period is part of the control, and the record's
+  `Opened`/`Reviewed` line states the interval.
 
 ## Then
 

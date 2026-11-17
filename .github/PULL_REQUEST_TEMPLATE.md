@@ -3,7 +3,8 @@
 Closes #<issue>
 
 > A PR without a linked issue, a completed DoD checklist, or an AI-authorship declaration is
-> **closed, not fixed in review**. `pr-governance.yml` enforces this.
+> **closed, not fixed in review**. Reviewers enforce this (keel's `pr-governance.yml` is
+> retired).
 
 ## What and why
 
@@ -95,9 +96,13 @@ Where you want scrutiny, and what you are least sure about.
 ## Self-review — required if nobody else approves (solo mode, POAM-008)
 
 Delete this section if another identity approved. Otherwise it **is** the review evidence,
-and `pr-governance.yml` will block the merge without it. Run `/self-review <PR>`.
+and reviewers will not accept the PR without it. The agent that builds the PR runs
+`/self-review <PR>` and fills this section before asking for review; the operator does not, and
+MyKronos `independent-review` does not replace it.
 
-- **Record:** `evidence/<issue>/g3/self-review.md`
+- **Record:** `evidence/<issue>/g3/self-review.md`. `<issue>` is the issue the PR closes
+  (`Closes`/`Fixes`/`Resolves #<n>`); with none, the first `Refs #<n>`; with none, the first
+  `#<n>` in the title. Close one issue per PR, or the issue cannot be resolved.
 - **Opened / reviewed:** `<timestamp>` → `<timestamp>` (cooling-off: don't merge same session)
 - **Verified independently:** *specific claims you checked, not "reviewed it"*
 - **Agent findings:** developer · security-engineer · qa-engineer
