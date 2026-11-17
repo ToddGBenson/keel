@@ -872,6 +872,20 @@ case "$cmd" in
   *"kubectl"*"prod"*|*"--context"*"prod"*|*"--profile"*"prod"*|*"terraform apply"*)
     block "production or infrastructure mutation. The pipeline deploys, never an agent." "AIC-3, CM-5, AC-6" ;;
 esac
+
+# ── Test suites never run inside production's containers (TheHub #61385) ───────
+# `docker exec` runs INSIDE the production container, under none of the --cpus/--memory
+# caps a test container gets. Uncapped test runs on the operator's host took TheHub
+# production down on 2026-10-23 (TheHub #61001). A suite in thehub-backend, thehub-postgres
+# or mykronos-backend competes with production for CPU and memory; `nice` lowers its CPU
+# priority but not its memory. Tests run in a capped container through the shared lock.
+# Read-only exec (cat /proc/..., a status query) is untouched. The runner must be in the
+# same exec segment, so `docker exec ... cat x; pytest` (pytest on the host) is not caught.
+prod_ctr='(thehub-backend|thehub-postgres|mykronos-backend)'
+test_runner='(pytest|py[.]test|tox|nox|python[0-9.]*([[:space:]]+-[A-Za-z]+)*[[:space:]]+-m[[:space:]]*pytest)'
+if g "$B"'docker[[:space:]]+(container[[:space:]]+)?exec[[:space:]]+([^|;&]*[[:space:]])?'"$prod_ctr"'[[:space:])`"'"'"']([^|;&]*[[:space:]/'"'"'"])?'"$test_runner$E"; then
+  block "running a test suite inside a production container with docker exec. It runs under no --cpus/--memory cap (the 2026-10-23 outage, TheHub #61001). Run it in a capped test container through the shared lock instead: bash scripts/docker-test-lock.sh run <owner> -- bash scripts/test-offline.sh ... (--cpus 2 --memory 2g)." "AIC-3, SC-6, CP-2"
+fi
 }
 
 cmd="$raw_cmd"; guard
