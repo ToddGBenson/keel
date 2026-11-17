@@ -14,6 +14,12 @@ records its arguments and starts nothing; gitleaks is hidden from PATH so the
 docker branch is taken. The script's own verdict is ignored (the stub writes
 no report), only the docker arguments are checked.
 
+The one section that uses the real scanner (the last but one) may start capped
+containers, and a test must never start a container on a host shared with
+production. It therefore runs only when opted in: CI is "true" (GitHub Actions
+sets it, so the unit-suites run exercises it) or KEEL_REAL_GITLEAKS=1.
+Otherwise it prints [skip] and starts nothing, not even `docker version`.
+
     python test/gitleaks-allowlist.test.py
 """
 import os
@@ -180,13 +186,19 @@ check("no canary report: the script exits non-zero", code != 0, f"(exit {code})\
 
 # ── The real scanner, --no-git, on a copy with no .git (TheHub #61237) ───────
 # Every check above uses a stub. This one runs the real gitleaks (binary, else
-# a capped container, exactly as the script does) and skips HONESTLY, with a
-# reason and no [ok], when neither is available.
+# a capped container, exactly as the script does) ONLY when opted in (CI=true or
+# KEEL_REAL_GITLEAKS=1), and skips HONESTLY, with a reason and no [ok], otherwise.
 print("gitleaks allowlist test: the real scanner on a copy with no .git")
-have_real = bool(shutil.which("gitleaks"))
-if not have_real and shutil.which("docker"):
-    have_real = subprocess.run(["docker", "version"], capture_output=True).returncode == 0
-if not have_real:
+opted_in = os.environ.get("CI") == "true" or os.environ.get("KEEL_REAL_GITLEAKS") == "1"
+have_real = False
+if opted_in:
+    have_real = bool(shutil.which("gitleaks"))
+    if not have_real and shutil.which("docker"):
+        have_real = subprocess.run(["docker", "version"], capture_output=True).returncode == 0
+if not opted_in:
+    print("  [skip] not opted in (set CI=true or KEEL_REAL_GITLEAKS=1): the real "
+          "--no-git path was NOT exercised this run and no container was started")
+elif not have_real:
     print("  [skip] neither gitleaks nor a working docker is available: "
           "the real --no-git path was NOT exercised this run")
 else:

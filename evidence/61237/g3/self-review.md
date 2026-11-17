@@ -1,7 +1,7 @@
 # Self-review — TheHub #61237
 
 Mode: solo (POAM-008). Builder-written under the 2026-11-04 operator decision (agents self-review keel PRs).
-PR: see PR description   Author: Claude Sonnet 5.5 builder (AI-authored)   Date: 2026-11-16
+PR: #182   Author: Claude Sonnet 5.5 builder (AI-authored)   Date: 2026-11-16
 verdict: pass
 Opened: 2026-11-16   Reviewed: 2026-11-16 (same session; cooling-off NOT met, an independent read is still required before merge)
 
@@ -19,7 +19,7 @@ Opened: 2026-11-16   Reviewed: 2026-11-16 (same session; cooling-off NOT met, an
 ## Not verified
 
 - Real gitleaks writes `[]` for a clean scan: from memory of the v8 JSON reporter, NOT observed. No gitleaks binary and no docker were used (the host is shared with production). If a real scan writes an empty file instead, step 2 now fails closed on every clean run, so this must be seen once in CI or on a gitleaks host.
-- The new real-scanner test section skipped honestly here (neither gitleaks nor docker on PATH); it did not execute.
+- The new real-scanner test section skipped honestly here and, after the fix round, runs only when CI=true or KEEL_REAL_GITLEAKS=1 (it started no container here); it executes in the Actions unit-suites run.
 - AC3 (two green unit runs on main) is post-merge.
 
 ## Cold-read notes
