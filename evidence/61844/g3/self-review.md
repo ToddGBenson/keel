@@ -1,7 +1,7 @@
 # Self-review — TheHub #61844 (guard-write.sh fails closed, as guard-bash.sh does)
 
 Mode: solo (POAM-008); agent self-review, pending the independent review before merge
-PR: (set when opened)   Author: Claude Opus 5.5 on the Linux runner laptop (AI-authored)   Date: 2026-11-17
+PR: #186   Author: Claude Opus 5.5 on the Linux runner laptop (AI-authored)   Date: 2026-11-17
 verdict: pass
 
 TheHub #61794 made guard-bash.sh fail closed and left guard-write.sh as a follow-up. That hook had
