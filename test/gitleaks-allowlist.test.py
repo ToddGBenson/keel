@@ -90,8 +90,9 @@ finally:
 # ── A copy with no .git, run from another directory (TheHub #61098) ─────────
 # test/test-manifest.test.py runs `./keel check` on a copy of this repository
 # that has no .git. The script began `cd "$(git rev-parse --show-toplevel)" ||
-# exit 1`; outside a work tree that is `cd ""`, which bash 5.2 on ubuntu-latest
-# rejects ("cd: null directory"), so the script exited 1 with neither verdict
+# exit 1`; outside a work tree that is `cd ""`, which bash 5.3 rejects ("line 22:
+# cd: null directory"). ubuntu-latest moved to ubuntu-26.04, which ships bash
+# 5.3 (5.2 tolerated it), so the script exited 1 with neither verdict
 # and keel check went red on every Unit results run since 2026-10-28. It must
 # find its repository from its own location instead, and, with no git history
 # to read, scan the files (--no-git) rather than report a vacuous "clean".
