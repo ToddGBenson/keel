@@ -1,7 +1,7 @@
 # Self-review — TheHub #61939 (guard-bash.sh decides a large command in linear time)
 
 Mode: solo (POAM-008); agent self-review, pending the independent review before merge
-PR: #184   Author: Claude Opus 5.5 on the Linux runner laptop (AI-authored)   Date: 2026-11-17
+PR: #184   Pair: binnacle #83   Author: Claude Opus 5.5 on the Linux runner laptop (AI-authored)   Date: 2026-11-17
 verdict: pass
 
 Claude Code gives a hook 60 s and lets the tool call proceed when it runs out, so a slow guard
