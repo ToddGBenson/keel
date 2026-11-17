@@ -476,6 +476,23 @@ g "$B"'git[[:space:]]+(filter-branch|filter-repo)\b' \
 g "$B"'git[[:space:]]+([^|;&]*[[:space:]])?push([[:space:]]+[^|;&]*)?[[:space:]](origin[[:space:]]+)?(HEAD:)?(main|master)'"$E" \
   && block "direct push to main. All change goes through a reviewed PR." "AC-5, CM-5"
 
+# TheHub #61972: agents never push a release tag. Every v* tag is a release candidate
+# (release.yml signs "release.yml@refs/tags/TAG"), so pushing one is cutting a release.
+# Caught in one git push invocation: a v<digit> tag by name or as `tag v1`, any
+# refs/tags/v* or refs/tags/* refspec (as source, destination, +forced or :deleted),
+# --tags, --follow-tags and --mirror (which push every tag), and push.followTags given
+# with -c or set with git config. --no-follow-tags, git tag -l and git fetch --tags stay
+# allowed. Not read: GIT_CONFIG_* environment variables, a remote.<name>.push or
+# .mirror setting made earlier, or an alias (open entries in docs/11-ai-agent-controls.md).
+GIT_PUSH="$B"'git[[:space:]]+([^|;&]*[[:space:]])?push([[:space:]]|$)'
+TAG_REF='(refs/tags/(v|\*)|v[0-9])[^[:space:]]*'
+g "$GIT_PUSH"'([^|;&]*[[:space:]])?(\+?([^[:space:]:]*:)?'"$TAG_REF"'|tag[[:space:]]+v[0-9][^[:space:]]*)'"$E" \
+  && block "pushing a release tag. a v* tag starts a release, and releases are the operator's: the Keel-Rulesets-Release script, or a release.yml dispatch. Push your branch and open a PR; the operator tags after merge." "CM-3, AIC-1, AC-5"
+g "$GIT_PUSH"'([^|;&]*[[:space:]])?--(tags|follow-tags|mirror)'"$E" \
+  && block "a git push that sends tags (--tags, --follow-tags or --mirror). a v* tag starts a release, and releases are the operator's: the Keel-Rulesets-Release script, or a release.yml dispatch. Push your branch and open a PR; the operator tags after merge." "CM-3, AIC-1, AC-5"
+g "$B"'git[[:space:]]+([^|;&]*[[:space:]])?(-c[[:space:]]*|config[[:space:]]+([^|;&]*[[:space:]])?)[Pp][Uu][Ss][Hh][.][Ff][Oo][Ll][Ll][Oo][Ww][Tt][Aa][Gg][Ss]' \
+  && block "setting push.followTags, which makes git push send tags. a v* tag starts a release, and releases are the operator's: the Keel-Rulesets-Release script, or a release.yml dispatch. Push your branch and open a PR; the operator tags after merge." "CM-3, AIC-1, AC-5"
+
 # Self-approval and self-merge — the control that makes every gate meaningful
 g "$B"'gh[[:space:]]+pr[[:space:]]+review\b[^|;&]*--approve\b' \
   && block "approving a PR. Agents recommend; a human or a separate identity approves." "AC-5, AIC-2"
@@ -589,6 +606,16 @@ if gh_api_write; then
     | grep -oE '(-[fF][[:space:]]*|--(raw-)?field[[:space:]=]+)'"$1"'=[^[:space:]|;&)`"'"'"']+' \
     | head -n1 | sed -E 's/^[^=]*=//'; }
   is_main() { printf '%s' "$1" | grep -qE '^(refs/heads/)?(main|master)$'; }
+  # TheHub #61972: a tag through the git data API. A tag object (git/tags), a move or
+  # delete of a tag ref (git/refs/tags/...), or a new ref (git/refs) that names a tag or
+  # whose ref this hook cannot read (--input, $(...)). A branch ref stays allowed.
+  g "$B"'gh[[:space:]]+api[^|;&]*/git/(tags|refs/tags/)' \
+    && block "writing a tag through gh api. a v* tag starts a release, and releases are the operator's: the Keel-Rulesets-Release script, or a release.yml dispatch. Push your branch and open a PR; the operator tags after merge." "CM-3, AIC-1, AC-5"
+  if g "$B"'gh[[:space:]]+api[^|;&]*/git/refs'"$E"; then
+    rf=$(api_field ref)
+    { [ -z "$rf" ] || printf '%s' "$rf" | grep -qE '^refs/tags/'; } \
+      && block "creating a tag ref through gh api (or a ref this hook cannot read; pass -f ref=refs/heads/<branch>). a v* tag starts a release, and releases are the operator's: the Keel-Rulesets-Release script, or a release.yml dispatch. Push your branch and open a PR; the operator tags after merge." "CM-3, AIC-1, AC-5"
+  fi
   # A contents write is a commit. With no branch field it lands on the default branch.
   if g "$B"'gh[[:space:]]+api[^|;&]*/contents/'; then
     br=$(api_field branch)
@@ -635,6 +662,9 @@ gql_mutations() {
   # the call (inline, or as a variable: -f b=main) or its branch is named only by
   # id. Quotes may still be JSON-escaped here, so main is matched as a word, not
   # as "main". Push a feature branch with git instead.
+  # TheHub #61972: createRef with a tag name is a pushed tag.
+  m 'createRef' && printf '%s' "$gql" | grep -qE 'refs/tags/' \
+    && block "creating a tag through GraphQL$via. a v* tag starts a release, and releases are the operator's: the Keel-Rulesets-Release script, or a release.yml dispatch. Push your branch and open a PR; the operator tags after merge." "CM-3, AIC-1, AC-5"
   m 'updateRefs?' \
     && block "moving a ref through GraphQL$via. A ref id may be main; push a feature branch with git." "AC-5, CM-5"
   if m 'createCommitOnBranch'; then
