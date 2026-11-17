@@ -231,8 +231,7 @@ if os.environ.get("KEEL_GL_INNER") != "1":
         out = p.stdout + p.stderr
         calls = log.read_text(encoding="utf-8").strip() if log.is_file() else ""
         check("not opted in: the inner run completes (exit 0)", p.returncode == 0,
-              f"(exit {p.returncode})
-{out[-800:]}")
+              f"(exit {p.returncode})\n{out[-800:]}")
         check("not opted in: docker is never invoked", calls == "", f"(saw: {calls})")
         check("not opted in: the real section prints an honest [skip], not an [ok]",
               "[skip]" in out and "real gitleaks, no .git" not in out, out)
