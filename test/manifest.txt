@@ -58,3 +58,4 @@ test/control-liveness-keel.test.py  test         keel liveness: frozen legacy G3
 # Added after #162-#166 merged without their manifest lines (a branch that merged main lost them).
 test/mykronos-pins.test.py          test         every MyKronos pin names one commit, none before mykronos #1036 (TheHub #61212)
 test/configure-github.test.py       test         configure-github.sh: the merge gate is MyKronos independent-review, App-pinned (TheHub #60978)
+test/self-review-docs.test.py       lint         docs: the building agent writes the self-review, the operator does not run it (TheHub #61360)

@@ -81,8 +81,11 @@ The approval record disappears; the *evidence* must not. Every PR merged in solo
 a self-review section stating **what was verified independently** — not "reviewed", but the
 specific claims checked and how.
 
-`pr-governance.yml` requires it. A PR with no approving review and no self-review record
-fails the check and cannot merge.
+The agent that builds the PR writes it; the operator does not run `/self-review`, and MyKronos
+`independent-review` does not replace it (operator decision 2026-11-04). In keel, reviewers read
+the record: `pr-governance.yml`, which used to fail a PR with no approving review and no record,
+was retired on 2026-10-20 and runs on `workflow_dispatch` only. A fork that restores it gets the
+check back.
 
 ## What this does not fix
 
