@@ -14,6 +14,12 @@ records its arguments and starts nothing; gitleaks is hidden from PATH so the
 docker branch is taken. The script's own verdict is ignored (the stub writes
 no report), only the docker arguments are checked.
 
+The one section that uses the real scanner (the last but one) may start capped
+containers, and a test must never start a container on a host shared with
+production. It therefore runs only when opted in: CI is "true" (GitHub Actions
+sets it, so the unit-suites run exercises it) or KEEL_REAL_GITLEAKS=1.
+Otherwise it prints [skip] and starts nothing, not even `docker version`.
+
     python test/gitleaks-allowlist.test.py
 """
 import os
@@ -90,8 +96,9 @@ finally:
 # ── A copy with no .git, run from another directory (TheHub #61098) ─────────
 # test/test-manifest.test.py runs `./keel check` on a copy of this repository
 # that has no .git. The script began `cd "$(git rev-parse --show-toplevel)" ||
-# exit 1`; outside a work tree that is `cd ""`, which bash 5.2 on ubuntu-latest
-# rejects ("cd: null directory"), so the script exited 1 with neither verdict
+# exit 1`; outside a work tree that is `cd ""`, which bash 5.3 rejects ("line 22:
+# cd: null directory"). ubuntu-latest moved to ubuntu-26.04, which ships bash
+# 5.3 (5.2 tolerated it), so the script exited 1 with neither verdict
 # and keel check went red on every Unit results run since 2026-10-28. It must
 # find its repository from its own location instead, and, with no git history
 # to read, scan the files (--no-git) rather than report a vacuous "clean".
@@ -133,6 +140,116 @@ try:
           f"({calls})")
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
+
+# ── A missing or unparsable report is an error, not "clean" (TheHub #61237) ──
+# count_findings used to echo 0 for a missing, empty or unparsable report, so a
+# gitleaks invocation that failed and wrote nothing satisfied step 2 ("the
+# fixture must NOT be reported"). A valid `[]` is the only clean answer.
+print("gitleaks allowlist test: a report that is not there fails, never reads clean")
+
+
+def run_with_stub(body):
+    """Run the real script with a gitleaks stub whose body decides the report."""
+    t = Path(tempfile.mkdtemp(prefix="gl-report-"))
+    try:
+        stubs = t / "stubs"
+        stubs.mkdir()
+        (stubs / "gitleaks").write_text(
+            "#!/usr/bin/env bash\n"
+            "src=; rep=\n"
+            "for a in \"$@\"; do case \"$prev\" in --source) src=$a;; --report-path) rep=$a;; esac; prev=$a; done\n"
+            + body + "exit 0\n", newline="\n")
+        (stubs / "gitleaks").chmod(0o755)
+        env = dict(os.environ, PATH=stubs.as_posix() + os.pathsep + os.environ["PATH"])
+        r = subprocess.run([BASH, SCRIPT.as_posix()], cwd=ROOT, capture_output=True,
+                           text=True, encoding="utf-8", errors="replace", env=env,
+                           timeout=300)
+        return r.returncode, r.stdout + r.stderr
+    finally:
+        shutil.rmtree(t, ignore_errors=True)
+
+
+FOUND = 'if [ -f "$src/planted.py" ]; then echo \'[{},{}]\' > "$rep"; else %s; fi\n'
+for label, repo_report in (
+        ("no report file at all", ":"),
+        ("an empty report file", ': > "$rep"'),
+        ("a report that is not JSON", 'echo "fatal: not a git repository" > "$rep"')):
+    code, out = run_with_stub(FOUND % repo_report)
+    check(f"{label}: the script exits non-zero", code != 0, f"(exit {code})\n{out}")
+    check(f"{label}: it is not reported as a clean repository",
+          "repository clean" not in out and "verified in BOTH" not in out, out)
+code, out = run_with_stub(FOUND % "echo '[]' > \"$rep\"")
+check("a valid empty list [] is still a clean repository", code == 0 and "repository clean" in out,
+      f"(exit {code})\n{out}")
+code, out = run_with_stub(": # canary report never written\n")
+check("no canary report: the script exits non-zero", code != 0, f"(exit {code})\n{out}")
+
+# ── The real scanner, --no-git, on a copy with no .git (TheHub #61237) ───────
+# Every check above uses a stub. This one runs the real gitleaks (binary, else
+# a capped container, exactly as the script does) ONLY when opted in (CI=true or
+# KEEL_REAL_GITLEAKS=1), and skips HONESTLY, with a reason and no [ok], otherwise.
+print("gitleaks allowlist test: the real scanner on a copy with no .git")
+opted_in = os.environ.get("CI") == "true" or os.environ.get("KEEL_REAL_GITLEAKS") == "1"
+have_real = False
+if opted_in:
+    have_real = bool(shutil.which("gitleaks"))
+    if not have_real and shutil.which("docker"):
+        have_real = subprocess.run(["docker", "version"], capture_output=True).returncode == 0
+if not opted_in:
+    print("  [skip] not opted in (set CI=true or KEEL_REAL_GITLEAKS=1): the real "
+          "--no-git path was NOT exercised this run and no container was started")
+elif not have_real:
+    print("  [skip] neither gitleaks nor a working docker is available: "
+          "the real --no-git path was NOT exercised this run")
+else:
+    tmp = Path(tempfile.mkdtemp(prefix="gl-real-"))
+    try:
+        copy = tmp / "copy"
+        shutil.copytree(ROOT, copy, ignore=shutil.ignore_patterns(".git", "node_modules"))
+        p = subprocess.run([BASH, (copy / "scripts" / SCRIPT.name).as_posix()],
+                           cwd=tmp, capture_output=True, text=True, encoding="utf-8",
+                           errors="replace", timeout=600)
+        out = p.stdout + p.stderr
+        check("real gitleaks, no .git: planted secrets found, allowlist verified",
+              p.returncode == 0 and "BOTH directions" in out, f"(exit {p.returncode})\n{out}")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+# ── Not opted in: the real section starts nothing (TheHub #61237 review) ────
+# The real-scanner section may start containers, so it must not run on a
+# developer's host (shared with production) unless asked. Run this very file
+# again with CI and KEEL_REAL_GITLEAKS unset and a docker shim first on PATH
+# that records ANY invocation (even `docker version`); it must never be called.
+if os.environ.get("KEEL_GL_INNER") != "1":
+    print("gitleaks allowlist test: not opted in, the real section starts nothing")
+    tmp = Path(tempfile.mkdtemp(prefix="gl-optin-"))
+    try:
+        stubs = tmp / "stubs"
+        stubs.mkdir()
+        log = tmp / "docker.log"
+        for tool in ("docker",):
+            (stubs / tool).write_text(
+                "#!/usr/bin/env bash\n"
+                "printf '%s\n' \"$0 $*\" >> \"$DOCKER_LOG\"\n"
+                "exit 0\n", newline="\n")
+            (stubs / tool).chmod(0o755)
+        (stubs / "docker.cmd").write_text(
+            "@echo %* >> \"%DOCKER_LOG%\"\r\n@exit /b 0\r\n", newline="")
+        env = {k: v for k, v in os.environ.items() if k not in ("CI", "KEEL_REAL_GITLEAKS")}
+        env.update(PATH=stubs.as_posix() + os.pathsep + os.environ["PATH"],
+                   DOCKER_LOG=log.as_posix(), KEEL_GL_INNER="1")
+        p = subprocess.run([sys.executable, str(Path(__file__).resolve())], cwd=ROOT,
+                           capture_output=True, text=True, encoding="utf-8",
+                           errors="replace", env=env, timeout=900)
+        out = p.stdout + p.stderr
+        calls = log.read_text(encoding="utf-8").strip() if log.is_file() else ""
+        check("not opted in: the inner run completes (exit 0)", p.returncode == 0,
+              f"(exit {p.returncode})\n{out[-800:]}")
+        check("not opted in: docker is never invoked", calls == "", f"(saw: {calls})")
+        check("not opted in: the real section prints an honest [skip], not an [ok]",
+              "[skip]" in out and "real gitleaks, no .git" not in out, out)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
 
 print()
 if failures:
