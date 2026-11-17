@@ -18,6 +18,16 @@ a test container gets. Uncapped test runs on the operator's host took TheHub pro
 - The refusal names the route: a capped test container (`--cpus 2 --memory 2g`) through TheHub's
   shared lock, `bash scripts/docker-test-lock.sh run <owner> -- bash scripts/test-offline.sh ...`.
 - docs/11-ai-agent-controls.md has a row for it, including what is not caught.
+- **Review round 1 (Fable 5.2 on 722e17a, BLOCKED on two points):**
+  1. `docker compose exec` / `docker-compose exec` into TheHub's compose services `backend` and
+     `postgres` was not caught. It is now, and `backend-staging` and `postgres-staging` stay allowed.
+  2. This record said the compose gap was listed in the docs row, and it was not. The row and the
+     record now agree: compose is covered, and the gaps listed in both are the same.
+  Nits taken: docker's global options before the subcommand (`docker -H ... exec`, `compose -f
+  ... exec`), and `docker.exe`, `/usr/bin/docker` and `docker-compose.exe` via normalize(), which
+  rewrites docker and docker-compose to the bare name as it does gh, git and curl. Stdin or heredoc
+  runners, versioned runner binaries and `python -m unittest` are documented as gaps. A bare
+  `pytest` word inside a production exec is left as a safe-side false positive, per the review.
 
 ## Verified independently
 
@@ -25,7 +35,11 @@ a test container gets. Uncapped test runs on the operator's host took TheHub pro
   were ALLOWED (pytest, `python -m pytest`, `python3 -u -m pytest`, tox in mykronos-backend, nox in
   thehub-postgres, pytest by path, inside `sh -c`, `docker container exec`, under `nice`, and the
   PowerShell tool). The 5 must-allow cases passed.
-- **Green after:** selftest 320 passed / 0 failed (305 + 15). The must-allow cases still pass:
+- **Green after:** selftest 320 passed / 0 failed (305 + 15).
+- **Round 1, red first:** the 10 new cases (7 must-block, 3 must-allow) against the previous head
+  722e17a: 7 failed. Compose exec backend, compose -f with exec -T, docker-compose exec postgres,
+  `docker -H ... exec`, docker.exe, /usr/bin/docker and PowerShell compose were all ALLOWED. Against
+  main: 16 failed. **Green:** selftest 330 passed / 0 failed. The must-allow cases still pass:
   `docker exec thehub-backend cat /proc/loadavg`, `cat /app/pytest.ini`, pytest in a non-production
   container, a capped `docker run --cpus 2 --memory 2g ... pytest`, and `docker exec ... cat x;
   pytest` (pytest on the host).
@@ -44,9 +58,9 @@ a test container gets. Uncapped test runs on the operator's host took TheHub pro
 ## Not verified
 
 - Git Bash on Windows was not run. The rule is a plain ERE on the same views as every other rule.
-- A runner started under another name (a script or Makefile target that calls pytest), a container
-  reached by id or renamed, or `docker compose exec backend` by service name, is not caught. These
-  are listed in the controls row.
+- These are not caught, and the controls row lists the same set: a runner fed on stdin or a heredoc;
+  a runner under another name (`pytest-3`, a versioned binary, a script or Makefile target); `python -m
+  unittest`; a container reached by id or renamed.
 
 ## Residual risk accepted
 
