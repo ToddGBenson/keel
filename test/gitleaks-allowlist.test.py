@@ -227,15 +227,16 @@ if os.environ.get("KEEL_GL_INNER") != "1":
         stubs = tmp / "stubs"
         stubs.mkdir()
         log = tmp / "docker.log"
-        (stubs / "docker").write_text(
-            "#!/usr/bin/env bash\n"
-            "printf '%s\n' \"$*\" >> \"$DOCKER_LOG\"\n"
-            "exit 0\n", newline="\n")
-        (stubs / "docker").chmod(0o755)
+        for tool in ("docker",):
+            (stubs / tool).write_text(
+                "#!/usr/bin/env bash\n"
+                "printf '%s\n' \"$0 $*\" >> \"$DOCKER_LOG\"\n"
+                "exit 0\n", newline="\n")
+            (stubs / tool).chmod(0o755)
         (stubs / "docker.cmd").write_text(
             "@echo %* >> \"%DOCKER_LOG%\"\r\n@exit /b 0\r\n", newline="")
         env = {k: v for k, v in os.environ.items() if k not in ("CI", "KEEL_REAL_GITLEAKS")}
-        env.update(PATH=stubs.as_posix() + os.pathsep + path_without("gitleaks", "docker"),
+        env.update(PATH=stubs.as_posix() + os.pathsep + os.environ["PATH"],
                    DOCKER_LOG=log.as_posix(), KEEL_GL_INNER="1")
         p = subprocess.run([sys.executable, str(Path(__file__).resolve())], cwd=ROOT,
                            capture_output=True, text=True, encoding="utf-8",
