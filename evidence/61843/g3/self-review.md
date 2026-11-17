@@ -1,7 +1,7 @@
 # Self-review — TheHub #61843 (guard-bash.sh finds its helpers only in system directories)
 
 Mode: solo (POAM-008); agent self-review, pending the independent review before merge
-PR: #189   Author: Claude Opus 5.5 on the Linux runner laptop (AI-authored)   Date: 2026-11-17
+PR: #189   Pair: binnacle #85   Author: Claude Opus 5.5 on the Linux runner laptop (AI-authored)   Date: 2026-11-17
 verdict: pass
 
 #61794's review finding #3 (MEDIUM, follow-up): PATH was not pinned. The hook reads every command
