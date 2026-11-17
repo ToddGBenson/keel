@@ -203,6 +203,42 @@ else:
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
+# ── Not opted in: the real section starts nothing (TheHub #61237 review) ────
+# The real-scanner section may start containers, so it must not run on a
+# developer's host (shared with production) unless asked. Run this very file
+# again with CI and KEEL_REAL_GITLEAKS unset and a docker shim first on PATH
+# that records ANY invocation (even `docker version`); it must never be called.
+if os.environ.get("KEEL_GL_INNER") != "1":
+    print("gitleaks allowlist test: not opted in, the real section starts nothing")
+    tmp = Path(tempfile.mkdtemp(prefix="gl-optin-"))
+    try:
+        stubs = tmp / "stubs"
+        stubs.mkdir()
+        log = tmp / "docker.log"
+        (stubs / "docker").write_text(
+            "#!/usr/bin/env bash\n"
+            "printf '%s\n' \"$*\" >> \"$DOCKER_LOG\"\n"
+            "exit 0\n", newline="\n")
+        (stubs / "docker").chmod(0o755)
+        (stubs / "docker.cmd").write_text(
+            "@echo %* >> \"%DOCKER_LOG%\"\r\n@exit /b 0\r\n", newline="")
+        env = {k: v for k, v in os.environ.items() if k not in ("CI", "KEEL_REAL_GITLEAKS")}
+        env.update(PATH=stubs.as_posix() + os.pathsep + path_without("gitleaks", "docker"),
+                   DOCKER_LOG=log.as_posix(), KEEL_GL_INNER="1")
+        p = subprocess.run([sys.executable, str(Path(__file__).resolve())], cwd=ROOT,
+                           capture_output=True, text=True, encoding="utf-8",
+                           errors="replace", env=env, timeout=900)
+        out = p.stdout + p.stderr
+        calls = log.read_text(encoding="utf-8").strip() if log.is_file() else ""
+        check("not opted in: the inner run completes (exit 0)", p.returncode == 0,
+              f"(exit {p.returncode})
+{out[-800:]}")
+        check("not opted in: docker is never invoked", calls == "", f"(saw: {calls})")
+        check("not opted in: the real section prints an honest [skip], not an [ok]",
+              "[skip]" in out and "real gitleaks, no .git" not in out, out)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
 print()
 if failures:
     print(f"{len(failures)} failed")
