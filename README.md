@@ -205,7 +205,9 @@ Written down so nobody discovers them during an assessment:
   physical, and personnel control families that live outside this repo. The control map
   marks what is partial — read the 🟡 entries as the honest ones.
 - **Prompt-level agent controls are advisory.** Only the tool grants, hooks, and branch
-  protection hold against a confused or adversarial model.
+  protection hold against a confused or adversarial model. The hooks are best-effort guidance
+  (a denylist over command text), not the boundary: see
+  `docs/11-ai-agent-controls.md` § Read this first.
 - **`bootstrap.sh` and `sync-platform.sh` are now verified end to end** against a real
   clone — nine defects were found and fixed on their first execution (L0011). The remaining
   untested surface is the non-`node` stack profiles and `release.yml`.

@@ -32,6 +32,25 @@ Naming it precisely is the prerequisite to controlling it:
 
 ## The controls
 
+### Read this first: the hooks are best-effort guidance, not the boundary
+
+Every row below marked "Hook-enforced" (and every "Enforced" in the strength column that
+rests on `guard-bash.sh` alone) is **best-effort guidance**. A hook is a denylist over command
+text: it refuses the spellings it knows, and a command that is re-worded (another quoting, a
+different tool, an indirection the parser does not follow) can get past it. The open entries in
+`test/hook-bypass-corpus.yml` are those known gaps. The boundary this repo actually relies on
+is:
+
+- **Branch protection**, with required checks pinned to a GitHub App, so no agent can merge or
+  approve its own change whatever it types.
+- **The sandbox** the agent runs in.
+- **Least-privilege credentials.** The agent's `gh` token should not be able to do what the
+  hooks forbid; a separate agent GitHub identity is planned (TheHub #61039).
+
+A rebuild of the hooks as allowlists over a parsed command is planned (TheHub #60944). Until it
+lands, treat a hook rule as a guard rail that catches honest mistakes, never as a security
+control.
+
 ### AIC-1 — Human accountability is non-delegable
 Every artifact an agent produces has a named accountable human. Agents produce and analyze;
 humans decide and answer for it. The human approval points are enumerated in
