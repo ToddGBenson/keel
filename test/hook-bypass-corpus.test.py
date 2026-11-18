@@ -62,6 +62,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import stat
 import subprocess
@@ -276,9 +277,28 @@ def make_env(mode: str, tmp: Path) -> dict | None:
     return env
 
 
-def run_one(e: dict, tool: str, env: dict, bash: str) -> tuple[int, str]:
+# [TheHub #61843] guard-bash.sh pins PATH to system directories, so a shim directory on
+# PATH no longer reaches it. The tests run a COPY whose one marked line is replaced by a
+# no-op, so the copy keeps the PATH this test gives it (bash converts a Windows PATH at
+# startup, which a literal written into the copy would skip). The live hook has no such
+# seam. A hook without the marked line (before #61843) runs as it is.
+PIN_RE = re.compile(r"^PATH=.*# guard-path-pin\b.*$", re.M)
+
+
+def unpinned_copy(hook: Path, dest_dir: Path) -> Path:
+    text = hook.read_text(encoding="utf-8")
+    new, n = PIN_RE.subn(": # guard-path-pin (test copy: PATH is the test's)", text)
+    if n == 0:
+        return hook
+    out = dest_dir / f"{hook.stem}.test-copy{hook.suffix}"
+    if not out.exists() or out.read_text(encoding="utf-8") != new:
+        out.write_text(new, encoding="utf-8")
+    return out
+
+
+def run_one(e: dict, tool: str, env: dict, bash: str, hooks: dict) -> tuple[int, str]:
     try:
-        r = subprocess.run([bash, str(HOOKS / e["hook"])], input=payload(e, tool),
+        r = subprocess.run([bash, str(hooks[e["hook"]])], input=payload(e, tool),
                            capture_output=True, cwd=ROOT, env=env, timeout=60)
     except subprocess.TimeoutExpired:
         # Claude Code would time the hook out and run the call.
@@ -324,7 +344,10 @@ def main() -> int:
             print(f"\n-- mode: {mode} ({jq_kind}) " + "-" * max(0, 50 - len(mode) - len(jq_kind)))
             todo = runs(entries)
             with ThreadPoolExecutor(max_workers=8) as pool:
-                results = list(pool.map(lambda r: run_one(r[0], r[1], env, bash), todo))
+                copies = Path(td) / f"hooks-{mode}"
+                copies.mkdir(exist_ok=True)
+                hooks = {h: unpinned_copy(HOOKS / h, copies) for h in HOOK_NAMES}
+                results = list(pool.map(lambda r: run_one(r[0], r[1], env, bash, hooks), todo))
             for (e, tool), (rc, err) in zip(todo, results):
                 ran += 1
                 blocked = rc == 2

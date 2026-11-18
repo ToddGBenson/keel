@@ -17,6 +17,7 @@ the same commands are blocked by their rules and a harmless one is allowed.
 """
 import json
 import os
+import re
 import shutil
 import stat
 import subprocess
@@ -62,6 +63,25 @@ SHIMS = {
 failures = []
 
 
+# [TheHub #61843] guard-bash.sh pins PATH to system directories, so a shim directory on
+# PATH no longer reaches it. The tests run a COPY whose one marked line is replaced by a
+# no-op, so the copy keeps the PATH this test gives it (bash converts a Windows PATH at
+# startup, which a literal written into the copy would skip). The live hook has no such
+# seam. A hook without the marked line (before #61843) runs as it is.
+PIN_RE = re.compile(r"^PATH=.*# guard-path-pin\b.*$", re.M)
+
+
+def unpinned_copy(hook: Path, dest_dir: Path) -> Path:
+    text = hook.read_text(encoding="utf-8")
+    new, n = PIN_RE.subn(": # guard-path-pin (test copy: PATH is the test's)", text)
+    if n == 0:
+        return hook
+    out = dest_dir / f"{hook.stem}.test-copy{hook.suffix}"
+    if not out.exists() or out.read_text(encoding="utf-8") != new:
+        out.write_text(new, encoding="utf-8")
+    return out
+
+
 def check(name, cond, detail=""):
     if cond:
         print(f"  [ok]   {name}")
@@ -95,6 +115,7 @@ def tool_dir(tmp: Path, faulty=None, shim=None, with_jq=True):
 
 def run(command, path_dir, tool="Bash", hook=HOOK):
     env = {"PATH": str(path_dir), "CLAUDE_PROJECT_DIR": str(ROOT), "HOME": os.environ.get("HOME", "/tmp")}
+    hook = unpinned_copy(hook, Path(path_dir).parent)
     r = subprocess.run([shutil.which("bash"), str(hook)], input=payload(command, tool),
                        capture_output=True, cwd=ROOT, env=env, timeout=60)
     return r.returncode, r.stderr.decode("utf-8", "replace")
