@@ -32,6 +32,34 @@ Naming it precisely is the prerequisite to controlling it:
 
 ## The controls
 
+### Read this first: the hooks are best-effort guidance, not the boundary
+
+Every row below marked "Hook-enforced", and every "Enforced" in the strength column whose
+mechanism includes `guard-bash.sh`, is **best-effort guidance**. A hook is a denylist over
+command text: it refuses the spellings it knows, and a command that is re-worded (another
+quoting, a different tool, an indirection the parser does not follow) can get past it. The
+open entries in `test/hook-bypass-corpus.yml` are those known gaps.
+
+What actually bounds an agent is what its GitHub credential can do, and today that boundary is
+thinner than the tables suggest:
+
+- **Branch protection on `main`** restricts direct pushes, force-pushes and deletion for
+  identities it binds, and its required checks are pinned to a GitHub App, so a status posted
+  with the agent's token cannot satisfy them. It does **not** stop an agent merging: no
+  approving review is required, and the agent's `gh` signs in as the repository owner with
+  admin rights (TheHub #61039). With `enforce_admins` off that identity can merge past a red
+  required check or push straight to `main`, and as an admin it can change the protection
+  itself.
+- **Least-privilege credentials** are the target, not the current state. Until agents have their
+  own GitHub identity without admin rights (TheHub #61039), the agent's `gh` token can do
+  everything the hooks forbid.
+- **A sandbox**, if you run the agent in one. keel does not configure one; `.claude/settings.json`
+  carries permissions and hooks only.
+
+A rebuild of the hooks as allowlists over a parsed command is planned (TheHub #60944). Until it
+and #61039 land, treat a hook rule as a guard rail that catches honest mistakes, never as a
+security control.
+
 ### AIC-1 — Human accountability is non-delegable
 Every artifact an agent produces has a named accountable human. Agents produce and analyze;
 humans decide and answer for it. The human approval points are enumerated in
@@ -40,11 +68,15 @@ stated.
 *Maps: AI RMF GOVERN 1.3, 2.1, 3.2 · 800-53 AC-5, CM-3, SA-3 · ISO 42001 A.3*
 
 ### AIC-2 — Separation of duties survives automation
-An agent identity that produces an artifact may not approve it. Enforced three ways, in
-increasing order of reliability: role prompt (weakest), **tool grant** (the `developer`
-agent has no approval capability; the `product-owner` agent cannot write source), and
-**GitHub branch protection + Environments** (strongest — a technical control that does not
-depend on the model behaving).
+An agent identity that produces an artifact may not approve it. The layers, from weakest to
+strongest: role prompt (weakest), **tool grant** (it narrows which tools an agent has, for
+example `ux` has no `Bash`, but every other agent here has `Bash`, and `Bash` runs `gh`, so it
+does not stop an agent approving or merging), and **GitHub branch protection + Environments**,
+which is a technical control that, for an identity it binds, does not depend on the model
+behaving. Today the agent's `gh` identity is the repository owner's with
+`enforce_admins` off, so on `main` it is not bound and no approving review is required; see
+*Read this first* above. The target is a separate agent identity without admin rights
+(TheHub #61039).
 
 Spawn separate agent invocations for produce and review. Asking one agent to "now review
 your own work" produces a review anchored on the reasoning that created the artifact, which
@@ -81,9 +113,9 @@ The columns are not equally strong, and saying so is the point of this control s
 
 | Column | Enforcement | Strength |
 |---|---|---|
-| **May approve** | `guard-bash.sh` blocks `gh pr review --approve`; GitHub branch protection blocks self-approval | **Enforced** |
+| **May approve** | `guard-bash.sh` blocks `gh pr review --approve`. GitHub refuses an approval from a PR's own author, but nothing else backs the hook: `main` requires no approving review, so an approval gates nothing, and the agent's identity can approve any PR it did not open (see *Read this first*) | ⚠️ **Hook-enforced** — a denylist over command text, until agents have their own GitHub identity (TheHub #61039) |
 | **May approve a deployment** (no agent, ever; operator decision 2026-10-26) | `guard-bash.sh` blocks reviewing a waiting run's environment deployment: `POST .../actions/runs/{id}/pending_deployments` or `.../deployment_protection_rule` via `gh api` (any method spelling, or a POST implied by `-f`/`-F`/`--input`) or `curl`, and the GraphQL `approveDeployments`/`rejectDeployments` mutations, also inside `$(...)`, backticks or `sh -c`. The method may be any case or quoted (`gh` upper-cases it), a `|`, `;`, `&` or newline inside quotes does not split the call, continued lines are rejoined, a GraphQL document `curl` sends from a file is read or refused, and `curl.exe`, `/usr/bin/curl`, `\curl`, `gh.exe` and the same names in any case (`GH`, `CURL`) are the same commands. Quotes and backslashes inside a word are read as bash removes them (`-X P""OST`, `pending"_"deployments`, `g''h`), `gh` and `curl` are judged by any write method they are given (`-X GET -iXPOST`, `curl -XGET -XPOST`), curl's dot segments and `{}`/`[]` URL globs are resolved, and a `gh alias set`/`gh alias import` body is judged as the gh command it is. The endpoint named anywhere in the command (`P=...; gh api -X POST $P`, `| xargs gh api`), a variable as the action, a body flag from `$(...)`, and a GraphQL document from `$(cat file)` are caught too. Not read: `wget`, httpie, `Invoke-RestMethod`, a language HTTP client, `curl --config` with the URL only in the file, an endpoint set in an earlier command, `xargs -a`, and a document produced by a command other than `cat` (open entries in `test/hook-bypass-corpus.yml`). Listing pending deployments stays allowed; `gh` 2.86 has no `gh run` subcommand that approves. The agent's `gh` signs in as the environment's required reviewer, so GitHub cannot tell the two apart | ⚠️ **Hook-enforced** — a denylist over command text, until agents have their own GitHub identity (TheHub #61039) |
-| **May push/merge** | `guard-bash.sh` blocks `gh pr merge`, force-push, direct-to-`main`; branch protection backs it. The same actions sent with `curl` and the `gh` token (a PR merge or review, a release, branch protection, a ruleset, a secret, an environment, `refs/heads/main`, a contents commit or a merge into `main`, and the GraphQL mutations for each) are refused on the same terms as `gh api`: any write method spelling, a POST implied by a body, continued lines, `$(...)`/backticks/`sh -c`, dot segments and URL globs; a GET stays allowed (TheHub #61048) | **Enforced** |
+| **May push/merge** | `guard-bash.sh` blocks `gh pr merge`, force-push, direct-to-`main`. Branch protection restricts direct pushes, force-pushes and deletion for non-admin identities, but does not stop an agent merging a PR whose required checks are green, and an admin identity can push straight to `main` (see *Read this first*). The same actions sent with `curl` and the `gh` token (a PR merge or review, a release, branch protection, a ruleset, a secret, an environment, `refs/heads/main`, a contents commit or a merge into `main`, and the GraphQL mutations for each) are refused on the same terms as `gh api`: any write method spelling, a POST implied by a body, continued lines, `$(...)`/backticks/`sh -c`, dot segments and URL globs; a GET stays allowed (TheHub #61048) | ⚠️ **Hook-enforced** — a denylist over command text, until agents have their own GitHub identity (TheHub #61039) |
 | **May create or push a release tag** (no; TheHub #61972) | `guard-bash.sh` splits the command into shell words (quotes honoured) and judges only the arguments that name refs. **git push**: `--tags`, `--follow-tags` and `--mirror` by any unique prefix git accepts (`--tag`, `--follow-tag`, `--mirr`); a refspec naming `refs/tags/...`, a release-shaped bare name (`v1`, `v1.2.3`, `vNext`) or `tag v...`; any refspec it cannot resolve from the text (a variable, `$(...)`, a glob such as `refs/*`); `push.followTags`, `remote.<name>.push` or `remote.<name>.mirror` given with `-c` or `--config-env`. **git send-pack**, always. **git tag** creating a `v*` tag (annotated or lightweight) or one named by a variable. **git config** setting those three keys. **gh api** writes to `git/tags`, to `git/refs/tags/...`, and to `git/refs` unless the call carries exactly one literal `ref=refs/heads/<name>` and no `--input`; the endpoint is normalised first (query string, trailing or doubled slashes, a leading slash, the API host). **GraphQL** `createRef` naming `refs/tags/`. The PowerShell tool is read the same way. The refusal says: "A v* tag is the ref a release is cut from, and cutting a release is the operator's decision. Push your branch and open a PR; after merge the operator creates the tag and dispatches release.yml." Allowed: a branch push (including a branch named `v2-migration`), `--no-follow-tags`, `git tag -l`, `--list`, `-d`, `-v`, a non-v tag, `git config --get`/`get`, `git stash push`, `git fetch --tags`, a v-word in a commit message or a redirect target. Not read: `GIT_CONFIG_*` environment variables, a `remote.<name>.push` or `.mirror` set earlier and then a plain `git push`, a git alias, and a REST tag write sent by `curl` (TheHub #61973's curl path). **Tag rulesets do not exist yet** (GET rulesets returns `[]`), so until the rulesets script runs (TheHub #61006) this hook is the only control | ⚠️ **Hook-enforced only** — no server-side tag protection yet |
 | **May run commands** | `settings.json` deny/ask rules + `guard-bash.sh` | **Enforced** |
 | **Which shell tools the guard covers** (TheHub #61064) | `settings.json` binds `guard-bash.sh` to `Bash\|PowerShell`, so every rule in this table runs whichever of Claude Code's shell tools sends the command; bound to `Bash` alone, the same `gh`/`curl` approval, merge, force-push or release sent through the PowerShell tool reached no hook. The command is also read the way PowerShell reads it: the backtick escape and line continuation (`` g`h ``, `` --f`orce ``), `''`/`""` quotes, a script block (`&{gh pr merge 1}`), an argument list and `Start-Process gh -ArgumentList`; a quoted fragment joined to the rest of its word (`` `m"erge" ``), two literals joined by `+`, `` `t ``/`` `n ``/`` `u{..} `` inside a double-quoted string, the stop-parsing token `--%`, and `(Get-Command gh)`/`(gcm gh).Source` (keel#166 review). `Invoke-RestMethod`, `Invoke-WebRequest`, `irm` and `iwr` are judged as `curl` is, by endpoint and by `-Method`/`-CustomMethod` in any case or prefix (`-Me post`, `-Method:POST`); a method that is a variable or a splatted hashtable counts as a write. Because the `Bash(curl:*)` deny rule does not reach the PowerShell tool, `curl` or a cmdlet writing to any endpoint the `gh api` rules protect (merge, review, release, protection, rulesets, secrets, environments, a commit or ref on `main`) is refused by the hook, and such an endpoint is read anywhere in the command (`$u = '.../merge'; irm -Method Put $u`), and a GraphQL document either sends is read (inline, `-InFile`, `(Get-Content FILE)`) or refused. Read-only PowerShell stays allowed (`gh pr view`, `irm` GET, `Get-Content`). `test/hook-bypass-corpus.test.py` runs every corpus entry through both tools and fails if `settings.json` stops binding either; `selftest.sh` checks the binding too. Not covered: the permission deny/ask/allow lists, which are still spelled `Bash(...)`; arguments splatted from an array (`gh @a`); a .NET client (`Net.WebClient`) — open corpus entries | ⚠️ **Hook-enforced** — a denylist over command text (TheHub #61039) |
@@ -264,8 +296,8 @@ definitions, fixed through `/learn`. Every AI incident becomes a new seeded case
 | Control | Prompt | Tool grant | Hook / CI | Branch protection |
 |---|---|---|---|---|
 | AIC-1 accountability | ✓ | | | ✓ (Environments) |
-| AIC-2 separation of duties | ✓ | ✓ | ✓ | ✓ |
-| AIC-3 least agency — approve/merge/push | ✓ | ✓ | ✓ | ✓ |
+| AIC-2 separation of duties | ✓ | ✗ (`Bash` runs `gh`) | ✓ | ✓ |
+| AIC-3 least agency — approve/merge/push | ✓ | ✗ (`Bash` runs `gh`) | ✓ | ✓ |
 | AIC-3 least agency — **write scope by role** | ✓ | ✗ | detection only | partial (CODEOWNERS) |
 | AIC-4 injection isolation | ✓ | ✓ (domain allowlist) | | |
 | AIC-5 secrets | ✓ | ✓ (deny rules) | ✓ | |
@@ -278,10 +310,14 @@ definitions, fixed through `/learn`. Every AI incident becomes a new seeded case
 | AIC-12 agent evaluation | | | ✓ (scheduled) | |
 
 **Read the table by column, not by row.** Prompt-only controls are advisory — a sufficiently
-confused model ignores them. The controls that hold under adversarial conditions are the
-ones with a mark in the tool-grant, hook, or branch-protection columns. When you add a new
-control, the design question is not "what should the agent be told" but **"what makes the
-unwanted action impossible."**
+confused model ignores them. A mark in the hook column is best-effort guidance, not a boundary
+(see *Read this first*). A mark in the branch-protection column holds only against an identity
+the protection binds, and the agent's identity is not bound today, so those marks are the
+target, not the current state. A tool grant is enforced by the harness, not by matching command
+text, but every agent here except `ux` is granted `Bash`, and `Bash` runs `gh`. So for approve,
+merge and push the tool grant limits nothing the hook does not, and the AIC-2 and AIC-3
+approve/merge/push cells are marked ✗ for that reason. When you add a new control, the design question is not "what should the agent be told"
+but **"what makes the unwanted action impossible."**
 
 ---
 
