@@ -66,7 +66,7 @@ esac
 
 "$GIT" ls-remote "$GIT_URI" 'refs/heads/*' 'refs/pull/*/head' 'refs/pull/*/merge' > "$work/refs"
 
-# Candidates, newest first: "<number> <sha> <branch>".
+# Candidates: "<number> <sha> <branch>", by pull request number (the order is set below).
 "$PY" - "$work/refs" "$BASE_BRANCH" > "$work/candidates" <<'PY'
 import re, sys
 refs = {}
@@ -90,9 +90,28 @@ for ref, sha in refs.items():
     if not branches:
         continue  # a fork's head, or a head that is only the base branch
     out.append((int(m.group(1)), sha, sorted(branches)[0]))
-for number, sha, branch in sorted(out, reverse=True):
+for number, sha, branch in sorted(out):
     print(number, sha, branch)
 PY
+
+# TheHub #62064: the head that has waited longest is judged first. With one head judged per
+# run, "newest pull request first" let every push to a higher-numbered PR jump ahead of an
+# older head, which starved a merge train (keel #189 waited 30+ minutes on 2026-11-18).
+# Each head's commit is fetched (depth 1, into a scratch repository) for its committer time,
+# and the candidates are ordered oldest first, by pull request number when the times tie.
+# When the times cannot be read, the order stays by pull request number, oldest first.
+"$GIT" -C "$work" init -q dates 2>/dev/null || true
+specs=()
+while read -r number sha branch; do specs+=("refs/pull/${number}/head:refs/c/${number}"); done < "$work/candidates"
+if [ "${#specs[@]}" -gt 0 ] && "$GIT" -C "$work/dates" fetch -q --no-tags --depth=1 "$GIT_URI" "${specs[@]}" 2>/dev/null; then
+  while read -r number sha branch; do
+    ct=$("$GIT" -C "$work/dates" log -1 --format=%ct "$sha" 2>/dev/null) || ct=""
+    printf '%s %s %s %s\n' "${ct:-9999999999}" "$number" "$sha" "$branch"
+  done < "$work/candidates" | sort -n -k1,1 -k2,2 | cut -d' ' -f2- > "$work/ordered"
+  mv "$work/ordered" "$work/candidates"
+else
+  echo "Could not read the heads' commit times; judging by pull request number, oldest first."
+fi
 
 echo "$(wc -l < "$work/candidates" | tr -d ' ') open pull request head(s) on branches of ${REPO_SLUG}."
 
