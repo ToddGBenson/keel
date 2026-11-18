@@ -21,7 +21,7 @@ which controls are achievable — recorded honestly below rather than marked sat
 | CIS | Control | Status | Implementation |
 |---|---|---|---|
 | 1.1.1 | Any change is tracked and traceable | ✅ | Every commit references an issue — enforced by `commit-msg` hook and `pr-governance.yml` (CM-3) |
-| 1.1.2 | Any change is approved | 🟡 | **Solo: structurally impossible.** `/self-review` record written by the building agent and read by reviewers (`pr-governance.yml` is `workflow_dispatch`-only since 2026-10-20, so no CI check requires it); POAM-008 |
+| 1.1.2 | Any change is approved | 🟡 | **Solo: structurally impossible.** `/self-review` artifact required by CI; POAM-008 |
 | 1.1.3 | Any change is reviewed by two people | ➖ | Solo project. Compensated per POAM-008; closes on a second team member |
 | 1.1.4 | Dismiss stale approvals | ✅ | `dismiss_stale_reviews: true` |
 | 1.1.5 | Code owners are set and approve | 🟡 | CODEOWNERS present and routes; **advisory** in solo mode (cannot self-approve) |

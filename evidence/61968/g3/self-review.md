@@ -5,9 +5,16 @@ PR: #193   Author: Claude Sonnet 5.5 (builder agent, AI-authored)   Date: 2026-1
 verdict: pass
 Opened: 2026-11-17   Reviewed: 2026-11-17 (same session; no interval, see "Not verified")
 
-Docs and text only. `scripts/sprint.sh`, `SECURITY.md`, the self-hosted-runner runbook, the CIS map,
-the POAM-008 control table, one `configure-github.sh` info line, `.claude/commands/self-review.md`
-and the PR template are corrected, and `test/self-review-docs.test.py` pins them.
+Docs and text only. `scripts/sprint.sh`, `SECURITY.md`, the self-hosted-runner runbook,
+`.claude/commands/self-review.md` and the PR template are corrected, and
+`test/self-review-docs.test.py` pins them.
+
+Scope change (PO decision): this PR must stay low-risk, so it does not touch compliance records or
+the branch-protection script. The CIS map (`docs/compliance/cis-supply-chain-map.md`), the POAM-008
+control table (`docs/compliance/poam.md`) and the `configure-github.sh` info line were moved out to
+TheHub story 62001 and reverted here to main's content. `test/self-review-docs.test.py` excludes
+exactly those three paths by name (a comment cites #62001) from the CI-required check; every other
+check is unchanged. Those three files still carry the CI-required wording until 62001 lands.
 
 ## Verified independently
 
@@ -47,9 +54,9 @@ independent review the Definition of Done asks for.
 
 ## Cold-read notes
 
-- I went past the four listed items: the CIS map, the POAM-008 table row and the
-  `configure-github.sh` info line also called the record CI-required, and AC1 says "none". All
-  three are one-line text edits. The reviewer should confirm that scope.
+- An earlier head also edited the CIS map, the POAM-008 table row and the `configure-github.sh` info
+  line. Those are out of this PR now (TheHub 62001); the test excludes the three paths by name, so
+  it does not guard them here.
 - The test is a phrase blocklist; a new phrasing of the same claim will pass. It pins the shapes
   found today, nothing more.
 

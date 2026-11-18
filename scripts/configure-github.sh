@@ -426,7 +426,7 @@ if [ "$MODE" = "solo" ]; then
   info "  protection at once, not just this one."
   info ""
   info "  Compensating controls (docs/13-solo-operation.md, POAM-008):"
-  info "    - /self-review record written by the building agent, read by reviewers (pr-governance.yml is retired)"
+  info "    - /self-review artifact REQUIRED by pr-governance.yml"
   info "    - cooling-off: do not merge the session you opened it"
   info "    - all status checks required"
   info "    - quarterly external review of a random sample"
