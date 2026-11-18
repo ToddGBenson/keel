@@ -305,7 +305,7 @@ definitions, fixed through `/learn`. Every AI incident becomes a new seeded case
 | AIC-7 supply chain | ✓ | | ✓ | ✓ |
 | AIC-8 model change control | | | ✓ | ✓ (CODEOWNERS) |
 | AIC-9 review calibration | ✓ | | ✓ (template check) | ✓ |
-| AIC-10 audit trail | | | ✓ | ✓ (signed commits on `main`, by the `keel-main` ruleset since 2026-11-18; GitHub's signature on a squash merge attests the merge, not the author) |
+| AIC-10 audit trail | | | ✓ | ✓ (GitHub-signed squash merges on `main`; signing is not required by rule since about 14:36Z on 2026-11-18; GitHub's signature on a squash merge attests the merge, not the author) |
 | AIC-11 bounded autonomy | ✓ | ✓ | | ✓ |
 | AIC-12 agent evaluation | | | ✓ (scheduled) | |
 

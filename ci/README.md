@@ -45,9 +45,9 @@ approve anything. Gate approval stays a human act recorded in GitHub (PD-2).
 > **Live protection on `main`, read 2026-11-18 (TheHub #62001):** 0 approving reviews; **two required
 > checks**, `Concourse / keel` and `library-allowlist`, both pinned to App 4551328, `strict`;
 > linear history, resolved conversations, no force-push or deletion; `enforce_admins` **on**
-> (since about 11:58Z that day, read at 12:09Z); branch protection's `required_signatures` off, but signed commits
-> required by the `keel-main` ruleset (no bypass: deletion, non-fast-forward, signed commits, a
-> pull request with squash only); release tags under the `keel-release-tags` ruleset, which
+> (since about 11:58Z that day, read at 12:09Z); branch protection's `required_signatures` off, and
+> signing not required by rule since about 14:36Z (GitHub signs each squash merge); the `keel-main` ruleset (no bypass: deletion, non-fast-forward, a pull request
+> with squash only); release tags under the `keel-release-tags` ruleset, which
 > admins bypass. A green `Concourse / keel` can show without the suites
 > having run (TheHub #62015, open). This supersedes the 2026-11-16 reading (one approving review,
 > no required checks) and every "private" or "Actions does not start" statement below.

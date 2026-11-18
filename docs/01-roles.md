@@ -199,8 +199,9 @@ Convention is not enforcement. The mechanisms:
 - **GitHub Environments** with required reviewers gate the production deploy job — the
   human authorization at G5 is a technical control, not an email.
 - **Signed commits**, so the producing identity is cryptographically attributable (SI-7,
-  CM-14). Required on keel's `main` by the `keel-main` ruleset since 2026-11-18 (POAM-009); the
-  commits on `main` are GitHub-signed squash merges, which attest the merge, not the author.
+  CM-14). Not required by rule on keel since about 14:36Z on 2026-11-18 (the ruleset's signature rule
+  blocked every PR with unsigned branch commits; POAM-009). The commits on `main` are
+  GitHub-signed squash merges, which attest the merge, not the author.
 - **Agent tool scoping** — each agent definition grants only the tools its role needs. The
   `product-owner` agent cannot write source files; the `developer` agent cannot approve.
   This is the AI-layer expression of the same principle (see `11-ai-agent-controls.md`).

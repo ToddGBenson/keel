@@ -155,7 +155,7 @@ controls:
       (solo mode, POAM-008) and two status checks (Concourse / keel and
       library-allowlist, App-pinned); enforce_admins is on, and the keel-main
       ruleset (no bypass) refuses deletion and non-fast-forward pushes and
-      requires signed commits and a pull request. The owner's identity, which
+      requires a pull request (its signature rule was dropped at about 14:36Z). The owner's identity, which
       the agents use, can still merge a green PR and bypasses the release-tag
       ruleset as an admin (TheHub #61039). Before: one approving review and
       enforce_admins false (2026-10-18, 2026-11-04). The

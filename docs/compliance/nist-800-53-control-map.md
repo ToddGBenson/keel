@@ -35,7 +35,7 @@ should be green in *its* map, backed by its `evidence/<issue>/g2|g4/` bundles.
 | SA-4 | Acquisition process | Dependency justification, license check, maintenance signal check | PR bodies, license scan | ✅ |
 | SA-4(3) | Development methods, techniques, practices | Documented process, test-first, code review, threat modeling | `docs/03`–`docs/06` | ✅ |
 | SA-8 | Security and privacy engineering principles | Applied and stated at G2, item 9 | Design notes | 🟡 **POAM-018** — gate never run |
-| SA-10 | Developer configuration management | Git, branch protection, change records. Signed commits required on `main` by the `keel-main` ruleset (since 2026-11-18); squash merges carry GitHub's signature | Git history, CM records | ✅ |
+| SA-10 | Developer configuration management | Git, branch protection, change records. GitHub-signed squash merges on `main`; signing is not required by rule since about 14:36Z on 2026-11-18 | Git history, CM records | ✅ |
 | SA-10(1) | Software/firmware integrity verification | Cosign signing, SLSA provenance, verify-on-deploy | Attestations | ✅ |
 | SA-11 | Developer testing and evaluation | G4 verification, three independent verdicts | `evidence/<issue>/g4/` | 🟡 **POAM-018** — gate never run |
 | SA-11(1) | Static code analysis | CodeQL + language linters, every PR, gated on new findings | SARIF | ✅ |
@@ -57,7 +57,7 @@ should be green in *its* map, backed by its `evidence/<issue>/g2|g4/` bundles.
 | CM-3(2) | Test, validate, document changes | G3 + G4 before any G5 | Gate evidence | 🟡 **POAM-018** — gate never run |
 | CM-4 | Impact analyses | Change record item 4; AI impact at item 5 | Change records | ✅ |
 | CM-4(1) | Separate test environments | Local / CI / staging / production separation | Environment config | ✅ |
-| CM-5 | Access restrictions for change | Branch protection (two required checks, linear history, no force-push or deletion) with `enforce_admins` on, and the `keel-main` ruleset with no bypass (deletion, non-fast-forward, signed commits, a pull request, squash only), since 2026-11-18. CODEOWNERS routes review (advisory). **Gaps:** 0 approving reviews, so the agents' identity (the owner's, TheHub #61039) can merge a green PR; the `keel-release-tags` ruleset's admin bypass lets it create or move a `v*` tag | GitHub settings, rulesets, git log | 🟡 |
+| CM-5 | Access restrictions for change | Branch protection (two required checks, linear history, no force-push or deletion) with `enforce_admins` on, and the `keel-main` ruleset with no bypass (deletion, non-fast-forward, a pull request, squash only), since 2026-11-18. CODEOWNERS routes review (advisory). **Gaps:** 0 approving reviews, so the agents' identity (the owner's, TheHub #61039) can merge a green PR; the `keel-release-tags` ruleset's admin bypass lets it create or move a `v*` tag | GitHub settings, rulesets, git log | 🟡 |
 | CM-6 | Configuration settings | IaC scanning (checkov/tfsec), weekly drift detection | Scan reports, drift reports | ✅ |
 | CM-7 | Least functionality | SA-8 review at G2; IaC scan; container minimization | Design notes, scans | 🟡 |
 | CM-8 | System component inventory | SBOM per build, CycloneDX, diffed | SBOM artifacts | ✅ |
@@ -75,7 +75,7 @@ should be green in *its* map, backed by its `evidence/<issue>/g2|g4/` bundles.
 | SI-2 | Flaw remediation | Severity SLAs (7/30/90 days); POA&M tracking | Finding register | ✅ |
 | SI-3 | Malicious code protection | Container scanning, dependency integrity verification | Scan reports | 🟡 |
 | SI-4 | System monitoring | `docs/08-operate-and-respond.md` monitoring table | Alert config | 🟡 |
-| SI-7 | Software/firmware/information integrity | Signed commits on `main` (GitHub-signed squash merges, by the `keel-main` ruleset; they attest the merge, not the author), signed artifacts, provenance, verify-on-deploy | Signatures, attestations | ✅ |
+| SI-7 | Software/firmware/information integrity | GitHub-signed squash merges on `main` (signing is not required by rule since about 14:36Z on 2026-11-18; they attest the merge, not the author), signed artifacts, provenance, verify-on-deploy | Signatures, attestations | ✅ |
 | SI-10 | Information input validation | Allocated at G2; negative-case tested at G4 | Tests, SAST | 🟡 **POAM-018** — gate never run |
 | SI-12 | Information management and retention | `docs/10-definitions.md` § Retention | Retention config | 🟡 |
 

@@ -63,8 +63,8 @@ evidence/
 Evidence must be **tamper-evident, attributable, and retrievable**:
 
 - **Git-resident where possible** — commit history is tamper-evident. It is not yet
-  attributable to its author by signature: `main` requires signed commits (the `keel-main` ruleset,
-  since 2026-11-18), but the signature on a squash merge is GitHub's, which attests the merge, not
+  attributable to its author by signature: signed commits are not required by rule (dropped
+  since about 14:36Z on 2026-11-18), and the signature on a squash merge is GitHub's, which attests the merge, not
   the author.
 - **CI-generated where possible** — a workflow run record cannot be hand-authored after the
   fact, which is exactly its value over a written claim.

@@ -122,7 +122,7 @@ not an embarrassment to bury.
 ## Change records as evidence
 
 Retained per `10-definitions.md` § Retention. Together with the GitHub approval record,
-the commit history (signed commits are required on `main` since 2026-11-18; GitHub signs the squash merges), and
+the commit history (GitHub signs each squash merge on `main`; signing is not required by rule since about 14:36Z on 2026-11-18), and
 pipeline logs, they constitute the CM-3 audit trail: **who changed
 what, when, why, who approved it, and what evidence supported the approval.** That is the
 question every assessor asks, and this is the shape of the answer.

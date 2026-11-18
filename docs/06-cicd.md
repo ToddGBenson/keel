@@ -94,7 +94,7 @@ and `library-allowlist`, both pinned to App 4551328, `strict: true`; stale appro
 conversations resolved; linear history; no force-push or deletion. **Not in force:**
 `independent-review` is not required; 0 approving reviews and no code-owner requirement (solo
 mode, POAM-008). **Since 2026-11-18:** `enforce_admins` on, and the `keel-main` ruleset (no
-bypass) refuses deletion and non-fast-forward pushes and requires signed commits and a pull
+bypass) refuses deletion and non-fast-forward pushes and requires a pull
 request (squash only); release tags have the `keel-release-tags` ruleset, which admins bypass,
 the agents' identity included (TheHub #61039). The list above is the target configuration. A green `Concourse / keel` can
 show without the suites having run (TheHub #62015). A release-tag control the agents cannot bypass waits on TheHub #61039.

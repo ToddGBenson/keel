@@ -29,8 +29,9 @@ Settings → Branches → Add rule for `main`:
 | Allow deletions | ❌ | |
 
 > keel's own `main` does not match this table today (2026-11-18): 0 approvals and no code-owner
-> requirement (solo mode). Signed commits are required by the `keel-main` ruleset rather than by
-> branch protection, and bypass is not allowed (`enforce_admins` on, no ruleset bypass). The table is
+> requirement (solo mode), and signed commits are not required by rule (dropped about 14:36Z: it
+> blocked every PR; GitHub signs each squash merge). `enforce_admins` is on, `keel-main` has no
+> bypass, and `keel-release-tags` has an admin bypass, which the agents' identity holds (TheHub #61039). The table is
 > the setup this template recommends; `docs/13-solo-operation.md` gives the live state and why.
 
 **"Do not allow bypassing" is the difference between a control and a documented

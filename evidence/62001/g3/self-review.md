@@ -102,6 +102,17 @@ The review's findings:
 3. **POAM-014's row** no longer says Concourse / keel both "stays unrequired" and is required: the
    first is marked superseded. No date changed.
 
+## Review round 4: the signature rule was dropped (2026-11-18, about 14:36Z)
+
+The operator dropped `required_signatures` from `keel-main` (re-read live at 14:38Z: deletion,
+non_fast_forward and pull_request, 0 approvals, squash only, no bypass). It blocked every PR
+whose branch commits were unsigned, even for a squash merge: #203 went from BLOCKED to CLEAN the
+moment it dropped. Every claim that `main` requires signed commits is restated, including the
+`.sdlc/protection.yaml` reason and the POAM-009 row (not reopened). CIS 1.1.9 is a **recorded
+deviation, not a POA&M item**: nothing unsigned reaches `main`, which takes only PRs,
+squash-merged and signed by GitHub, and the author was never attributed by signature.
+`protection-drift.py compare` against live: 6/6 match.
+
 ## Flags for the operator (not changed here)
 
 - **POAM-010 and POAM-014 fall due 2026-11-21.** Neither was re-dated.

@@ -74,8 +74,7 @@ A green `Concourse / keel` can show without the suites having run (TheHub #62015
 
 **Squash merges only.** `required_linear_history` is on, and a squash produces a single
 commit on `main`. Branch protection's `required_signatures` is off (measured 2026-11-04 and
-2026-11-18), but since 2026-11-18 the `keel-main` ruleset requires signed commits on `main`.
-The squash merges are signed by GitHub, which attests the merge, not the author (POAM-009).
+2026-11-18), and signed commits are not required by rule since about 14:36Z on 2026-11-18 (the `keel-main` ruleset's signature rule blocked every PR with unsigned branch commits, even for a squash merge); `main` is squash-only and GitHub signs each squash merge, which attests the merge, not the author (POAM-009).
 
 ## The rules that never bend
 

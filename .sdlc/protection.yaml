@@ -43,9 +43,11 @@ fields:
   required_signatures:
     value: false
     reason: >-
-      TheHub #60979: off in branch protection since at least 2026-10-22. Since
-      2026-11-18 the keel-main ruleset requires signed commits on main instead
-      (TheHub #62001); this field reads branch protection only.
+      TheHub #60979: off in branch protection since at least 2026-10-22. The
+      keel-main ruleset required signed commits from about 11:58Z to about
+      14:36Z on 2026-11-18, when the operator dropped the rule because it
+      blocked every PR with unsigned branch commits (TheHub #62001). main is
+      squash-only and GitHub signs each squash merge.
       Declared as it is so OPERATING.md stops claiming it. Turning it back on
       is the owner's call (ci/README.md gives the command); flip this to true
       in the same change.
