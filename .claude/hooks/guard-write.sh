@@ -142,13 +142,16 @@ warn() { echo "WARNING  $1" >&2; }
 # path is also resolved against the payload's cwd: 142/x.sarif from inside evidence/ is
 # evidence. So the path is rebuilt segment by segment, with builtins only:
 #   backslashes as slashes; a relative path joined to the payload's cwd; a drive-relative
-#   "C:" prefix dropped; per segment, everything from the first ":" dropped (a stream),
-#   trailing dots and spaces trimmed, "." skipped and ".." resolved.
+#   "C:" prefix dropped; per segment, "." and ".." judged as written (".." resolved), an
+#   exact unnamed stream type (::$DATA) dropped, trailing dots and spaces trimmed. A segment
+#   that only trims to "", "." or "..", a line break, and inside evidence/ any ":" (a named
+#   stream) or a trailing dot or space on the file name, are refused (review rounds 2 and 3).
 # Case is ignored by the matches below (nocasematch), not by rewriting the path: no
 # external tool, so nothing planted on PATH can change the answer.
 guard_slash() { local s=${1//\\//}; printf '%s' "$s"; }
-guard_unread() { # the path cannot be judged: refuse it (review of #197, round 2)
-  echo "BLOCKED by .claude/hooks/guard-write.sh — the write's path ($1) cannot be judged safely: $2. Name the file plainly." >&2
+guard_unread() { # the path cannot be judged: refuse it (review of #197, rounds 2 and 3)
+  local shown=${1//[$'\001'-$'\037'$'\177']/?}           # control characters are not echoed raw
+  echo "BLOCKED by .claude/hooks/guard-write.sh — the write's path ($shown) cannot be judged safely: $2. Name the file plainly." >&2
   echo "" >&2
   echo "Control: AU-9, CA-2. See docs/11-ai-agent-controls.md." >&2
   exit 2
@@ -163,7 +166,7 @@ case "$npath" in
   [A-Za-z]:*) npath=${npath:2}; [ -n "$pcwd" ] && npath="$pcwd/$npath" ;;  # drive-relative
   *) [ -n "$pcwd" ] && npath="$pcwd/$npath" ;;           # relative to the cwd
 esac
-guard_segs=() guard_lead=""
+guard_segs=() guard_lead="" guard_colon=0 guard_lastdot=0 guard_cut=()
 case "$npath" in /*) guard_lead="/" ;; esac
 IFS='/' read -r -a guard_parts <<< "$npath"
 guard_n() { printf '%s' "${#guard_segs[@]}"; }
@@ -181,10 +184,18 @@ for guard_seg in ${guard_parts[@]+"${guard_parts[@]}"}; do
         else guard_segs+=(".."); fi
         continue ;;
   esac
-  # An NTFS stream TYPE suffix is dropped: ::$DATA, ::$INDEX_ALLOCATION, :$I30:$INDEX_ALLOCATION.
-  # A named stream (a.md:x.sarif) keeps its colon, and is refused inside evidence/ below.
-  case "$guard_seg" in *:*'$'*) guard_seg=${guard_seg%%:*} ;; esac
+  # Round 3: any ":" in a segment (other than a drive, C:) is noted, and refused inside
+  # evidence/ below: a named stream (a.md:x.sarif, a.md:x.sarif:$DATA) is not the .md in
+  # front of it. Only an exact, unnamed stream TYPE (::$DATA, ::$INDEX_ALLOCATION,
+  # :$I30:$INDEX_ALLOCATION) is dropped here, so the directory it names is still recognised.
+  case "$guard_seg" in [A-Za-z]:) ;; *:*) guard_colon=1 ;; esac
+  case "$guard_seg" in
+    *'::$'[A-Za-z_]*) [ -z "${guard_seg#*::\$}" ] || case "${guard_seg#*::\$}" in *[!A-Za-z_]*) ;; *) guard_seg=${guard_seg%%::\$*} ;; esac ;;
+    *':$I30:$INDEX_ALLOCATION') guard_seg=${guard_seg%:\$I30:\$INDEX_ALLOCATION} ;;
+  esac
   guard_raw=$guard_seg
+  guard_lastdot=0
+  case "$guard_seg" in *[.\ ]) guard_lastdot=1 ;; esac
   while case "$guard_seg" in *[.\ ]) true ;; *) false ;; esac; do
     guard_seg=${guard_seg%?}                               # trailing dots and spaces
   done
@@ -192,13 +203,21 @@ for guard_seg in ${guard_parts[@]+"${guard_parts[@]}"}; do
     ""|.|..) guard_unread "$path" "the segment \"$guard_raw\" means something different on Windows" ;;
   esac
   guard_segs+=("$guard_seg")
+  guard_cut+=("${guard_seg%%:*}")                          # the same, cut at any ':' (for recognising evidence/)
 done
 npath="$guard_lead$(IFS=/; printf '%s' "${guard_segs[*]-}")"
+cpath="$guard_lead$(IFS=/; printf '%s' "${guard_cut[*]-}")"
 shopt -s nocasematch
 
+# Round 3: a segment with a ':' is judged both as written and cut at the ':' (evidence:foo is
+# evidence/ to the second reading); either reading under evidence/ with a ':' is refused.
+case "$cpath" in
+  */evidence/*|evidence/*) [ "$guard_colon" -eq 1 ] && guard_unread "$path" "a ':' in a path under evidence/ (an NTFS stream)" ;;
+esac
 case "$npath" in
   */evidence/*|evidence/*)
-    case "${npath#[A-Za-z]:}" in *:*) guard_unread "$path" "a named NTFS stream inside evidence/" ;; esac
+    [ "$guard_colon" -eq 1 ] && guard_unread "$path" "a ':' in a path under evidence/ (an NTFS stream)"
+    [ "$guard_lastdot" -eq 1 ] && guard_unread "$path" "a trailing dot or space on the file name under evidence/ (on Windows it names another file)"
     case "$npath" in
       # Narrative artifacts an agent legitimately authors during a gate.
       *.md) : ;;

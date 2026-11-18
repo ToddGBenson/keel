@@ -46,7 +46,23 @@ sprint.
   - Only a stream TYPE suffix (one with `$`) is stripped, and a named stream inside evidence/ is
     refused.
   - Empty-array expansions are guarded for bash older than 4.4 under `set -u`.
-- **Green after:** selftest 356 passed / 0 failed (round 1: 348). hook-write-fail-closed all passed. Bypass corpus
+- **Red first, round 3** (review of b6e5d3a/8c8d632; inputs in the binnacle comment): 8 more cases
+  against b6e5d3a gave 359 passed and 5 failed. These were ALLOWED: a named stream that also carries
+  a `$` (`a.md:x.sarif:$DATA`, `a.md:$x.sarif`), `a.md::$DATA`, `evidence:foo/...`, and a trailing dot
+  on the file name.
+- **The round-3 change:**
+  - Inside evidence/, any `:` in a segment (other than a drive) is refused, on the path as written
+    and on the path cut at each `:`. Only an exact unnamed stream type (`::$DATA`,
+    `:$I30:$INDEX_ALLOCATION`) is dropped, so the directory it names is still recognised.
+  - A trailing dot or space on the file name under evidence/ is refused.
+  - The refusal message replaces control characters with `?`.
+  - The LF-in-cwd case is now a real red case (`/repo/evidence<LF>x`, which round 1 truncated to
+    `/repo/evidence`).
+  - The comment above the rebuild is current.
+- **The review's round-3 inputs** (plus the round-1 and round-2 ones that touch streams): 30 checks,
+  0 wrong. `\\?\C:\...\evidence\142\b.md` is now ALLOWED: it is a narrative `.md`, and a drive
+  segment is not a stream. Round 2 refused it, with the wrong reason.
+- **Green after:** selftest 364 passed / 0 failed (round 2: 356). hook-write-fail-closed all passed. Bypass corpus
   224 entries, 804 runs, 0 failed.
 - `./keel check` green in a capped python:3.12-slim container. shellcheck v0.10.0 `-S warning`
   clean. Pinned gitleaks v8.18.4: no leaks.

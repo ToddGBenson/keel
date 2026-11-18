@@ -580,6 +580,15 @@ check "a named stream on an evidence .md"      block "$(wpayload 'evidence/142/a
 check "a line feed in the path"               block "$(printf '{"tool_input":{"file_path":"x\\n/../evidence/142/a.sarif","content":"x"}}')" guard-write.sh
 check "a line feed in the cwd"                block "$(printf '{"cwd":"/repo/evidence/x\\n/..","tool_input":{"file_path":"../142/a.sarif","content":"x"}}')" guard-write.sh
 check "an ordinary relative path, no cwd"      allow "$(wpayload 'src/a.py' 'x = 1')"                             guard-write.sh
+# Review round 3: a named stream that also carries a $, a trailing dot, a line feed in the cwd.
+check "a named stream with :\$DATA"           block "$(wpayload 'evidence/142/a.md:x.sarif:$DATA' 'x')"         guard-write.sh
+check "a named stream, a \$ in its name"       block "$(wpayload 'evidence/142/a.md:$x.sarif' 'x')"              guard-write.sh
+check "a.md::\$DATA under evidence"           block "$(wpayload 'evidence/142/a.md::$DATA' 'x')"                guard-write.sh
+check "evidence:foo, a stream on the dir"     block "$(wpayload 'evidence:foo/142/a.sarif' 'x')"                 guard-write.sh
+check "a trailing dot on the file name"       block "$(wpayload 'evidence/142/a.md.' 'x')"                       guard-write.sh
+check "a line feed in the cwd (truncating)"   block "$(printf '{"cwd":"/repo/evidence\\nx","tool_input":{"file_path":"142/a.sarif","content":"x"}}')" guard-write.sh
+check "a..b.md under evidence"                allow "$(wpayload 'evidence/142/a..b.md' 'x')"                     guard-write.sh
+check "a colon outside evidence"              allow "$(wpayload 'src/x:y.txt' 'x')"                              guard-write.sh
 
 echo ""
 echo "──────────────────────────────────────────────────────────────"
