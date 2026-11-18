@@ -13,6 +13,72 @@
 
 set -uo pipefail
 
+# TheHub #61973: A DEADLINE. Claude Code gives a hook 60 s and, when it runs out, lets
+# the call PROCEED, so a hook that is merely slow fails open, whatever made it slow. Some
+# command shapes still cost this hook seconds per kilobyte (one process start per helper,
+# per segment, per view), and on a host where process starts are slow (Git Bash) a short
+# command can reach the limit.
+#
+# So the hook runs as two processes. This one, the supervisor, reads nothing and decides
+# nothing: it starts the guard (this same file, with --guard-worker) as a background job
+# in a process group of its own, and starts a timer. When the guard finishes first, its
+# verdict is passed on. When the timer fires first, the whole group (the guard and every
+# helper it started) is killed and the call is BLOCKED. The guard's stdout is discarded and
+# its stderr goes to a file that is printed at the end, so a helper that outlives the
+# guard cannot hold Claude Code's pipes open past the deadline.
+#
+# A signal to the supervisor, or a guard that dies of one, is a block too (an exit of
+# 128+N would be an allow). 40 s leaves room under the 60 s default for the supervisor
+# itself; settings.json sets no shorter timeout. Commands over 1 MiB are refused without
+# being read: nothing legitimate an agent runs is that long.
+#
+# The test seam: the hook tests rewrite the marked line in their copies to a short
+# deadline. The live hook takes no override.
+guard_deadline=40  # guard-deadline: the hook tests rewrite this line, and only it
+guard_max_bytes=1048576
+if [ "${1:-}" != "--guard-worker" ]; then
+  # The supervisor's own stderr is fd 3; fd 2 is muted, so bash's job notices ("Killed")
+  # never reach Claude Code.
+  exec 3>&2 2>/dev/null
+  guard_block() { # $1: why
+    {
+      echo "BLOCKED by .claude/hooks/guard-bash.sh — internal error: $1, so it cannot tell whether the command is allowed."
+      echo ""
+      echo "This is the guard failing closed (TheHub #61973), not a rule. Retry the call; if it"
+      echo "keeps happening, split the command or report it: the host is short of time or resources."
+    } >&3
+  }
+  guard_err="$(command mktemp 2>/dev/null)" || { guard_block "it cannot create its output file"; exit 2; }
+  set -m
+  "$BASH" "${BASH_SOURCE[0]}" --guard-worker <&0 >/dev/null 2>"$guard_err" &
+  guard_wpid=$!
+  # The timer: USR1 at the deadline, USR2 at once if it cannot sleep (no timer, no verdict).
+  ( if command sleep "$guard_deadline"; then kill -USR1 "$$"; else kill -USR2 "$$"; fi ) </dev/null >/dev/null 2>&1 &
+  guard_tpid=$!
+  set +m
+  guard_stop() { kill -KILL -- "-$1" 2>/dev/null || kill -KILL "$1" 2>/dev/null; return 0; }
+  guard_done() { # $1: exit status; $2: why it is a block, or empty to pass the guard's verdict on
+    trap '' USR1 HUP INT TERM PIPE ALRM USR2
+    guard_stop "$guard_tpid"
+    [ -n "${2:-}" ] && guard_stop "$guard_wpid"
+    # Builtins only: a broken cat must not hide the guard's own message.
+    while IFS= read -r guard_line || [ -n "$guard_line" ]; do
+      printf '%s\n' "$guard_line" >&3
+    done < "$guard_err"
+    command rm -f "$guard_err" 2>/dev/null
+    if [ -n "${2:-}" ]; then guard_block "$2"; exit 2; fi
+    exit "$1"
+  }
+  trap 'guard_done 2 "it ran past its own deadline of ${guard_deadline} s"' USR1
+  trap 'guard_done 2 "it cannot start its deadline timer (no sleep)"' USR2
+  trap 'guard_done 2 "it was sent a signal"' HUP INT TERM PIPE ALRM
+  wait "$guard_wpid"; guard_rc=$?
+  case "$guard_rc" in
+    0|2) guard_done "$guard_rc" ;;
+    *)   guard_done 2 "the guard stopped with exit $guard_rc (a signal, or a crash) before its verdict" ;;
+  esac
+fi
+
 # TheHub #61794: FAIL CLOSED. Every rule below reads the command through text tools
 # inside $(...) captures and `printf ... | grep -q` tests, and nothing checked that
 # they worked: a helper that errored or was killed left a capture empty, no rule
@@ -50,7 +116,9 @@ guard_fault() { printf '%s exited %s\n' "$1" "$2" >> "$guard_faults" 2>/dev/null
 guard_run() { # $1: tool, $2: highest exit status that is not an error; the rest: its args
   local t=$1 ok=$2 rc; shift 2
   command "$t" "$@"; rc=$?
-  [ "$rc" -eq 141 ] && return 0
+  # TheHub #61973: 141 (SIGPIPE) is a fault too. Every wrapped helper drains its input
+  # (grep and head above), so none is ever a writer whose reader stopped early, and an
+  # extractor killed by SIGPIPE left an empty capture that read as "no match".
   [ "$rc" -gt "$ok" ] && guard_fault "$t" "$rc"
   return "$rc"
 }
@@ -109,8 +177,18 @@ guard_exit() { # builtins only: a broken helper must not be able to hide its own
   exit "$rc"
 }
 trap guard_exit EXIT
+# TheHub #61973: a catchable signal ends the shell with 128+N, which Claude Code reads as
+# an allow. Each one is recorded as a fault and turned into a block by the EXIT trap.
+for guard_sig in HUP INT TERM PIPE ALRM USR1 USR2; do
+  # shellcheck disable=SC2064  # the signal name is fixed when the trap is set
+  trap "guard_fault signal $guard_sig; exit 1" "$guard_sig"
+done
 
 payload="$(cat)"
+if [ "${#payload}" -gt "$guard_max_bytes" ]; then
+  echo "BLOCKED by .claude/hooks/guard-bash.sh — the command is over $guard_max_bytes bytes, which this guard does not read (TheHub #61973). Write long content to a file with the Write tool and run a short command on it." >&2
+  exit 2
+fi
 
 # Decode a JSON string body (the sed fallback below hands over the raw escapes).
 # \uXXXX is left as it is.
@@ -200,7 +278,7 @@ function guard_join(lo, hi,  m) { if (lo == hi) return guard_line[lo]; m = int((
 # moves forward, so a cursor over the newline positions makes every call O(1) amortized.
 # index(substr(s, i), "\n") copied the rest of the command at every comment line and
 # here-document line: quadratic (TheHub #61939).
-function guard_nextnl(i) { while (guard_nl[guard_nc] < i) guard_nc++; return guard_nl[guard_nc] }
+function guard_nextnl(i) { while (guard_nc <= NR && guard_nl[guard_nc] < i) guard_nc++; return guard_nl[guard_nc] }
 { guard_line[NR] = $0 }
 END {
   s = (NR > 0) ? guard_join(1, NR) : ""

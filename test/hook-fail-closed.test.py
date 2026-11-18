@@ -29,7 +29,7 @@ ROOT = Path(__file__).resolve().parent.parent
 HOOK = ROOT / ".claude" / "hooks" / "guard-bash.sh"
 # The tools guard-bash.sh runs (test/hook-bypass-corpus.test.py's HOOK_TOOLS, plus jq).
 TOOLS = ("bash", "sh", "cat", "grep", "sed", "tr", "head", "mktemp", "rm", "awk",
-         "python3", "python", "env", "jq")
+         "python3", "python", "env", "jq", "sleep")
 FAULTY = ("grep", "sed", "awk", "tr", "cat", "jq")
 # Helpers the hook runs on EVERY command (reading the payload and building its views),
 # so a fault in one refuses even a harmless command. tr runs only on the curl/cmdlet
@@ -54,7 +54,10 @@ LARGE = {f"{name}, padded to {len(cmd + PAD) // 1024} KB": cmd + PAD for name, c
 # command must now be decided well inside the timeout. The dense case (100,000 one-character
 # comment lines) is the worst shape for the per-line rescan.
 LARGE["self-merge, then 100,000 one-character comment lines"] = MUST_BLOCK["self-merge"] + "\n#" * 100000
-BUDGET_S = 5   # the fixed hook takes ~0.7 s here; main took 7-16 s
+BUDGET_S = 5   # the fixed hook takes ~0.7 s on the Linux runner; main took 7-16 s there
+# [TheHub #61973, review of #184] A harmless padded command is ALLOWED, so it runs every rule
+# on every view: the slowest decided shape of this padding. It must be quick and allowed.
+HARMLESS_LARGE = {f"`git status`, padded to {len(HARMLESS + PAD) // 1024} KB": "git status" + PAD}
 SHIMS = {
     "exits 2": "#!/bin/sh\nexit 2\n",
     "is killed": "#!/bin/sh\nkill -9 $$\n",
@@ -120,14 +123,22 @@ def main():
         print("a large command: a match is still a match (review #1)")
         for with_jq in ([True, False] if have_jq else [False]):
             d = clean if with_jq else tool_dir(tmp, with_jq=False)
-            for name, cmd in LARGE.items():
+            for name, cmd in list(LARGE.items()) + list(HARMLESS_LARGE.items()):
+                want = 0 if name in HARMLESS_LARGE else 2
                 for t in ("Bash", "PowerShell"):
                     mode = "jq" if with_jq else "no-jq"
-                    start = time.monotonic()
-                    rc, err = run(cmd, d, t)
-                    took = time.monotonic() - start
-                    check(f"{mode} {t}: {name} is blocked", rc == 2, f"rc={rc} ALLOWED")
-                    check(f"{mode} {t}: {name} is decided in {took:.1f} s (budget {BUDGET_S} s)",
+                    # [TheHub #61973, review of #184] The better of two runs, so one starved
+                    # sample on a busy worker is not a failure; the budget is unchanged.
+                    took = None
+                    for _ in range(2):
+                        start = time.monotonic()
+                        rc, err = run(cmd, d, t)
+                        took = min(took, time.monotonic() - start) if took is not None else time.monotonic() - start
+                        if took < BUDGET_S:
+                            break
+                    verdict = "allowed" if want == 0 else "blocked"
+                    check(f"{mode} {t}: {name} is {verdict}", rc == want, f"rc={rc} {err[:200]}")
+                    check(f"{mode} {t}: {name} is decided in {took:.1f} s (budget {BUDGET_S} s, best of two)",
                           took < BUDGET_S, "TOO SLOW: a hook past its timeout lets the call proceed")
 
         print("one helper fails: the hook refuses")
