@@ -49,14 +49,32 @@ injectable workflow.
 - No real release was run. This changes release tooling, so it goes to Fable's review and the
   operator batch.
 
+## Review round 1 (Fable 5.2 on 791dba8 / b56f2de, SHIP WITH NITS)
+
+- **The trusted ref is a branch, never a tag.** This was pre-existing, but cheap and in scope.
+  `--trusted-ref` was resolved by short name, so a tag spelled like a branch, on a commit off
+  main carrying its own floor file, verified with exit 0. Now:
+  - `HEAD` is taken as the caller's checkout;
+  - a fully qualified `refs/heads/*` or `refs/remotes/*` is taken as given;
+  - a short name is looked up only as `refs/remotes/<name>`, `refs/heads/<name>` or
+    `refs/remotes/origin/<name>`;
+  - anything else, including any `refs/tags/*`, is refused.
+- **Nits.** A floor file that exists on the trusted ref but cannot be read (or is empty) is
+  refused; before, the read error fell back silently to keel's floor. The `KEEL_UPSTREAM` match
+  is case-insensitive.
+- **Tests:** 3 new checks, failing on 791dba8 and passing here; all others pass. keel's
+  supply-chain test (`--trusted-ref HEAD`) passes.
+- **Not in this PR (the PO is filing a follow-up):** a fork's floor can be lowered by a PR to
+  `.github/release-floor`, because forward-only applies only where keel's floor is present. It
+  ties to TheHub #61039 and to requiring code-owner review.
+
 ## For the operator
 
 binnacle does not hold keel's floor and has no `.github/release-floor`, so with this change its
 release is refused with that instruction. That is no worse than before, when it was refused for
-lacking af878f1. Choosing binnacle's floor commit is the operator's decision. The candidate is
-eca1114 ("pass workflow_dispatch inputs as data, not as program text", binnacle #9), the first
-binnacle commit with af878f1's input fix. Check that its release.yml also carries the G5 gate
-before naming it.
+lacking af878f1. Choosing binnacle's floor commit is the operator's decision. Fable's review names
+3e44164a8d62210e61bb7ebd7f5f02877d3c472b (binnacle #65), not eca1114: eca1114's preflight still
+holds id-token: write with no environment. Adding the file is a later PR.
 
 ## Residual risk accepted
 

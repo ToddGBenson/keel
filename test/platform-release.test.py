@@ -330,6 +330,31 @@ try:
     check("verify: a configured floor BEHIND the keel floor it would replace -> refused (forward only)",
           rc == 1 and "only move forward" in log and called is None, log)
 
+    # The trusted ref is a branch, never a tag (review of #202): a tag spelled like a branch,
+    # on a commit off main that carries its own floor file, must not stand in for main.
+    tagref = tmp / "tagref"
+    subprocess.run(["git", "clone", "-q", tree.as_posix(), tagref.as_posix()], check=True)
+    rgit = git_cmd(tagref)
+    subprocess.run([*rgit, "checkout", "-q", "-B", "main", "origin/main"], check=True)
+    subprocess.run([*rgit, "fetch", "-q", "origin", "refs/tags/v1.2.0:refs/tags/v1.2.0"], check=False)
+    subprocess.run([*rgit, "checkout", "-q", "-b", "offmain"], check=True)
+    (tagref / ".github").mkdir(exist_ok=True)
+    (tagref / ".github" / "release-floor").write_text(main_sha + "\n", encoding="utf-8")
+    subprocess.run([*rgit, "add", "-A"], check=True)
+    subprocess.run([*rgit, "commit", "-q", "-m", "a floor off main"], check=True)
+    subprocess.run([*rgit, "tag", "release/main"], check=True)
+    subprocess.run([*rgit, "checkout", "-q", "main"], check=True)
+    subprocess.run([*rgit, "branch", "-q", "-D", "offmain"], check=True)
+    rc, log, called = verify_as("owner/fork", tag="v1.2.0", git_dir=tagref, trusted="release/main")
+    check("verify: a TAG spelled like a branch as the trusted ref -> refused (a tag cannot be the trusted ref)",
+          rc == 1 and "not a branch" in log and called is None, log)
+    rc, log, called = verify_as("owner/fork", tag="v1.2.0", git_dir=tagref, trusted="refs/tags/release/main")
+    check("verify: refs/tags/... as the trusted ref -> refused",
+          rc == 1 and "not a branch" in log and called is None, log)
+    rc, log, called = verify_as("Owner/KEEL", sh=up)
+    check("verify: the upstream name matched in any case (Owner/KEEL is owner/keel) -> held to keel's floor",
+          rc == 1 and "fetch the full history of" in log and called is None, log)
+
     # A shallow clone is refused: missing history is not "no keel history".
     shallow = tmp / "shallow"
     subprocess.run(["git", "clone", "-q", "--depth", "1", "--branch", "main", f"file://{tree.as_posix()}",

@@ -80,16 +80,43 @@ KEEL_UPSTREAM="ToddGBenson/keel"
 #      pre-gate release.yml (binnacle's does), so the root is not a safe floor.
 # A repository holding RELEASE_FLOOR may still configure a floor, but only one that descends
 # from RELEASE_FLOOR: a configured floor can only move the floor forward.
+# The trusted ref names a BRANCH, never a tag (TheHub #61432 review). A short name is looked up
+# only among branches (refs/remotes/<name>, refs/heads/<name>, refs/remotes/origin/<name>), so a
+# tag spelled like a branch cannot stand in for it. HEAD is the caller's own checkout (Concourse's
+# get of main). Anything else, a tag or a sha included, is refused.
+resolve_trusted() { # $1 git dir, $2 ref -> prints its commit
+  local gitdir=$1 ref=$2 full="" c
+  case "$ref" in
+    HEAD) full=HEAD ;;
+    refs/heads/*|refs/remotes/*) full=$ref ;;
+    refs/*) die "trusted ref '${ref}' is not a branch (refs/heads/ or refs/remotes/); a tag cannot be the trusted ref" ;;
+    *)
+      for c in "refs/remotes/${ref}" "refs/heads/${ref}" "refs/remotes/origin/${ref}"; do
+        if git -C "$gitdir" show-ref --verify --quiet "$c"; then full=$c; break; fi
+      done
+      [ -n "$full" ] || die "trusted ref '${ref}' is not a branch in ${gitdir} (looked for refs/remotes/${ref}, refs/heads/${ref} and refs/remotes/origin/${ref}); a tag cannot be the trusted ref" ;;
+  esac
+  git -C "$gitdir" rev-parse --verify --quiet "${full}^{commit}" \
+    || die "trusted ref '${ref}' does not resolve in ${gitdir}"
+}
 release_floor() { # $1 git dir, $2 trusted sha, $3 OWNER/REPO -> prints the floor sha
   local gitdir=$1 trusted=$2 repo=$3 cfg base=""
   [ "$(git -C "$gitdir" rev-parse --is-shallow-repository 2>/dev/null)" = "false" ] \
     || die "the repository at ${gitdir} is a shallow clone (or not a repository); fetch its full history (no --depth) and retry: the release floor cannot be judged on part of it"
   if git -C "$gitdir" cat-file -e "${RELEASE_FLOOR}^{commit}" 2>/dev/null; then
     base=$RELEASE_FLOOR
-  elif [ "$repo" = "$KEEL_UPSTREAM" ]; then
+  elif [ "$(printf '%s' "$repo" | tr 'A-Z' 'a-z')" = "$(printf '%s' "$KEEL_UPSTREAM" | tr 'A-Z' 'a-z')" ]; then
     die "the release floor ${RELEASE_FLOOR} is not in the repository at ${gitdir}; fetch the full history of ${KEEL_UPSTREAM} and retry"
   fi
-  cfg=$(git -C "$gitdir" show "${trusted}:.github/release-floor" 2>/dev/null | tr -d ' \t\r\n' || true)
+  # An absent file is "no configured floor"; a file that exists but cannot be read is refused,
+  # never read as absent (review nit: it fell back to keel's floor silently).
+  cfg=""
+  if git -C "$gitdir" cat-file -e "${trusted}:.github/release-floor" 2>/dev/null; then
+    cfg=$(git -C "$gitdir" show "${trusted}:.github/release-floor") \
+      || die "cannot read .github/release-floor on the trusted ref"
+    cfg=$(printf '%s' "$cfg" | tr -d ' \t\r\n')
+    [ -n "$cfg" ] || die ".github/release-floor on the trusted ref is empty"
+  fi
   if [ -z "$cfg" ]; then
     [ -n "$base" ] && { printf '%s' "$base"; return 0; }
     die "${repo} does not hold keel's release floor and its trusted ref has no .github/release-floor; commit that file (through a reviewed PR) naming the first commit whose release.yml has the G5 gate and passes workflow inputs as data"
@@ -175,8 +202,7 @@ verify() {
   local commit trusted_sha
   commit="$(git -C "$gitdir" rev-parse --verify --quiet "refs/tags/${tag}^{commit}")" \
     || die "tag ${tag} is not in the repository at ${gitdir}; cannot tell which commit signed it"
-  trusted_sha="$(git -C "$gitdir" rev-parse --verify --quiet "${trusted}^{commit}")" \
-    || die "trusted ref '${trusted}' does not resolve in ${gitdir}"
+  trusted_sha="$(resolve_trusted "$gitdir" "$trusted")" || exit 1
   if ! git -C "$gitdir" merge-base --is-ancestor "$commit" "$trusted_sha"; then
     die "tag ${tag} is on commit ${commit}, which is not reachable from ${trusted} (${trusted_sha}): its release.yml was never on ${trusted}, so its signature says nothing about the G5 gate"
   fi
