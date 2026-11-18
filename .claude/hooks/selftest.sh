@@ -598,6 +598,21 @@ check "gh api by repository id"        block "$(payload 'gh api repositories/1/g
 check "PS: splatted git @a"            block "$(pspayload "\$a=@('push','origin','v1.2.3'); git @a")" guard-bash.sh
 check "PS: Start-Process git tag push" block "$(pspayload "Start-Process git -ArgumentList 'push origin v1.2.3'")" guard-bash.sh
 check "tag --sort, listing"            allow "$(payload 'git tag --sort=-creatordate')"              guard-bash.sh
+# Review of keel #192, the final round: ordinary work main allows (round 3 false positives).
+check "PS: \$url = git config --get"    allow "$(pspayload '$url = git config --get remote.origin.url')" guard-bash.sh
+check "PS: \$tags = git tag -l"         allow "$(pspayload '$tags = git tag -l')"                     guard-bash.sh
+check "PS: \$r = git push -u origin HEAD" allow "$(pspayload '$r = git push -u origin HEAD 2>&1')"    guard-bash.sh
+check "PS: \$cfg = Get-Content config"  allow "$(pspayload '$cfg = Get-Content config')"              guard-bash.sh
+check "[ -f config ]"                  allow "$(payload '[ -f config ] && cat config')"              guard-bash.sh
+check "[ \"\$1\" = push ]"              allow "$(payload 'if [ "$1" = push ]; then echo x; fi')"      guard-bash.sh
+check "\"\$PYTHON\" -m pip config list" allow "$(payload '"$PYTHON" -m pip config list')"             guard-bash.sh
+check "PS: a here-string with an apostrophe" allow "$(pspayload "git commit -m @'
+fix: don't allow this
+
+git push origin v1.2.3 is refused
+'@")" guard-bash.sh
+check "PS: \$r = git push origin v1.2.3" block "$(pspayload '$r = git push origin v1.2.3')"            guard-bash.sh
+check "\$G push origin v1.2.3"          block "$(payload '$G push origin v1.2.3')"                    guard-bash.sh
 check "gh api git/refs, two refs"      block "$(payload 'gh api repos/O/R/git/refs -f ref=refs/heads/x -f ref=refs/tags/v9 -f sha=a')" guard-bash.sh
 check "push a refs/* glob"             block "$(payload "git push origin 'refs/*'")"                     guard-bash.sh
 check "push a refs/t* glob"            block "$(payload "git push origin 'refs/t*:refs/t*'")"            guard-bash.sh

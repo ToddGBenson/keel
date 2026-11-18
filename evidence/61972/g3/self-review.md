@@ -76,6 +76,39 @@ round, then ship. Fable 5.2 reviewed 8316706 (BLOCK).
   415/0 here, and 415/0 with jq off the PATH. Corpus 884/0 (KB-253..259). No process per word:
   words are classified with nocasematch (the #62031 T1 lesson); a 300-command line takes 0.3 s.
 
+## Round 3, the final round (Fable 5.2 on d6a19c2 / fc8d181, BLOCK; scope stop)
+
+Only the two blocking classes are fixed:
+- **(d) False positives against main, a regression on ordinary work:**
+  - a PowerShell assignment (`$x = git config --get ...`, `$tags = git tag -l`,
+    `$r = git push -u origin HEAD`, `$cfg = Get-Content config`): the command after the `=` is
+    judged;
+  - `[` and `[[` are ordinary command words;
+  - a non-literal command word (`"$PYTHON" -m pip config list`, `$DOCKER push image`) is refused
+    only with a tag-capable subcommand AND a word shaped like a release tag
+    (`$G push origin v1.2.3` is still refused);
+  - a PowerShell here-string (`@'` ... `'@` at the start of a line) is one text word, so an
+    apostrophe in it no longer ends a quote.
+  All are selftest allow rows (the corpus holds must-block rows only), red at d6a19c2.
+- **Timing:**
+  - refspecs and config keys are judged in-process (no `printf | grep` per refspec);
+  - `cmd /c` is read once per level, not twice;
+  - past 8 levels, the hook refuses only if a word shaped like a release tag appears, and
+    otherwise leaves the nest to its other rules, as on main.
+  `test/hook-tag-timing.test.py` gives 300 `git push origin feat` lines and a 7-deep PowerShell
+  `cmd /c` the same relative bound as #61987's test: 4x the one-line time + 1 s. Red at d6a19c2
+  (`cmd /c`: 1.86 s against 1.22 s); here 0.26 s and 0.09 s.
+- **Gaps documented in docs/11, not fixed:**
+  - redirects before the command or between git and its subcommand;
+  - PowerShell `('refs/tags/' + 'v1')`;
+  - a here-string piped to bash;
+  - a nest deeper than 8 with a split spelling;
+  - `git tag` value-letter clusters;
+  - other launchers.
+  None is a regression against main. The real control is TheHub #61039.
+- **Evidence:** selftest 425/0 with jq and without (8 fail at d6a19c2); the review inputs 270/0
+  plus these 21; corpus 884/0; hook-fail-closed passes; shellcheck clean.
+
 ## Verified independently
 
 - **Red first, round 1:** 37 new selftest cases (review classes, not its exact inputs).

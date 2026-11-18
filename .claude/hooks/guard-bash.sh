@@ -1031,6 +1031,11 @@ END {
       else tok = tok c
       continue
     }
+    if (c == "@" && (d == "'" || d == "\"") && substr(s, i + 2, 1) == "\n") {   # a here-string (round 3)
+      e = "\n" d "@"; j = index(substr(s, i + 3), e)
+      if (j == 0) { tok = tok substr(s, i + 3); have = 1; i = n; continue }
+      tok = tok substr(s, i + 3, j - 1); have = 1; i = i + 2 + j + 2; continue
+    }
     if (c == "'" || c == "\"") { q = c; have = 1; continue }
     if (c == "`" && i < n) { i++; if (d != "\n") { tok = tok d; have = 1 }; continue }
     if (c == "#" && !have) { while (i < n && substr(s, i + 1, 1) != "\n") i++; continue }
@@ -1053,7 +1058,9 @@ tag_dyn() { # a word this hook cannot read as written
   [ "$tag_mode" = ps ] && case "$1" in @*) return 0 ;; esac
   return 1
 }
-tag_versionish() { printf '%s' "$1" | grep -qE '^v([0-9]+([.][0-9]+)+([-+.][0-9A-Za-z.-]*)?|[0-9]+|[A-Z][A-Za-z0-9._-]*)$'; }
+# Round 3 (timing): in-process, no process per refspec.
+tag_vre='^v([0-9]+([.][0-9]+)+([-+.][0-9A-Za-z.-]*)?|[0-9]+|[A-Z][A-Za-z0-9._-]*)$'
+tag_versionish() { [[ $1 =~ $tag_vre ]]; }
 tag_side() { # one side of a refspec
   [ -z "$1" ] && return 0
   tag_dyn "$1" && block "a git push whose refspec ($1) cannot be read here: a variable, a substitution, a brace or a glob may name a release tag. Name the branch literally. $tag_msg" "CM-3, AIC-1, AC-5"
@@ -1064,8 +1071,18 @@ tag_side() { # one side of a refspec
   tag_versionish "$1" && block "pushing a release tag ($1, a tag when one by that name exists). $tag_msg" "CM-3, AIC-1, AC-5"
   return 0
 }
-tag_cfg() { # a git config key that makes push send tags
-  printf '%s' "$1" | grep -qiE '^(push[.]followtags|remote[.].+[.](push|mirror))(=|$)'
+tag_cre='^([Pp][Uu][Ss][Hh][.][Ff][Oo][Ll][Ll][Oo][Ww][Tt][Aa][Gg][Ss]|[Rr][Ee][Mm][Oo][Tt][Ee][.].+[.]([Pp][Uu][Ss][Hh]|[Mm][Ii][Rr][Rr][Oo][Rr]))(=|$)'
+tag_cfg() { [[ $1 =~ $tag_cre ]]; }   # a git config key that makes push send tags (in-process, round 3)
+# Round 3: a word that is shaped like a release tag or a tag-sending option, used where the hook
+# cannot read the command fully (a non-literal command word, a nest past the depth cap).
+tag_shaped() {
+  local a r
+  for a in "$@"; do
+    case "$a" in refs/tags/*|tags/*|*:refs/tags/*|*:tags/*|--tag|--tags|--follow-tag*|--mirr*|--fol*) return 0 ;; esac
+    r=${a#+}; r=${r##*:}
+    tag_versionish "$r" && return 0
+  done
+  return 1
 }
 tag_git() { # tag_git <words after git>
   local a sub="" cfg_bad="" k
@@ -1250,7 +1267,12 @@ tag_guard() { # $1: bash|ps, $2: the command text
   local toks=() seg=() t mode_was=$tag_mode src=$2
   tag_depth=$((tag_depth + 1))
   if [ "$tag_depth" -gt 8 ]; then
-    case "$src" in *[Gg][Ii][Tt]*|*[Gg][Hh]*) block "a command nested more than 8 levels deep that names git or gh; this hook cannot read it. Run it directly. $tag_msg" "CM-3, AIC-1, AC-5" ;; esac
+    # Round 3: past the cap, refuse only when a word shaped like a release tag (or a tag-sending
+    # option) appears; an ordinary deep nest is left to the rest of this hook, as on main.
+    local deep=() ; read -r -a deep <<< "${src//[\'\"]/ }"
+    if tag_shaped "${deep[@]}"; then
+      block "a command nested more than 8 levels deep that names a release tag; this hook cannot read it. Run it directly. $tag_msg" "CM-3, AIC-1, AC-5"
+    fi
     tag_depth=$((tag_depth - 1)); return 0
   fi
   tag_mode=$1
@@ -1320,7 +1342,10 @@ tag_seg() { # $@: the words of one simple command
   n=${#w[@]}
   # The words before the command: assignments, keywords and wrappers that run the rest.
   while [ "$i" -lt "$n" ]; do
-    a=${w[i]}; tag_pre "$a"; lw=$tag_pre_out
+    a=${w[i]}
+    # Round 3: a PowerShell assignment, `$name = git ...`: judge the command after the `=`.
+    if [ "$tag_mode" = ps ] && [[ $a == '$'* ]] && [ "${w[i+1]:-}" = "=" ]; then i=$((i + 2)); continue; fi
+    tag_pre "$a"; lw=$tag_pre_out
     case "$lw" in skip|assign) i=$((i + 1)); continue ;; esac
     case "$lw" in
       env|command|builtin|exec|nohup|sudo|doas|nice|timeout|stdbuf|xargs)
@@ -1342,7 +1367,10 @@ tag_seg() { # $@: the words of one simple command
   [ "$i" -ge "$n" ] && return 0
   a=${w[i]}; base=${a##*/}; base=${base##*\\}; base=${base%.[Ee][Xx][Ee]}; tag_cmdkind "$base"; lw=$tag_cmdkind_out
   # A command word this hook cannot read, followed by words a tag write needs (round 2).
-  if tag_dyn "$a" && tag_names_ref_cmd "${w[@]:i+1}"; then
+  # Round 3 (false positives against main): `[ -f config ]`, `"$PYTHON" -m pip config list` and
+  # `$DOCKER push image` are not a git push. A non-literal command word is refused only with a
+  # tag-capable subcommand AND a word shaped like a release tag after it.
+  if [ "$a" != "[" ] && [ "$a" != "[[" ] && tag_dyn "$a" && tag_names_ref_cmd "${w[@]:i+1}" && tag_shaped "${w[@]:i+1}"; then
     block "a command whose name ($a) is not written literally, with arguments that can push or create a tag. Write the command out. $tag_msg" "CM-3, AIC-1, AC-5"
   fi
   case "$lw" in
@@ -1367,7 +1395,7 @@ tag_seg() { # $@: the words of one simple command
       for a in "${bodies[@]}" "${hs[@]}"; do tag_guard ps "$a"; done ;;
     cmd)
       for ((k = i + 1; k < n; k++)); do
-        case "${w[k]}" in /[cCkK]) rest="${w[*]:k+1}"; tag_guard bash "$rest"; tag_guard ps "$rest"; return 0 ;; esac
+        case "${w[k]}" in /[cCkK]) rest="${w[*]:k+1}"; tag_guard "$tag_mode" "$rest"; return 0 ;; esac   # once per level (round 3)
       done ;;
     eval) rest="${w[*]:i+1}"; tag_guard "$tag_mode" "$rest" ;;
     iex)
