@@ -940,14 +940,21 @@ ctr_is_runner() { # $1: the command line (entrypoint and arguments), quotes remo
   printf '%s' "$c" | grep -qE '^ ([A-Za-z_][A-Za-z0-9_]*=[^ ]* )*(nice( -n ?[-0-9]+)? )?([^ ]*/)?(pytest|py[.]test|tox|nox) ' && return 0
   printf '%s' "$c" | grep -qE '^ ([A-Za-z_][A-Za-z0-9_]*=[^ ]* )*(nice( -n ?[-0-9]+)? )?([^ ]*/)?python[0-9.]*( -[A-Za-z]+)* -m ?pytest ' && return 0
   printf '%s' "$c" | grep -qE '^ ([^ ]*/)?(sh|bash|dash|zsh|ash)( -[a-z]+)* -[a-z]*c .*(^|[ ;&|(/])(pytest|py[.]test|tox|nox|python[0-9.]*( -[A-Za-z]+)* -m ?pytest)( |$)' && return 0
-  return 1
+  # Review of #198, round 2: a runner anywhere in the command, not only as its first word
+  # (timeout 30 pytest, env X=1 pytest, uv run pytest, python -X dev -m pytest, sh -c 'pytest'),
+  # as main's rule effectively read it. A package being installed (pip install pytest) is not
+  # a run.
+  printf '%s' "$c" | grep -qE '[ /;&|(]((py[.]?test|tox|nox)|-m ?(pytest|unittest)|npm (run )?test)([ ;&|)]|$)' || return 1
+  printf '%s' "$c" | grep -qE '(^| )install( [^ ]+)* (py[.]?test|tox|nox)( |$)' && \
+    ! printf '%s' "$c" | grep -qE -e '-m ?(pytest|unittest)|(^| )(pytest|tox|nox) (-|[^ ]*/|tests?)' && return 1
+  return 0
 }
 ctr_cpu_ok() { # $1 --cpus value; $2 --cpu-quota; $3 --cpu-period. True when 0 < CPUs <= 2.
   guard_run awk 1 -v c="$1" -v q="$2" -v p="${3:-100000}" 'BEGIN { if (c != "") v = c + 0; else if (q != "") v = (q + 0) / (p + 0); else exit 1; exit !(v > 0 && v <= 2) }'
 }
 ctr_mem_ok() { # $1: a --memory value. True when 0 < bytes <= 2g.
   [ -n "$1" ] || return 1
-  printf '%s' "$1" | guard_run awk 1 '{ v = $0; u = tolower(substr(v, length(v))); n = v + 0
+  printf '%s' "$1" | guard_run awk 1 '{ v = $0; sub(/[bB]$/, "", v); if (v == "") exit 1; u = tolower(substr(v, length(v))); n = v + 0
     if (u == "k") n *= 1024; else if (u == "m") n *= 1048576; else if (u == "g") n *= 1073741824
     exit !(v ~ /^[0-9.]+[bkmgBKMG]?$/ && n > 0 && n <= 2147483648) }'
 }
@@ -960,6 +967,9 @@ ctr_judge() { # $@: the words of one invocation
   done
   [ -z "$eng" ] && return 0
   i=$((i + 1))
+  # Review of #198, round 2: /usr/bin/docker or docker.exe is followed by the bare name
+  # normalize() appended; that word is the engine again, not the subcommand.
+  [ "$(ctr_unq "${w[i]:-}")" = "$eng" ] && i=$((i + 1))
   # global options of the engine (and of compose)
   while [ "$i" -lt "$n" ]; do
     a=$(ctr_unq "${w[i]}")
@@ -989,7 +999,7 @@ ctr_judge() { # $@: the words of one invocation
         case "$a" in
           --entrypoint) entry=$(ctr_unq "${w[i+1]:-}"); i=$((i + 2)) ;;
           --entrypoint=*) entry=${a#--entrypoint=}; i=$((i + 1)) ;;
-          -e|--env|-l|--label|--name|-p|--publish|-u|--user|-v|--volume|-w|--workdir|--pull|--cap-add|--cap-drop|--env-file|--index) i=$((i + 2)) ;;
+          -e|--env|-l|--label|--name|-p|--publish|-u|--user|-v|--volume|-w|--workdir|--pull|--cap-add|--cap-drop|--env-file|--env-from-file|--index) i=$((i + 2)) ;;
           -*) i=$((i + 1)) ;;
           *) break ;;
         esac
@@ -997,6 +1007,10 @@ ctr_judge() { # $@: the words of one invocation
       svc=$(ctr_unq "${w[i]:-}"); i=$((i + 1))
       rest=$(ctr_unq "$entry ${w[*]:i}")
       ctr_is_runner "$rest" || return 0
+      # Round 2 backstop: a production service named anywhere among the words after
+      # run|exec, with a runner, is refused even when an option this parser does not know
+      # took the service's place.
+      for a in "${w[@]:i-1}"; do printf '%s' "$(ctr_unq "$a")" | grep -qxE "$prod_svc" && svc=$(ctr_unq "$a"); done
       case "$svc" in *'$'*|*'`'*) block "a test suite in a compose service named by a variable ($svc); it may be a production service. Name the service. $ctr_route" "AIC-3, SC-6, CP-2" ;; esac
       printf '%s' "$svc" | grep -qxE "$prod_svc" \
         && block "running a test suite in a production compose service with $eng ${sub#compose-} ($svc: thehub-backend, thehub-postgres, mykronos-backend). It runs under none of a test container's caps. $ctr_route" "AIC-3, SC-6, CP-2"
@@ -1017,9 +1031,10 @@ ctr_judge() { # $@: the words of one invocation
           --entrypoint=*) entry=${a#*=} ;;
           --entrypoint) entry=$(ctr_unq "${w[i+1]:-}"); i=$((i + 1)) ;;
           --*=*) ;;
-          --rm|--detach|--interactive|--tty|--init|--privileged|--read-only|--publish-all|--no-healthcheck|--oom-kill-disable|--quiet|--sig-proxy|--help) ;;
+          --rm|--detach|--interactive|--tty|--init|--privileged|--read-only|--publish-all|--no-healthcheck|--oom-kill-disable|--quiet|--sig-proxy|--help|--disable-content-trust|--use-api-socket) ;;
           --*) i=$((i + 1)) ;;                              # a long option and its value
           -[ditPq]|-[ditPq][ditPq]|-[ditPq][ditPq][ditPq]) ;;  # flag clusters (-it, -dit)
+          -[ditPq]*[A-Za-z]) i=$((i + 1)) ;;                # a cluster ending in an option that takes a value (-itv /x:/y)
           -?) i=$((i + 1)) ;;                               # a short option and its value
           -*) ;;                                            # a short option with its value attached
           *) break ;;
@@ -1054,6 +1069,11 @@ END {
     if (q != "") { if (c == q) q = ""; else if (c == "\\" && q == "\"" && i < n) tok = tok substr(s, ++i, 1); else tok = tok c; continue }
     if (c == "'" || c == "\"") { q = c; have = 1; continue }
     if (c == "\\" && i < n) { tok = tok substr(s, ++i, 1); have = 1; continue }
+    if (c == "$" && substr(s, i + 1, 1) == "(") {           # $(...) stays inside its word (round 2)
+      d = 0
+      for (; i <= n; i++) { c = substr(s, i, 1); tok = tok c; if (c == "(") d++; else if (c == ")" && --d == 0) break }
+      have = 1; continue
+    }
     if (c == " " || c == "\t") { flush(); continue }
     if (c == "\n" || c == ";" || c == "|" || c == "&" || c == "(" || c == ")" || c == "`") { flush(); print "\001"; continue }
     tok = tok c; have = 1
@@ -1076,7 +1096,7 @@ ctr_guard() { # $1: one view of the command
 cmd="$raw_cmd"; guard
 if [ "$word_cmd" != "$raw_cmd" ]; then cmd="$word_cmd"; guard; fi
 if [ "$ps_cmd" != "$raw_cmd" ] && [ "$ps_cmd" != "$word_cmd" ]; then cmd="$ps_cmd"; guard; fi
-if g "$B"'(docker|podman|nerdctl|docker-compose|podman-compose)([[:space:]]|$)' || [ "$ps_cmd" != "$raw_cmd" ]; then
+if g '(^|[^A-Za-z0-9_.-])(docker|podman|nerdctl|docker-compose|podman-compose)([.][Ee][Xx][Ee])?([[:space:]]|$)' || [ "$ps_cmd" != "$raw_cmd" ]; then
   ctr_guard "$masked_cmd"
   [ "$ps_cmd" != "$raw_cmd" ] && ctr_guard "$ps_cmd"
 fi

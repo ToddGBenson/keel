@@ -568,6 +568,17 @@ check "docker run, --memory \"2g\" quoted"    allow "$(payload 'docker run --rm 
 check "docker run, --cpu-quota cap"          allow "$(payload 'docker run --rm --cpu-quota 200000 -m 2g python:3.12 pytest')" guard-bash.sh
 check "docker run pip install pytest"        allow "$(payload 'docker run --rm python:3.12 pip install pytest')"         guard-bash.sh
 check "docker run -w /opt/tox"               allow "$(payload 'docker run --rm -w /opt/tox alpine ls')"                  guard-bash.sh
+# Review of #198, round 2: the engine by path, a runner after a wrapper or inside sh -c, $(...).
+check "/usr/bin/docker compose exec backend" block "$(payload '/usr/bin/docker compose exec backend pytest')"        guard-bash.sh
+check "compose exec backend sh -c 'pytest'" block "$(payload "docker compose exec backend sh -c 'pytest'")"         guard-bash.sh
+check "compose exec backend timeout pytest" block "$(payload 'docker compose exec backend timeout 600 pytest -q')"  guard-bash.sh
+check "compose exec backend uv run pytest"  block "$(payload 'docker compose exec backend uv run pytest')"          guard-bash.sh
+check "compose exec -w \$(pwd) backend"      block "$(payload 'docker compose exec -w $(pwd) backend pytest')"       guard-bash.sh
+check "docker.exe run, uncapped"            block "$(payload 'docker.exe run --rm python:3.12 pytest')"             guard-bash.sh
+check "docker run sh -c 'pytest', uncapped" block "$(payload "docker run --rm python:3.12 sh -c 'pytest -q'")"     guard-bash.sh
+check "docker run -v \$(pwd), uncapped"      block "$(payload 'docker run --rm -v $(pwd):/app -w /app python:3.12 pytest')" guard-bash.sh
+check "docker run -m 2gb, capped"           allow "$(payload 'docker run --rm --cpus 2 -m 2gb python:3.12 pytest')"  guard-bash.sh
+check "docker build -t pytest"              allow "$(payload 'docker build -t pytest .')"                           guard-bash.sh
 echo ""
 echo "guard-write.sh — must BLOCK (AU-9, AIC-5)"
 check "hand-edit generated SARIF" block "$(wpayload 'evidence/142/g4/scan.sarif' 'x')"    guard-write.sh

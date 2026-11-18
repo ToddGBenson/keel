@@ -66,6 +66,28 @@ verdict: pass
   both tools: 71 checks, 0 wrong. Corpus KB-270..272 (two Get-Command forms and the alias); corpus
   812 runs, 0 failed.
 
+## Review round 2 (Fable 5.2 on e2b66c7 / bcb68bf, BLOCK; the PO's last full round)
+
+- **The regression against main:** 15 inputs to the #61385 compose-exec rule that main blocks passed
+  at e2b66c7.
+  - **(a) An engine by path or `.exe`:** the bare name normalize() appends was read as the
+    subcommand. The judge now skips it, and the engine pre-check matches after a `/` as well.
+  - **(b, c) A runner inside `sh -c`, or after a wrapper** (timeout, env, uv run, coverage run,
+    `python -X dev -m`): the runner now counts anywhere among the command's words, as main's rule
+    effectively read it. A package being installed (`pip install pytest`) is still not a run.
+  - **(d) An unquoted `$(...)`:** it stays inside its word.
+  - **A backstop:** a production service named anywhere after compose run/exec, with a runner,
+    is refused even when an option this parser does not know (e.g. `--env-from-file x`) took the
+    service's place.
+- **The run-cap rule had the same causes,** with the same fixes. `--disable-content-trust` and
+  `--use-api-socket` are flags; `-itv /a:/b` takes its value; `-m 2gb` is accepted.
+- **Red at e2b66c7:** selftest 363 passed, 9 failed. **Green:** 372 / 0. The review's round-1 and
+  round-2 inputs, through both tools: 72 checks, 0 wrong.
+- **Interaction:** #199 (TheHub #62031) adds a tokenizer to guard-bash.sh too. Whichever merges
+  second reconciles the two into one shared tokenizer.
+- **Documented gaps (unchanged on main):** PowerShell splatting (`docker @a`), Start-Process docker
+  -ArgumentList, `run -d` then `exec`, and `create` then `start`.
+
 ## Not verified
 
 - Git Bash on Windows was not run.
