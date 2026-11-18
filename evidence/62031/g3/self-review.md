@@ -1,7 +1,7 @@
 # Self-review — TheHub #62031 (main through a refspec, a + force push, commit -n)
 
 Mode: solo (POAM-008); agent self-review, pending the independent review before merge
-PR: (set when opened)   Author: Claude Opus 5.5 on the Linux runner laptop (AI-authored)   Date: 2026-11-18
+PR: #199   Author: Claude Opus 5.5 on the Linux runner laptop (AI-authored)   Date: 2026-11-18
 verdict: pass
 
 guard-bash.sh's push-to-main rule knew one shape: `git push [origin] [HEAD:]main`. With
