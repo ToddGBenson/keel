@@ -45,9 +45,12 @@ def check(name, cond, detail=""):
         failures.append(name)
 
 
-def git(*args, cwd):
+def git(*args, cwd, env=None):
     return subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True,
-                          text=True).stdout.strip()
+                          text=True, env=env).stdout.strip()
+
+
+CLOCK = [1_700_000_000]  # fixture commits get distinct, increasing committer times (TheHub #62064)
 
 
 class Origin:
@@ -64,15 +67,18 @@ class Origin:
         git("init", "-q", "--bare", str(self.bare), cwd=tmp)
         git("push", "-q", str(self.bare), "main", cwd=self.work)
 
-    def commit(self, msg):
+    def commit(self, msg, when=None):
         (self.work / "f.txt").write_text(msg + "\n")
         git("add", "f.txt", cwd=self.work)
-        git("commit", "-q", "-m", msg, cwd=self.work)
+        CLOCK[0] += 60
+        stamp = f"@{when if when is not None else CLOCK[0]} +0000"
+        git("commit", "-q", "-m", msg, cwd=self.work,
+            env={**os.environ, "GIT_COMMITTER_DATE": stamp, "GIT_AUTHOR_DATE": stamp})
         return git("rev-parse", "HEAD", cwd=self.work)
 
-    def branch(self, name, msg):
+    def branch(self, name, msg, when=None):
         git("checkout", "-q", "-B", name, "main", cwd=self.work)
-        sha = self.commit(msg)
+        sha = self.commit(msg, when)
         git("push", "-q", "-f", str(self.bare), f"{name}:refs/heads/{name}", cwd=self.work)
         git("checkout", "-q", "main", cwd=self.work)
         return sha
@@ -146,7 +152,7 @@ def main():
         print("which heads")
         r, pr, starts, sha_file = pick(o, tmp)
         asked = [s["commit_sha"] for s in starts]
-        check("the newest open same-repo head is judged first", r.returncode == 0 and asked == [b],
+        check("the OLDEST open same-repo head is judged first (TheHub #62064)", r.returncode == 0 and asked == [a],
               f"rc={r.returncode} asked={asked}\n{r.stdout}{r.stderr}")
         check("a fork's head is never asked about", fork not in asked)
         check("a closed pull request (no merge ref) is never asked about", closed not in asked)
@@ -155,22 +161,22 @@ def main():
               and starts[0]["phase"] == "start" and starts[0]["conclusion"] is None
               and starts[0]["repo_full_name"] == "ToddGBenson/keel", starts)
         head = (pr / ".git" / "HEAD").read_text().strip() if (pr / ".git" / "HEAD").exists() else ""
-        check("the picked head is checked out detached, so check-run.sh reads its sha", head == b, head)
+        check("the picked head is checked out detached, so check-run.sh reads its sha", head == a, head)
         check("pr/.pr names the pull request, sha and branch",
-              (pr / ".pr").exists() and (pr / ".pr").read_text().split() == ["12", b, "feat-b"])
+              (pr / ".pr").exists() and (pr / ".pr").read_text().split() == ["11", a, "feat-a"])
         check("nothing judged is marked .none", not (pr / ".none").exists())
         check("pr-sha/HEAD holds the head's sha alone, for the end report (review #1)",
-              sha_file.exists() and sha_file.read_text().strip() == b)
+              sha_file.exists() and sha_file.read_text().strip() == a)
 
         print("once per head")
-        r, pr, starts, sha_file = pick(o, tmp, {b: done()})
+        r, pr, starts, sha_file = pick(o, tmp, {a: done()})
         asked = [s["commit_sha"] for s in starts]
         check("a head with a completed check is skipped and the next one judged",
-              r.returncode == 0 and asked == [b, a]
-              and (pr / ".git" / "HEAD").read_text().strip() == a, f"{asked}\n{r.stdout}{r.stderr}")
-        r, pr, starts, sha_file = pick(o, tmp, {b: done("in_progress", None)})
+              r.returncode == 0 and asked == [a, b]
+              and (pr / ".git" / "HEAD").read_text().strip() == b, f"{asked}\n{r.stdout}{r.stderr}")
+        r, pr, starts, sha_file = pick(o, tmp, {a: done("in_progress", None)})
         check("a head whose check is still in progress (a run that died) is judged again",
-              r.returncode == 0 and (pr / ".git" / "HEAD").read_text().strip() == b, r.stdout + r.stderr)
+              r.returncode == 0 and (pr / ".git" / "HEAD").read_text().strip() == a, r.stdout + r.stderr)
         r, pr, starts, sha_file = pick(o, tmp, {b: done(), a: done(conclusion="failure")})
         check("every head judged: a pass that marks pr/.none and checks nothing out",
               r.returncode == 0 and (pr / ".none").exists() and not (pr / ".git").exists(),
@@ -180,8 +186,25 @@ def main():
         check("at most PR_PICK_LIMIT starts per run", len(starts) == 1 and (pr / ".none").exists(),
               f"{len(starts)} starts")
 
+        print("oldest head first (TheHub #62064)")
+        # A newer push to a higher-numbered pull request does not jump the queue.
+        b2 = o.branch("feat-b", "b, pushed again")
+        o.pull(12, b2)
+        r, pr, starts, sha_file = pick(o, tmp)
+        asked = [s["commit_sha"] for s in starts]
+        check("a newer push to #12 does not jump ahead of #11's older unjudged head",
+              r.returncode == 0 and asked == [a], f"{asked}\n{r.stdout}{r.stderr}")
+        # An old head on a high-numbered pull request beats a newer head on a lower one.
+        old = o.branch("feat-old", "an old head", when=1_600_000_000)
+        o.pull(20, old)
+        r, pr, starts, sha_file = pick(o, tmp)
+        asked = [s["commit_sha"] for s in starts]
+        check("the head that has waited longest is judged first, whatever its PR number",
+              r.returncode == 0 and asked == [old] and (pr / ".pr").read_text().split()[0] == "20",
+              f"{asked}\n{r.stdout}{r.stderr}")
+
         print("refusals")
-        r, pr, _, sha_file = pick(o, tmp, {b: {"detail": "This token is scoped to another repo"}})
+        r, pr, _, sha_file = pick(o, tmp, {old: {"detail": "This token is scoped to another repo"}})  # the head asked first
         check("an answer that is not created/updated/unchanged fails the step",
               r.returncode != 0 and not (pr / ".pr").exists() and not sha_file.exists(),
               r.stdout + r.stderr)
