@@ -77,9 +77,12 @@ HOOKS = ROOT / ".claude" / "hooks"
 # The only jq filters the hooks use. Anything else is refused by the shim.
 JQ_FILTERS = {
     ".tool_input.command // empty": lambda ti: ti.get("command"),
-    ".tool_input.file_path // empty": lambda ti: ti.get("file_path"),
-    '(.tool_input.content // .tool_input.new_string // "")':
-        lambda ti: ti.get("content") or ti.get("new_string") or "",
+    ".tool_input.file_path // .tool_input.notebook_path // empty":
+        lambda ti: ti.get("file_path") or ti.get("notebook_path"),
+    '[.tool_input.content, .tool_input.new_string, .tool_input.new_source, (.tool_input.edits // [] | .[]? | .new_string?)] | map(select(type == "string")) | join("\\n")':
+        lambda ti: "\n".join(s for s in [ti.get("content"), ti.get("new_string"), ti.get("new_source")]
+                             + [e.get("new_string") for e in (ti.get("edits") or []) if isinstance(e, dict)]
+                             if isinstance(s, str)),
 }
 MODES = ("jq", "no-jq")
 HOOK_NAMES = ("guard-bash.sh", "guard-write.sh")
@@ -175,20 +178,25 @@ def matcher_covers(matcher: str, tool: str) -> bool:
 
 
 def binding_errors() -> list[str]:
-    """guard-bash.sh must be bound to every tool in BASH_TOOLS (TheHub #61064)."""
+    """guard-bash.sh must be bound to every tool in BASH_TOOLS (TheHub #61064), and
+    guard-write.sh to every tool in WRITE_TOOLS (TheHub #61391)."""
     try:
         settings = json.loads(SETTINGS.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         return [f"{SETTINGS.name}: cannot read it ({exc})"]
-    bound: list[str] = []
-    for group in (settings.get("hooks") or {}).get("PreToolUse") or []:
-        if any("guard-bash.sh" in (h.get("command") or "") for h in group.get("hooks") or []):
-            bound.append(group.get("matcher", ""))
-    if not bound:
-        return [f"{SETTINGS.name}: no PreToolUse hook runs guard-bash.sh"]
-    return [f"{SETTINGS.name}: guard-bash.sh is not bound to the {tool} tool "
-            f"(matchers: {bound!r}); a {tool} command reaches no rule"
-            for tool in BASH_TOOLS if not any(matcher_covers(m, tool) for m in bound)]
+    errors: list[str] = []
+    for hook, tools, what in (("guard-bash.sh", BASH_TOOLS, "command"), ("guard-write.sh", WRITE_TOOLS, "write")):
+        bound: list[str] = []
+        for group in (settings.get("hooks") or {}).get("PreToolUse") or []:
+            if any(hook in (h.get("command") or "") for h in group.get("hooks") or []):
+                bound.append(group.get("matcher", ""))
+        if not bound:
+            errors.append(f"{SETTINGS.name}: no PreToolUse hook runs {hook}")
+            continue
+        errors += [f"{SETTINGS.name}: {hook} is not bound to the {tool} tool "
+                   f"(matchers: {bound!r}); a {tool} {what} reaches no rule"
+                   for tool in tools if not any(matcher_covers(m, tool) for m in bound)]
+    return errors
 
 
 def runs(entries: list[dict]) -> list[tuple[dict, str]]:
