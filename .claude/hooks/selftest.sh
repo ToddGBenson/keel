@@ -556,6 +556,21 @@ check "evidence, ./ and // segments"     block "$(wpayload './evidence/./142//g4
 check "evidence\\ narrative (.md)"        allow "$(wpayload 'evidence\\142\\g4\\verify.md' 'Verified.')"     guard-write.sh
 check "Evidence narrative (.MD)"         allow "$(wpayload 'Evidence/142/g4/verify.MD' 'Verified.')"       guard-write.sh
 check "a file merely named evidence"     allow "$(wpayload 'docs/evidence-model.md' 'x')"                    guard-write.sh
+# Review of #197/#91: the spellings the first round still missed, and the payload's cwd.
+cwpayload() { # $1 = path, $2 = content, $3 = cwd
+  esc=$(printf '%s' "$2" | sed 's/\\/\\\\/g; s/"/\\"/g'); p=$(printf '%s' "$1" | sed 's/\\/\\\\/g'); c=$(printf '%s' "$3" | sed 's/\\/\\\\/g')
+  printf '{"cwd":"%s","tool_input":{"file_path":"%s","content":"%s"}}' "$c" "$p" "$esc"
+}
+check "evidence, drive-relative C:evidence\\"  block "$(cwpayload 'C:evidence\142\g4\a.sarif' 'x' 'C:\repo')"        guard-write.sh
+check "evidence, a ::\$INDEX_ALLOCATION stream" block "$(wpayload 'evidence::$INDEX_ALLOCATION/142/g4/a.sarif' 'x')" guard-write.sh
+check "evidence, a :\$I30 stream"             block "$(wpayload 'evidence:$I30:$INDEX_ALLOCATION/142/g4/a.sarif' 'x')" guard-write.sh
+check "evidence, a trailing dot"              block "$(wpayload 'evidence./142/g4/a.sarif' 'x')"                   guard-write.sh
+check "evidence, a trailing space"            block "$(wpayload 'evidence /142/g4/a.sarif' 'x')"                   guard-write.sh
+check "relative, cwd inside evidence/"        block "$(cwpayload '142/g4/a.sarif' 'x' '/repo/evidence')"            guard-write.sh
+check "relative, cwd inside Evidence\\ (Windows)" block "$(cwpayload '142\g4\a.sarif' 'x' 'C:\repo\Evidence')"     guard-write.sh
+check "out of evidence via .., from its cwd"  allow "$(cwpayload '../src/a.py' 'x = 1' '/repo/evidence')"            guard-write.sh
+check "evidence/../src, resolved"             allow "$(wpayload 'evidence/../src/a.py' 'x = 1')"                  guard-write.sh
+check "into evidence via .."                  block "$(wpayload 'src/../evidence/142/a.sarif' 'x')"                guard-write.sh
 
 echo ""
 echo "──────────────────────────────────────────────────────────────"

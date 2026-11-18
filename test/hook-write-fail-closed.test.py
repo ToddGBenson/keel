@@ -38,7 +38,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 HOOK = ROOT / ".claude" / "hooks" / "guard-write.sh"
 # The tools guard-write.sh runs, and what the shims and the test need around them.
-TOOLS = ("bash", "sh", "cat", "grep", "mktemp", "rm", "python3", "python", "env", "jq", "tr")
+TOOLS = ("bash", "sh", "cat", "grep", "mktemp", "rm", "python3", "python", "env", "jq")
 # Helpers the hook reads the payload or the content with.
 FAULTY = ("grep", "cat", "jq", "python3")
 # Credential-shaped values are built from parts so that this file holds no contiguous

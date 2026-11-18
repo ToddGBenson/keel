@@ -12,32 +12,49 @@ sprint.
 
 ## The change
 
-- **One normalised spelling.** The path is judged as `npath`: backslashes become slashes, case is
-  lowered, repeated slashes and `./` segments collapse, and a leading `./` is dropped.
-- **Lower-casing uses `tr`**, through a new wrapper so a failing `tr` is a fault, not `${x,,}`. bash
-  3.2 (macOS) has no `${x,,}`, and the hook would crash there, refusing every write.
-- **The high-consequence notices** (workflows, hooks, gates, compliance) read the same spelling.
-- test/hook-write-fail-closed.test.py lists `tr` among the tools the hook runs.
+- **One normalised path, rebuilt segment by segment with builtins only:**
+  - backslashes become slashes;
+  - a relative path is joined to the payload's `cwd`;
+  - a drive-relative `C:` prefix is dropped;
+  - per segment, everything from the first `:` is dropped (an NTFS stream such as `::$INDEX_ALLOCATION`
+    or `:$I30`), trailing dots and spaces are trimmed, `.` is skipped and `..` is resolved.
+- **Case is ignored by the matches** (`shopt -s nocasematch`, bash 3.1 and later) rather than by
+  rewriting the path. No external tool is involved, so a planted `tr` or other helper cannot change
+  the answer. This replaces round 0's `tr` wrapper (review findings 5 and 6).
+- **The high-consequence notices** read the same path, so a relative `.github/workflows/...` now
+  gets its notice too.
+- **The payload's `cwd`** is read by both parsers (jq and python).
 
 ## Verified independently
 
-- **Red first:** 8 new selftest cases against main bd2ef2f's guard-write.sh. Of the 5 must-block
-  cases, 4 were ALLOWED: backslashes, a Windows drive path, `Evidence/`, and `EVIDENCE/`. The `./`
-  and `//` case was already blocked, because `*/evidence/*` matched it. The 3 must-allow cases passed:
-  a backslashed `.md`, a capitalised `.MD`, and `docs/evidence-model.md`.
-- **Green after:** selftest 338 passed / 0 failed. hook-write-fail-closed all passed. Bypass corpus
+- **Red first, round 0:** of the first 8 cases, 4 failed against main bd2ef2f. Backslashes, a Windows
+  drive path, `Evidence/` and `EVIDENCE/` were ALLOWED.
+- **Red first, round 1** (review of #197/#91; the exact inputs are in the binnacle comment): 10 more
+  cases against the reviewed head a04095b. 8 failed. These were ALLOWED: drive-relative
+  `C:evidence\...`, `evidence::$INDEX_ALLOCATION/...`, `evidence:$I30:$INDEX_ALLOCATION/...`, a trailing
+  dot, a trailing space, a relative path from a cwd inside `evidence/`, and the same with a Windows cwd
+  `C:\repo\Evidence`. And `evidence/../src/a.py` was falsely blocked.
+- **Green after:** selftest 348 passed / 0 failed. hook-write-fail-closed all passed. Bypass corpus
   224 entries, 804 runs, 0 failed.
 - `./keel check` green in a capped python:3.12-slim container. shellcheck v0.10.0 `-S warning`
   clean. Pinned gitleaks v8.18.4: no leaks.
 
 ## Not verified
 
-- Git Bash on Windows was not run. A Windows path reaches the hook as the tool sends it. The
-  normalisation does not depend on the shell.
-- Not covered: an 8.3 short name (`EVIDE~1`), a path through a symlink or junction, and a `..` that
-  climbs back into evidence/ from outside (`src/../evidence/x`). That last one already contains
-  `/evidence/`, so it is caught. NotebookEdit and MultiEdit reach this rule once #195 is on main; it
-  reads the same `path`.
+- Git Bash on Windows was not run here. The review ran round 0 there and confirmed each blocked
+  spelling resolves to the same file through Node's `fs.statSync`.
+- **Corrected "not covered" note** (review finding 7): `evidence` is eight characters, so it has no
+  8.3 alias. The round-0 note was wrong. The real gaps of round 0 were the spellings above, which
+  this round closes.
+- **Still not covered:**
+  - a path through a symlink or junction into evidence/;
+  - a `cwd` that the payload does not carry (the path is judged as given);
+  - a relative path when the agent has `cd`ed and the payload's cwd is stale.
+- NotebookEdit and MultiEdit paths reach this rule through `notebook_path` once #195/#89 is on main.
+  Until then those paths are not read. selftest.sh conflicts with #195/#89, so whichever merges
+  second rebases.
+- **The false positive is wider, in the safe direction:** `Evidence/` anywhere on disk is treated as
+  evidence, including on case-sensitive Linux, where it is a different directory.
 
 ## Residual risk accepted
 

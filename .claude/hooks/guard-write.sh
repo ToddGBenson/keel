@@ -60,7 +60,6 @@ grep() { # -q (and --quiet/--silent) dropped, output discarded: grep reads all i
 }
 # shellcheck disable=SC2120  # called with no arguments here (payload="$(cat)"); kept general like guard-bash.sh's
 cat()     { guard_run cat 0 "$@"; }
-tr()      { guard_run tr 0 "$@"; }
 jq()      { guard_run jq 0 "$@"; }
 python3() { guard_run python3 0 "$@"; }
 python()  { guard_run python 0 "$@"; }
@@ -104,11 +103,13 @@ payload="$(cat)"
 # `command -v` would report them even where no binary exists (TheHub #61794).
 if type -P jq >/dev/null 2>&1; then
   path="$(printf '%s' "$payload" | jq -r '.tool_input.file_path // empty')"
+  pcwd="$(printf '%s' "$payload" | jq -r '.cwd // empty')"
   content="$(printf '%s' "$payload" | jq -r '(.tool_input.content // .tool_input.new_string // "")')"
 elif type -P python3 >/dev/null 2>&1 || type -P python >/dev/null 2>&1; then
   # The wrapper's name, not a path, so a failing interpreter is recorded as a fault.
   PY=python3; type -P python3 >/dev/null 2>&1 || PY=python
   path="$(printf '%s' "$payload" | "$PY" -c 'import sys,json;d=json.load(sys.stdin);print(d.get("tool_input",{}).get("file_path",""))' 2>/dev/null)"
+  pcwd="$(printf '%s' "$payload" | "$PY" -c 'import sys,json;print(json.load(sys.stdin).get("cwd") or "")' 2>/dev/null)"
   content="$(printf '%s' "$payload" | "$PY" -c 'import sys,json;d=json.load(sys.stdin);t=d.get("tool_input",{});print(t.get("content") or t.get("new_string") or "")' 2>/dev/null)"
 else
   # No reliable parser. Fail OPEN on content scanning rather than blocking all edits,
@@ -135,13 +136,45 @@ warn() { echo "WARNING  $1" >&2; }
 # TheHub #62022: judge the path the way the file system will resolve it. On Windows a path
 # takes backslashes and its case is ignored, so evidence\142\x.sarif and Evidence/x.sarif
 # are the same file as evidence/x.sarif, and the rule (forward slashes, lower case) let them
-# through on every write tool. One normalised spelling: backslashes as slashes, lower case,
-# repeated slashes and ./ segments collapsed. tr, not ${x,,}, so bash 3.2 (macOS) runs it.
-npath=${path//\\//}
-npath="$(printf '%s' "$npath" | LC_ALL=C tr 'A-Z' 'a-z')"
-while case "$npath" in *//*) true ;; *) false ;; esac; do npath=${npath//\/\//\/}; done
-while case "$npath" in */./*) true ;; *) false ;; esac; do npath=${npath//\/.\//\/}; done
-npath=${npath#./}
+# through on every write tool. The review of #197 found more spellings of the same file:
+# a drive-relative C:evidence\..., an NTFS stream suffix on a segment (evidence::$INDEX_
+# ALLOCATION/...), and a trailing dot or space on a segment (evidence./...). A relative
+# path is also resolved against the payload's cwd: 142/x.sarif from inside evidence/ is
+# evidence. So the path is rebuilt segment by segment, with builtins only:
+#   backslashes as slashes; a relative path joined to the payload's cwd; a drive-relative
+#   "C:" prefix dropped; per segment, everything from the first ":" dropped (a stream),
+#   trailing dots and spaces trimmed, "." skipped and ".." resolved.
+# Case is ignored by the matches below (nocasematch), not by rewriting the path: no
+# external tool, so nothing planted on PATH can change the answer.
+guard_slash() { local s=${1//\\//}; printf '%s' "$s"; }
+npath=$(guard_slash "$path")
+pcwd=$(guard_slash "${pcwd:-}")
+case "$npath" in
+  /*|[A-Za-z]:/*) ;;                                     # absolute
+  [A-Za-z]:*) npath=${npath:2}; [ -n "$pcwd" ] && npath="$pcwd/$npath" ;;  # drive-relative
+  *) [ -n "$pcwd" ] && npath="$pcwd/$npath" ;;           # relative to the cwd
+esac
+guard_segs=() guard_lead=""
+case "$npath" in /*) guard_lead="/" ;; esac
+IFS='/' read -r -a guard_parts <<< "$npath"
+for guard_seg in "${guard_parts[@]}"; do
+  if [ "${#guard_segs[@]}" -eq 0 ] && [ -z "$guard_lead" ] && case "$guard_seg" in [A-Za-z]:) true ;; *) false ;; esac; then
+    guard_segs+=("$guard_seg"); continue                  # a drive, C:
+  fi
+  guard_seg=${guard_seg%%:*}                               # an NTFS stream suffix
+  while case "$guard_seg" in *[.\ ]) [ "$guard_seg" != "." ] && [ "$guard_seg" != ".." ] ;; *) false ;; esac; do
+    guard_seg=${guard_seg%?}                               # trailing dots and spaces
+  done
+  case "$guard_seg" in
+    ""|.) ;;
+    ..) if [ "${#guard_segs[@]}" -gt 0 ] && [ "${guard_segs[${#guard_segs[@]}-1]}" != ".." ]; then
+          unset 'guard_segs[${#guard_segs[@]}-1]'; guard_segs=("${guard_segs[@]}")
+        else guard_segs+=(".."); fi ;;
+    *) guard_segs+=("$guard_seg") ;;
+  esac
+done
+npath="$guard_lead$(IFS=/; printf '%s' "${guard_segs[*]}")"
+shopt -s nocasematch
 
 case "$npath" in
   */evidence/*|evidence/*)
@@ -191,5 +224,6 @@ case "$npath" in
   */docs/compliance/*)
     warn "Editing compliance material. Control claims must be backed by evidence that actually supports them — never mark a control satisfied to unblock work (PD-7)." ;;
 esac
+shopt -u nocasematch
 
 exit 0
