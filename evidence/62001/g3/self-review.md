@@ -1,7 +1,7 @@
 # Self-review — TheHub #62001 (the compliance and process docs state main's protection as it is)
 
 Mode: solo (POAM-008); agent self-review, pending the independent review before merge
-PR: (set when opened)   Author: Claude Opus 5.5 on the Linux runner laptop (AI-authored)   Date: 2026-11-18
+PR: #200   Author: Claude Opus 5.5 on the Linux runner laptop (AI-authored)   Date: 2026-11-18
 verdict: pass
 
 The docs claimed branch protection that is not in force: `enforce_admins: true`, signed commits,
