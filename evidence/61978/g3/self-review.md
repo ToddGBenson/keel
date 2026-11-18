@@ -1,7 +1,7 @@
 # Self-review — TheHub #61978 (b, c) and #62016 (both parsers give the same verdict)
 
 Mode: solo (POAM-008); agent self-review, pending the independent review before merge
-PR: (set when opened)   Author: Claude Opus 5.5 on the Linux runner laptop (AI-authored)   Date: 2026-11-18
+PR: #196   Author: Claude Opus 5.5 on the Linux runner laptop (AI-authored)   Date: 2026-11-18
 verdict: pass
 
 Part (a), pinning guard-write.sh's PATH, waits for #189 (TheHub #61843) and is not in this change.
