@@ -64,8 +64,8 @@ detected at review, not prevented at the tool layer. Do not read it as a control
 
 | Boundary | Enforcement | Status |
 |---|---|---|
-| Cannot approve a PR | `guard-bash.sh` + branch protection | **Enforced** |
-| Cannot merge, force-push, or push to `main` | `guard-bash.sh` + branch protection | **Enforced** |
+| Cannot approve a PR | `guard-bash.sh` (a denylist over command text); branch protection does not back it today | ⚠️ **Hook-enforced** until agents have their own GitHub identity (TheHub #61039) |
+| Cannot merge, force-push, or push to `main` | `guard-bash.sh` (a denylist over command text); branch protection binds non-admin identities only | ⚠️ **Hook-enforced** until agents have their own GitHub identity (TheHub #61039) |
 | Cannot touch production or handle secrets | `guard-bash.sh` + `settings.json` deny rules | **Enforced** |
 | **Restricted to its expected write scope** | Role prompt only | ⚠️ **Prompt-enforced** |
 

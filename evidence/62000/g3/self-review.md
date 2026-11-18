@@ -3,7 +3,8 @@
 Mode: solo (POAM-008); agent self-review, pending the independent review before merge
 PR: #191   Author: Claude Sonnet 5.5 (AI-authored)   Date: 2026-11-18
 verdict: pass
-Opened: 2026-11-18 02:24 UTC   Reviewed: 2026-11-18 02:40 UTC (fix round)   Cooling-off: none, 16 minutes (same session; the independent review is the compensating read)
+Opened: 2026-11-18 02:24:58 UTC (first commit; PR opened 02:25:12Z)   Reviewed: first self-review at the round-1 fix commit 02:32:21Z; this record last updated for round 2 at 02:43:13 UTC
+Cooling-off: none (same session). Measured: round-1 independent review posted 02:29:25Z, round-1 fix commit 02:32:21Z (about 3 minutes later), round-2 independent review posted 02:40:34Z, round-2 fix written at 02:43:13 UTC (about 18 minutes after the first commit). The independent review is the compensating read.
 
 Docs only. `docs/11-ai-agent-controls.md` listed each hook rule as "Hook-enforced: a denylist
 over command text" but never said plainly, before the table, that a hook can be re-worded around
@@ -14,6 +15,25 @@ later (TheHub #60944), and meanwhile say the hooks are best-effort.
 The first head (05c1422) replaced one overclaim with another: it named branch protection, a
 sandbox and least-privilege credentials as the boundary. The independent review blocked it
 because none of the three holds as stated today. This record covers the fix round.
+
+Round 2: the second independent review (Opus, on head 0845f3f) blocked on three points, fixed
+here with new commits. B1: the tool grant was called "the one column that limits what the
+agent can attempt", and AIC-2 said `developer` has no approval capability and `product-owner`
+cannot write source. Read from `.claude/agents/*.md`, 14 of 15 agents are granted `Bash` (only
+`ux` is not), `Bash` runs `gh`, and `developer` and `product-owner` both have `Bash` and
+`Write`/`Edit`, so the claim was false; the sentence, the AIC-2 parenthetical and the AIC-2 and
+AIC-3 approve/merge/push tool-grant marks now say so. Nits N1-N4 applied. B2: the timestamps
+on this record were wrong (a review time later than the commit that holds it); they are now
+the measured ones above, from `git log` and the GitHub API. B3: `docs/compliance/ai-inventory.md`
+marked "Cannot approve a PR" and "Cannot merge, force-push, or push to `main`" as Enforced by
+`guard-bash.sh` + branch protection; those two status cells now agree with `docs/11`
+(Hook-enforced, a denylist over command text, until agents have their own GitHub identity,
+TheHub #61039). Nothing else in that file changed. Files that read `ai-inventory.md`:
+`test/agent-evals-record.test.py` (AIC-12 paragraph only) and `scripts/validate-platform.py`
+(the agent table in section B, which was not touched); both re-run, exit codes in the PR body.
+Follow-ups F1-F5 from that review (stale `enforce_admins` claims in docs/13, the CIS and NIST
+maps, AIC-10 signed commits, the AC-5 assessment test) are not fixed here; the PO files them
+under TheHub #62001.
 
 ## The change
 
