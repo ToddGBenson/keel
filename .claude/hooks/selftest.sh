@@ -530,6 +530,26 @@ check "pytest in another container"   allow "$(payload 'docker exec thehub-test-
 check "capped test container"         allow "$(payload 'docker run --rm --cpus 2 --memory 2g python:3.12 pytest')"    guard-bash.sh
 check "exec, then pytest on the host" allow "$(payload 'docker exec thehub-backend cat /proc/meminfo; pytest -q')"    guard-bash.sh
 echo ""
+echo "guard-bash.sh — a binary name is added, never substituted (TheHub #61987)"
+# normalize() rewrote any word whose last path segment is gh, git, curl or docker to the bare
+# name, so an endpoint ending in /gh lost its path and the contents rule never saw it.
+check "contents commit, endpoint ends /gh"   block "$(payload 'gh api -X PUT repos/O/R/contents/bin/gh -f message=x -f content=eA==')" guard-bash.sh
+check "contents commit, quoted .../git"      block "$(payload "gh api -X PUT 'repos/O/R/contents/tools/git' -f message=x -f content=eA==")" guard-bash.sh
+check "curl contents commit, URL ends /curl" block "$(payload "curl -X PUT -H 'Authorization: token t' https://api.github.com/repos/O/R/contents/vendor/curl -d '{\"message\":\"x\",\"content\":\"eA==\"}'")" guard-bash.sh
+check "a wrapper outside any list"           block "$(payload 'timeout 5 /usr/bin/gh pr merge 12')"                         guard-bash.sh
+check "gh.exe by Windows path"               block "$(payload '"C:\Program Files\GitHub CLI\gh.exe" pr merge 12')"          guard-bash.sh
+check "contents read, endpoint ends /gh"     allow "$(payload 'gh api repos/O/R/contents/bin/gh')"                           guard-bash.sh
+echo ""
+echo "guard-bash.sh — compose run and an uncapped docker run (TheHub #61987)"
+check "compose run backend pytest"           block "$(payload 'docker compose run --rm backend pytest')"                    guard-bash.sh
+check "docker-compose run postgres tox"      block "$(payload 'docker-compose run postgres tox')"                           guard-bash.sh
+check "docker run pytest, no caps"           block "$(payload 'docker run --rm python:3.12 pytest')"                        guard-bash.sh
+check "docker run pytest, cpus only"         block "$(payload 'docker run --rm --cpus 2 python:3.12 python -m pytest')"     guard-bash.sh
+check "docker run pytest, capped"            allow "$(payload 'docker run --rm --cpus 2 --memory 2g python:3.12 pytest')"   guard-bash.sh
+check "docker run pytest, capped, -m/="      allow "$(payload 'docker run --rm --cpus=2 -m 2g python:3.12 pytest')"         guard-bash.sh
+check "compose run backend-staging pytest"   allow "$(payload 'docker compose run backend-staging pytest')"                 guard-bash.sh
+check "docker run, no runner"                allow "$(payload 'docker run --rm alpine cat /etc/os-release')"                guard-bash.sh
+echo ""
 echo "guard-write.sh — must BLOCK (AU-9, AIC-5)"
 check "hand-edit generated SARIF" block "$(wpayload 'evidence/142/g4/scan.sarif' 'x')"    guard-write.sh
 check "hand-edit generated XML"   block "$(wpayload 'evidence/142/g4/results.xml' 'x')"   guard-write.sh

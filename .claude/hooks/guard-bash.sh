@@ -172,9 +172,16 @@ norm=()
 for pair in 'gh:[Gg][Hh]' 'git:[Gg][Ii][Tt]' 'curl:[Cc][Uu][Rr][Ll]' 'docker:[Dd][Oo][Cc][Kk][Ee][Rr]' \
             'docker-compose:[Dd][Oo][Cc][Kk][Ee][Rr]-[Cc][Oo][Mm][Pp][Oo][Ss][Ee]'; do
   name=${pair%%:*}; pat=${pair#*:}
-  norm+=(-e 's#"([^"]*[/\\])?'"$pat"'(\.[Ee][Xx][Ee])?"#'"$name"'#g'
-         -e "s#'([^']*[/\\\\])?$pat(\\.[Ee][Xx][Ee])?'#$name#g"
-         -e 's#(^|[|;&[:space:](`"'"'"'])\\?([^[:space:]|;&()`"'"'"'<>]*[/\\])?'"$pat"'(\.[Ee][Xx][Ee])?([[:space:])`"'"'"'|;&]|$)#\1'"$name"'\4#g')
+  # TheHub #61987: the bare name is ADDED after the word, never put in its place. Replacing
+  # it ate any argument whose last path segment is one of these names: an endpoint such as
+  # repos/O/R/contents/bin/gh became "gh", and the contents rule never saw /contents/.
+  # Rewriting only in command position instead would miss a binary path after any wrapper
+  # not on a fixed list (timeout 5 /usr/bin/gh ...). So the word stays and the name follows
+  # it, which every rule reads; a bare, lower-case name is left alone.
+  norm+=(-e 's#"([^"]*[/\\])?'"$pat"'(\.[Ee][Xx][Ee])?"#& '"$name"'#g'
+         -e "s#'([^']*[/\\\\])?$pat(\\.[Ee][Xx][Ee])?'#& $name#g"
+         -e 's#(^|[|;&[:space:](`"'"'"'])(\\?([^[:space:]|;&()`"'"'"'<>]*[/\\])?'"$pat"'(\.[Ee][Xx][Ee])?)([[:space:])`"'"'"'|;&]|$)#\1\2 '"$name"'\5#g'
+         -e 's#(^|[|;&[:space:](`"'"'"'])'"$name $name"'([[:space:])`"'"'"'|;&]|$)#\1'"$name"'\2#g')
 done
 norm+=(-e 's#(gh[[:space:]]+alias[[:space:]]+set([[:space:]]+-[^[:space:]]+)*[[:space:]]+[^[:space:]-][^[:space:]]*[[:space:]]+)(["'"'"']?)#\1\3gh #g')
 normalize() { sed -E "${norm[@]}"; }
@@ -909,7 +916,26 @@ test_runner='(pytest|py[.]test|tox|nox|python[0-9.]*([[:space:]]+-[A-Za-z]+)*[[:
 runner_after='[[:space:])`"'"'"']([^|;&]*[[:space:]/'"'"'"])?'"$test_runner$E"
 docker_exec="$B"'docker([[:space:]]+[^|;&]*)?[[:space:]](container[[:space:]]+)?exec[[:space:]]+([^|;&]*[[:space:]])?'
 compose_exec="$B"'(docker([[:space:]]+[^|;&]*)?[[:space:]]compose|docker-compose)[[:space:]]+([^|;&]*[[:space:]])?exec[[:space:]]+([^|;&]*[[:space:]])?'
-if g "$docker_exec$prod_ctr$runner_after" || g "$compose_exec$prod_svc$runner_after"; then
+# Review of keel #190 (TheHub #61987): `compose run` starts a new container from the same
+# production service definition; refused like compose exec. The message names the spelling.
+compose_run="$B"'(docker([[:space:]]+[^|;&]*)?[[:space:]]compose|docker-compose)[[:space:]]+([^|;&]*[[:space:]])?run[[:space:]]+([^|;&]*[[:space:]])?'
+if g "$compose_exec$prod_svc$runner_after" || g "$compose_run$prod_svc$runner_after"; then
+  block "running a test suite in a production compose service with docker compose exec/run (backend or postgres: thehub-backend, thehub-postgres, mykronos-backend). It runs under none of a test container's caps (the 2026-10-23 outage, TheHub #61001). Run it in a capped test container through the shared lock instead: bash scripts/docker-test-lock.sh run <owner> -- bash scripts/test-offline.sh ... (--cpus 2 --memory 2g)." "AIC-3, SC-6, CP-2"
+fi
+# An uncapped `docker run` of a test suite: the outage was uncapped test containers. Each
+# docker run invocation that runs a runner must carry both a CPU cap (--cpus) and a memory
+# cap (--memory or -m); otherwise it is refused with the same route.
+if g "$B"'docker([[:space:]]+[^|;&]*)?[[:space:]](container[[:space:]]+)?run[[:space:]]'; then
+  while IFS= read -r guard_seg; do
+    printf '%s' "$guard_seg" | grep -qE "$B"'docker([[:space:]]+[^|;&]*)?[[:space:]](container[[:space:]]+)?run[[:space:]][^|;&]*(^|[[:space:]/'"'"'"])'"$test_runner$E" || continue
+    # compose run is the compose rule's (a production service, or a dev one with its own limits).
+    printf '%s' "$guard_seg" | grep -qE '(^|[[:space:]])(compose|docker-compose)[[:space:]]' && continue
+    { printf '%s' "$guard_seg" | grep -qE '[[:space:]]--cpus([=[:space:]])' \
+      && printf '%s' "$guard_seg" | grep -qE '[[:space:]](--memory|-m)[=[:space:]]*[0-9]'; } \
+      || block "running a test suite in a docker run without both a CPU cap (--cpus) and a memory cap (--memory). Uncapped test containers took TheHub production down on 2026-10-23 (TheHub #61001). Use the shared lock and the capped route: bash scripts/docker-test-lock.sh run <owner> -- bash scripts/test-offline.sh ... (--cpus 2 --memory 2g)." "AIC-3, SC-6, CP-2"
+  done <<< "$(printf '%s' "$cmd" | tr '|;&' '\n\n\n')"
+fi
+if g "$docker_exec$prod_ctr$runner_after"; then
   block "running a test suite inside a production container with docker exec. It runs under no --cpus/--memory cap (the 2026-10-23 outage, TheHub #61001). Run it in a capped test container through the shared lock instead: bash scripts/docker-test-lock.sh run <owner> -- bash scripts/test-offline.sh ... (--cpus 2 --memory 2g)." "AIC-3, SC-6, CP-2"
 fi
 }
