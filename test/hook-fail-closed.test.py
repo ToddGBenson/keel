@@ -23,6 +23,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -47,6 +48,14 @@ HARMLESS = "git status"
 # a file: 5000 comment lines of 80 characters, about 400 KB.
 PAD = "".join(f"\n# padding line {i:05d} " + "x" * 58 for i in range(5000))
 LARGE = {f"{name}, padded to {len(cmd + PAD) // 1024} KB": cmd + PAD for name, cmd in MUST_BLOCK.items()}
+# [TheHub #61939] Claude Code gives a hook 60 s, and a hook that runs out of time lets the
+# call PROCEED, so a slow guard fails open. The no-jq path took ~16 s on the padded command
+# above and the jq path ~10 s, because the awk views built their output one character at a
+# time (quadratic) and rescanned the rest of the command at every comment line. Each large
+# command must now be decided well inside the timeout. The dense case (100,000 one-character
+# comment lines) is the worst shape for the per-line rescan.
+LARGE["self-merge, then 100,000 one-character comment lines"] = MUST_BLOCK["self-merge"] + "\n#" * 100000
+BUDGET_S = 5   # the fixed hook takes ~0.7 s here; main took 7-16 s
 SHIMS = {
     "exits 2": "#!/bin/sh\nexit 2\n",
     "is killed": "#!/bin/sh\nkill -9 $$\n",
@@ -134,9 +143,13 @@ def main():
             d = clean if with_jq else tool_dir(tmp, with_jq=False)
             for name, cmd in LARGE.items():
                 for t in ("Bash", "PowerShell"):
+                    mode = "jq" if with_jq else "no-jq"
+                    start = time.monotonic()
                     rc, err = run(cmd, d, t)
-                    check(f"{'jq' if with_jq else 'no-jq'} {t}: {name} is blocked", rc == 2,
-                          f"rc={rc} ALLOWED")
+                    took = time.monotonic() - start
+                    check(f"{mode} {t}: {name} is blocked", rc == 2, f"rc={rc} ALLOWED")
+                    check(f"{mode} {t}: {name} is decided in {took:.1f} s (budget {BUDGET_S} s)",
+                          took < BUDGET_S, "TOO SLOW: a hook past its timeout lets the call proceed")
 
         print("one helper fails: the hook refuses")
         for tool in FAULTY:
