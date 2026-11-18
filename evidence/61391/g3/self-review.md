@@ -1,7 +1,7 @@
 # Self-review — TheHub #61391 (guard-write.sh on every write tool)
 
 Mode: solo (POAM-008); agent self-review, pending the independent review before merge
-PR: (set when opened)   Author: Claude Opus 5.5 on the Linux runner laptop (AI-authored)   Date: 2026-11-18
+PR: #195   Author: Claude Opus 5.5 on the Linux runner laptop (AI-authored)   Date: 2026-11-18
 verdict: pass
 
 guard-write.sh was bound to `Write|Edit`. Its evidence rule (AU-9) and secret rules (AIC-5) never
