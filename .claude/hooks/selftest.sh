@@ -548,6 +548,18 @@ check "push feat:feat"                    allow "$(payload 'git push origin feat
 check "push a branch named main-fix"      allow "$(payload 'git push origin feat:main-fix')"                     guard-bash.sh
 check "push HEAD:feat/main-x"             allow "$(payload 'git push origin HEAD:feat/main-x')"                  guard-bash.sh
 check "commit -m with an n in it"         allow "$(payload 'git commit -m "notes"')"                             guard-bash.sh
+# A push of the current branch while the checkout is on main (the PO's addition to #62031).
+onmain=$(mktemp -d); onfeat=$(mktemp -d)
+git -C "$onmain" init -q -b main 2>/dev/null || { git -C "$onmain" init -q; git -C "$onmain" checkout -q -b main; }
+git -C "$onfeat" init -q -b feat 2>/dev/null || { git -C "$onfeat" init -q; git -C "$onfeat" checkout -q -b feat; }
+cwpay() { printf '{"cwd":"%s","tool_input":{"command":"%s"}}' "$1" "$2"; }
+check "on main: git push"                 block "$(cwpay "$onmain" 'git push')"                                  guard-bash.sh
+check "on main: git push origin"          block "$(cwpay "$onmain" 'git push origin')"                           guard-bash.sh
+check "on main: git push -u origin HEAD"  block "$(cwpay "$onmain" 'git push -u origin HEAD')"                   guard-bash.sh
+check "elsewhere: git -C <main repo> push" block "$(cwpay "$onfeat" "git -C $onmain push origin HEAD")"          guard-bash.sh
+check "on feat: git push -u origin HEAD"  allow "$(cwpay "$onfeat" 'git push -u origin HEAD')"                   guard-bash.sh
+check "on main: git push origin feat"     allow "$(cwpay "$onmain" 'git push origin feat')"                      guard-bash.sh
+rm -rf "$onmain" "$onfeat"
 echo ""
 echo "guard-write.sh — must BLOCK (AU-9, AIC-5)"
 check "hand-edit generated SARIF" block "$(wpayload 'evidence/142/g4/scan.sarif' 'x')"    guard-write.sh

@@ -79,6 +79,8 @@ cat()     { guard_run cat 0 "$@"; }
 # shellcheck disable=SC2317  # wrapped for when a rule calls it
 cut()     { guard_run cut 0 "$@"; }
 jq()      { guard_run jq 0 "$@"; }
+# shellcheck disable=SC2317  # wrapped for when a rule calls it (TheHub #62031)
+git()     { guard_run git 0 "$@"; }
 # shellcheck disable=SC2317  # wrapped for when a rule calls it
 python3() { guard_run python3 0 "$@"; }
 # shellcheck disable=SC2317  # wrapped for when a rule calls it
@@ -137,12 +139,14 @@ AWK
 # would report it even where no jq binary exists.
 if type -P jq >/dev/null 2>&1; then
   cmd="$(printf '%s' "$payload" | jq -r '.tool_input.command // empty')"
+  payload_cwd="$(printf '%s' "$payload" | jq -r '.cwd // empty')"
 else
   # TheHub #61038 review: take the JSON string itself (not everything up to the
   # payload's last quote, which swallowed the "description" field) and decode it, so
   # this mode sees the command jq would. Undecoded, \" is not a quote and \n is not a
   # newline, and the quote-aware view below could not tell what is quoted.
   cmd="$(printf '%s' "$payload" | sed -nE 's/.*"command"[[:space:]]*:[[:space:]]*"(([^"\\]|\\.)*)".*/\1/p')"
+  payload_cwd="$(printf '%s' "$payload" | sed -nE 's/.*"cwd"[[:space:]]*:[[:space:]]*"(([^"\\]|\\.)*)".*/\1/p' | sed 's/\\\\/\\/g')"
   cmd_json="$cmd"
   cmd="$(printf '%s' "$cmd_json" | LC_ALL=C awk "$json_unescape_awk" 2>/dev/null)" || cmd="$cmd_json"
 fi
@@ -488,6 +492,37 @@ g "$GIT_PUSH_SEG"'\+?refs/heads/(main|master)'"$E" \
   && block "direct push to main (refs/heads/main). All change goes through a reviewed PR." "AC-5, CM-5"
 g "$GIT_PUSH_SEG"'\+[^[:space:]]' \
   && block "force push (a + refspec). Published history is immutable — it is the AU-12 audit trail." "AIC-3, AU-12, SI-7"
+# A push that names no ref, or names HEAD, pushes the CURRENT branch: `git push`, `git push
+# origin`, `git push -u origin HEAD`. On a checkout that is on main that is a push to main,
+# and the likeliest real one. The branch is read where the push runs (the payload's cwd, or
+# git -C <dir>), with git through a fault-recording wrapper: a git that cannot answer blocks.
+guard_push_current() { # $1: one invocation; true if it pushes the current branch
+  local w pos=0 skip=0 head=0 seen=0
+  for w in $1; do
+    if [ "$seen" -eq 0 ]; then [ "$w" = "push" ] && seen=1; continue; fi
+    if [ "$skip" -eq 1 ]; then skip=0; continue; fi
+    case "$w" in
+      -o|--push-option|--repo|--receive-pack|--exec) skip=1 ;;
+      -*) ;;
+      HEAD) head=1; pos=$((pos + 1)) ;;
+      *) pos=$((pos + 1)) ;;
+    esac
+  done
+  [ "$seen" -eq 1 ] && { [ "$pos" -le 1 ] || [ "$head" -eq 1 ]; }
+}
+if g "$GIT_PUSH_SEG" || g "$B"'git[[:space:]]+([^|;&]*[[:space:]])?push'"$E"; then
+  while IFS= read -r guard_seg; do
+    printf '%s' "$guard_seg" | grep -qE "$B"'git[[:space:]]+([^|;&]*[[:space:]])?push([[:space:]]|$)' || continue
+    guard_push_current "$guard_seg" || continue
+    guard_dir="${payload_cwd:-$PWD}"
+    guard_c=$(printf '%s' "$guard_seg" | grep -oE "$B"'git[[:space:]]+-C[[:space:]]+[^[:space:]]+' | head -n1 | sed -E 's/.*-C[[:space:]]+//')
+    if [ -n "$guard_c" ]; then case "$guard_c" in /*|[A-Za-z]:[/\\]*) guard_dir=$guard_c ;; *) guard_dir="$guard_dir/$guard_c" ;; esac; fi
+    guard_branch=$(guard_run git 1 -C "$guard_dir" symbolic-ref --short -q HEAD)
+    case "$guard_branch" in
+      main|master) block "a push of the current branch, which is $guard_branch (in $guard_dir). All change goes through a reviewed PR: push a feature branch." "AC-5, CM-5" ;;
+    esac
+  done <<< "$(printf '%s' "$cmd" | tr '|;&' '\n\n\n')"
+fi
 g "$B"'git[[:space:]]+([^|;&]*[[:space:]])?commit[[:space:]]([^|;&]*[[:space:]])?-[aeiopqsvzn]*n[a-zA-Z]*'"$E" \
   && block "hook bypass (-n on a git commit, alone or in a cluster of flags). Fix the cause the hook found." "AIC-3, IA-5"
 

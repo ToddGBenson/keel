@@ -18,6 +18,12 @@ predate the hook sprint.
 - **A `+` refspec is a force push**, whatever the flags say.
 - **A git commit's `-n` is read inside a cluster of flags** that take no value (`-an`, `-anm`).
   `-mnotes` is a message, because `m` takes the rest of the word.
+- **A push of the current branch while the checkout is on main** (the PO's addition) is refused:
+  `git push`, `git push origin`, `git push -u origin HEAD`. The branch is read where the push runs:
+  the payload's `cwd` (both parsers read it), or `git -C <dir>`. That uses
+  `git symbolic-ref --short -q HEAD` through the fault-recording wrapper, so a git that cannot answer
+  blocks, and a detached HEAD (exit 1) is not a branch. It runs only for those push shapes: one git
+  process on those calls.
 - Corpus: KB-260..262 (`feat:main`, `+feat`, `commit -anm`). #196 holds KB-229..231 and #192
   holds KB-240..252.
 
@@ -29,7 +35,11 @@ predate the hook sprint.
   The 4 must-allow cases passed: feat:feat, feat:main-fix, HEAD:feat/main-x, and
   `commit -m "notes"`.
 - **Corpus on main:** 12 of 816 runs failed (the 3 new entries, on both tools and in both modes).
-- **Green after:** selftest 345 passed / 0 failed. Corpus 227 entries, 816 runs, 0 failed, 32 open.
+- **Red first, the addition:** 6 more cases built on throwaway repos, against the first #199 head
+  738876d: 347 passed, 4 failed. `git push`, `git push origin` and `git push -u origin HEAD` on main,
+  and `git -C <main repo> push origin HEAD`, were ALLOWED. The must-allow cases passed: HEAD on a
+  feature branch, and `git push origin feat` from main.
+- **Green after:** selftest 351 passed / 0 failed. Corpus 227 entries, 816 runs, 0 failed, 32 open.
   shellcheck v0.10.0 `-S warning` clean. Pinned gitleaks v8.18.4: no leaks.
 
 ## Not verified
@@ -38,9 +48,9 @@ predate the hook sprint.
 - hook-fail-closed.test.py's 5 s timing budget fails on this laptop for every head, main included,
   because the CPU is clamped at 400 MHz. Its result here says nothing about this change. CI's run
   is the one to trust once the clamp is fixed.
-- **Not read:** a refspec held in a variable (`git push origin "$R"`); `push.default`/`remote.*.push`
-  config that maps a plain push onto main; and `git push origin HEAD` while main is checked out.
-  That last one is a push of the current branch, which is main only if the agent works on main.
+- **Not read:** a refspec held in a variable (`git push origin "$R"`), and `remote.*.push` config that
+  maps a named push onto main. A `push.default` other than simple/current/upstream is not modelled;
+  a plain push is treated as a push of the current branch.
   The 61972 tokenizer (held) is the general fix for refspecs it cannot read.
 
 ## Residual risk accepted
