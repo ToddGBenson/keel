@@ -941,6 +941,9 @@ fi
 # `docker start` (docs/11-ai-agent-controls.md lists them).
 ctr_route="Run it in a capped test container through the shared lock: bash scripts/docker-test-lock.sh run <owner> -- bash scripts/test-offline.sh ... (--cpus 2 --memory 2g). Uncapped test runs took TheHub production down on 2026-10-23 (TheHub #61001)."
 ctr_unq() { local v=$1; v=${v//\"/}; v=${v//\'/}; printf '%s' "$v"; }
+# Review of #198, round 4 (timing): the same, in-process, into $_cu. A subshell per word made a
+# 300-line heredoc fork thousands of times.
+ctr_u() { _cu=${1//\"/}; _cu=${_cu//\'/}; }
 ctr_is_runner() { # $1: the command line (entrypoint and arguments), quotes removed
   local c ws
   read -r -a ws <<< "$1"                                    # one space between words, none at the ends
@@ -970,7 +973,7 @@ ctr_mem_ok() { # $1: a --memory value. True when 0 < bytes <= 2g.
 ctr_judge() { # $@: the words of one invocation
   local w=("$@") n=$# i=0 eng="" sub="" a v
   while [ "$i" -lt "$n" ]; do
-    a=$(ctr_unq "${w[i]}"); a=${a##*/}; a=${a%.exe}; a=${a%.EXE}
+    ctr_u "${w[i]}"; a=$_cu; a=${a##*/}; a=${a%.exe}; a=${a%.EXE}
     case "$a" in docker|podman|nerdctl|docker-compose|podman-compose) eng=$a; break ;; esac
     i=$((i + 1))
   done
@@ -978,67 +981,67 @@ ctr_judge() { # $@: the words of one invocation
   i=$((i + 1))
   # Review of #198, round 2: /usr/bin/docker or docker.exe is followed by the bare name
   # normalize() appended; that word is the engine again, not the subcommand.
-  [ "$(ctr_unq "${w[i]:-}")" = "$eng" ] && i=$((i + 1))
+  ctr_u "${w[i]:-}"; [ "$_cu" = "$eng" ] && i=$((i + 1))
   # global options of the engine (and of compose)
   while [ "$i" -lt "$n" ]; do
-    a=$(ctr_unq "${w[i]}")
+    ctr_u "${w[i]}"; a=$_cu
     case "$a" in
       -H|--host|--context|-c|--config|--log-level|-l|-f|--file|--tlscacert|--tlscert|--tlskey|-p|--project-name|--profile|--env-file|--project-directory|--ansi|--progress|--namespace|-n|--address|--url|--connection|--root|--runroot) i=$((i + 2)) ;;
       -*) i=$((i + 1)) ;;
       *) break ;;
     esac
   done
-  sub=$(ctr_unq "${w[i]:-}")
+  ctr_u "${w[i]:-}"; sub=$_cu
   case "$eng" in *-compose) sub="compose-$sub" ;; esac
   if [ "$sub" = "compose" ]; then
     i=$((i + 1))
     while [ "$i" -lt "$n" ]; do
-      a=$(ctr_unq "${w[i]}")
+      ctr_u "${w[i]}"; a=$_cu
       case "$a" in -f|--file|-p|--project-name|--profile|--env-file|--project-directory|--ansi|--progress|--parallel) i=$((i + 2)) ;; -*) i=$((i + 1)) ;; *) break ;; esac
     done
-    sub="compose-$(ctr_unq "${w[i]:-}")"
+    ctr_u "${w[i]:-}"; sub="compose-$_cu"
   fi
-  [ "$sub" = "container" ] && { i=$((i + 1)); sub=$(ctr_unq "${w[i]:-}"); }
+  [ "$sub" = "container" ] && { i=$((i + 1)); ctr_u "${w[i]:-}"; sub=$_cu; }
   i=$((i + 1))
   local entry="" svc="" rest="" cpus="" quota="" period="" mem=""
   case "$sub" in
     compose-run|compose-exec)
       while [ "$i" -lt "$n" ]; do
-        a=$(ctr_unq "${w[i]}")
+        ctr_u "${w[i]}"; a=$_cu
         case "$a" in
-          --entrypoint) entry=$(ctr_unq "${w[i+1]:-}"); i=$((i + 2)) ;;
+          --entrypoint) ctr_u "${w[i+1]:-}"; entry=$_cu; i=$((i + 2)) ;;
           --entrypoint=*) entry=${a#--entrypoint=}; i=$((i + 1)) ;;
           -e|--env|-l|--label|--name|-p|--publish|-u|--user|-v|--volume|-w|--workdir|--pull|--cap-add|--cap-drop|--env-file|--env-from-file|--index) i=$((i + 2)) ;;
           -*) i=$((i + 1)) ;;
           *) break ;;
         esac
       done
-      svc=$(ctr_unq "${w[i]:-}"); i=$((i + 1))
-      rest=$(ctr_unq "$entry ${w[*]:i}")
+      ctr_u "${w[i]:-}"; svc=$_cu; i=$((i + 1))
+      ctr_u "$entry ${w[*]:i}"; rest=$_cu
       ctr_is_runner "$rest" || return 0
       # Round 2 backstop: a production service named anywhere among the words after
       # run|exec, with a runner, is refused even when an option this parser does not know
       # took the service's place.
-      for a in "${w[@]:i-1}"; do printf '%s' "$(ctr_unq "$a")" | grep -qxE "$prod_svc" && svc=$(ctr_unq "$a"); done
+      for a in "${w[@]:i-1}"; do ctr_u "$a"; [[ $_cu =~ ^${prod_svc}$ ]] && svc=$_cu; done
       case "$svc" in *'$'*|*'`'*) block "a test suite in a compose service named by a variable ($svc); it may be a production service. Name the service. $ctr_route" "AIC-3, SC-6, CP-2" ;; esac
       printf '%s' "$svc" | grep -qxE "$prod_svc" \
         && block "running a test suite in a production compose service with $eng ${sub#compose-} ($svc: thehub-backend, thehub-postgres, mykronos-backend). It runs under none of a test container's caps. $ctr_route" "AIC-3, SC-6, CP-2"
       return 0 ;;
     run)
       while [ "$i" -lt "$n" ]; do
-        a=$(ctr_unq "${w[i]}")
+        ctr_u "${w[i]}"; a=$_cu
         case "$a" in
           --cpus=*) cpus=${a#*=} ;;
-          --cpus) cpus=$(ctr_unq "${w[i+1]:-}"); i=$((i + 1)) ;;
+          --cpus) ctr_u "${w[i+1]:-}"; cpus=$_cu; i=$((i + 1)) ;;
           --cpu-quota=*) quota=${a#*=} ;;
-          --cpu-quota) quota=$(ctr_unq "${w[i+1]:-}"); i=$((i + 1)) ;;
+          --cpu-quota) ctr_u "${w[i+1]:-}"; quota=$_cu; i=$((i + 1)) ;;
           --cpu-period=*) period=${a#*=} ;;
-          --cpu-period) period=$(ctr_unq "${w[i+1]:-}"); i=$((i + 1)) ;;
+          --cpu-period) ctr_u "${w[i+1]:-}"; period=$_cu; i=$((i + 1)) ;;
           --memory=*) mem=${a#*=} ;;
-          --memory|-m) mem=$(ctr_unq "${w[i+1]:-}"); i=$((i + 1)) ;;
+          --memory|-m) ctr_u "${w[i+1]:-}"; mem=$_cu; i=$((i + 1)) ;;
           -m*) mem=${a#-m}; mem=${mem#=} ;;
           --entrypoint=*) entry=${a#*=} ;;
-          --entrypoint) entry=$(ctr_unq "${w[i+1]:-}"); i=$((i + 1)) ;;
+          --entrypoint) ctr_u "${w[i+1]:-}"; entry=$_cu; i=$((i + 1)) ;;
           --*=*) ;;
           --rm|--detach|--interactive|--tty|--init|--privileged|--read-only|--publish-all|--no-healthcheck|--oom-kill-disable|--quiet|--sig-proxy|--help|--disable-content-trust|--use-api-socket) ;;
           --*) i=$((i + 1)) ;;                              # a long option and its value
@@ -1051,7 +1054,7 @@ ctr_judge() { # $@: the words of one invocation
         i=$((i + 1))
       done
       i=$((i + 1))                                          # the image
-      rest=$(ctr_unq "$entry ${w[*]:i}")
+      ctr_u "$entry ${w[*]:i}"; rest=$_cu
       ctr_is_runner "$rest" || return 0
       case "$cpus$quota$period$mem" in *'$'*|*'`'*) block "a test suite in a docker run whose CPU or memory cap is a variable this hook cannot read. Give the caps as numbers. $ctr_route" "AIC-3, SC-6, CP-2" ;; esac
       { ctr_cpu_ok "$cpus" "$quota" "$period" && ctr_mem_ok "$mem"; } \
@@ -1069,6 +1072,27 @@ fi
 # --entrypoint "python -m pytest" is one word and -e X="--cpus 2 -m 2g" is not a cap. Run on
 # the masked view (a separator inside quotes is already a space) and the PowerShell view.
 read -r -d '' ctr_tok_awk <<'AWK'
+function hd_open(   dash, dl, e) {   # after "<<": read the delimiter; the body starts at the next newline
+  i++; dash = 0; if (substr(s, i + 1, 1) == "-") { dash = 1; i++ }
+  while (substr(s, i + 1, 1) ~ /[ \t]/) i++
+  dl = ""
+  while (i < n) { e = substr(s, i + 1, 1); if (e ~ /[ \t\n;|&<>()]/) break; i++; if (e != "'" && e != "\"" && e != "\\") dl = dl e }
+  nhd++; hdelim[nhd] = dl; hdash[nhd] = dash
+}
+function hd_bodies(emit,   k, line, body, j, dl) {   # at a newline: consume the pending bodies
+  for (k = 1; k <= nhd; k++) {
+    body = ""
+    while (i < n) {
+      j = index(substr(s, i + 1), "\n"); if (j == 0) j = n - i + 1
+      line = substr(s, i + 1, j - 1); i += j
+      dl = line; if (hdash[k]) sub(/^\t+/, "", dl)
+      if (dl == hdelim[k]) break
+      body = body line "\003"
+    }
+    if (emit) print "\002" body
+  }
+  nhd = 0
+}
 function flush() { if (have) { print tok; tok = ""; have = 0 } }
 { s = (NR > 1) ? s "\n" $0 : $0 }
 END {
@@ -1083,8 +1107,10 @@ END {
       for (; i <= n; i++) { c = substr(s, i, 1); tok = tok c; if (c == "(") d++; else if (c == ")" && --d == 0) break }
       have = 1; continue
     }
+    if (c == "<" && substr(s, i + 1, 1) == "<" && substr(s, i + 2, 1) != "<") { flush(); hd_open(); continue }   # round 4: a heredoc
     if (c == " " || c == "\t") { flush(); continue }
-    if (c == "\n" || c == ";" || c == "|" || c == "&" || c == "(" || c == ")" || c == "`") { flush(); print "\001"; continue }
+    if (c == "\n") { flush(); if (nhd) hd_bodies(1); print "\001"; continue }
+    if (c == ";" || c == "|" || c == "&" || c == "(" || c == ")" || c == "`") { flush(); print "\001"; continue }
     tok = tok c; have = 1
   }
   flush()
@@ -1092,26 +1118,59 @@ END {
 AWK
 ctr_seg() { # $@: one segment. Round 3: judged from EVERY engine word (an outer docker exec
   # <container> docker compose ... is two invocations), and a NAME=value word is never an engine.
-  local w=("$@") k a
+  # Round 4: a heredoc body (one \002 word) is a command only when a shell is fed it
+  # (bash <<EOF ...); fed to anything else (git commit -F -, cat > file) it is text.
+  local w=() k a first="" bodies=()
+  for a in "$@"; do case "$a" in $'\002'*) bodies+=("${a#?}") ;; *) w+=("$a") ;; esac; done
+  for a in "${w[@]}"; do case "$a" in [A-Za-z_]*=*|env|sudo|command|exec|nice|nohup|timeout) ;; *) first=${a##*/}; break ;; esac; done
+  case "$first" in
+    sh|bash|dash|zsh|ash|ksh) for a in "${bodies[@]}"; do ctr_guard "${a//$'\003'/$'\n'}"; done ;;
+  esac
+  set -- "${w[@]}"
   for ((k = 0; k < $#; k++)); do
-    case "${w[k]}" in [A-Za-z_]*=*) continue ;; esac
-    a=$(ctr_unq "${w[k]}"); a=${a##*/}; a=${a%.exe}; a=${a%.EXE}
+    case "${w[k]}" in [A-Za-z_]*=*) continue ;; *[Dd][Oo][Cc][Kk][Ee][Rr]*|*[Pp][Oo][Dd][Mm][Aa][Nn]*|*[Nn][Ee][Rr][Dd][Cc][Tt][Ll]*) ;; *) continue ;; esac
+    ctr_u "${w[k]}"; a=$_cu; a=${a##*/}; a=${a%.exe}; a=${a%.EXE}
     case "$a" in docker|podman|nerdctl|docker-compose|podman-compose) ctr_judge "${w[@]:k}" ;; esac
   done
 }
-ctr_subst_awk='
-{ s = (NR > 1) ? s " " $0 : $0 }
+read -r -d '' HD_AWK <<'AWK' || true
+function hd_open(   dash, dl, e) {   # after "<<": read the delimiter; the body starts at the next newline
+  i++; dash = 0; if (substr(s, i + 1, 1) == "-") { dash = 1; i++ }
+  while (substr(s, i + 1, 1) ~ /[ \t]/) i++
+  dl = ""
+  while (i < n) { e = substr(s, i + 1, 1); if (e ~ /[ \t\n;|&<>()]/) break; i++; if (e != "'" && e != "\"" && e != "\\") dl = dl e }
+  nhd++; hdelim[nhd] = dl; hdash[nhd] = dash
+}
+function hd_bodies(emit,   k, line, body, j, dl) {   # at a newline: consume the pending bodies
+  for (k = 1; k <= nhd; k++) {
+    body = ""
+    while (i < n) {
+      j = index(substr(s, i + 1), "\n"); if (j == 0) j = n - i + 1
+      line = substr(s, i + 1, j - 1); i += j
+      dl = line; if (hdash[k]) sub(/^\t+/, "", dl)
+      if (dl == hdelim[k]) break
+      body = body line "\003"
+    }
+    if (emit) print "\002" body
+  }
+  nhd = 0
+}
+AWK
+ctr_subst_awk="$HD_AWK"'
+{ s = (NR > 1) ? s "\n" $0 : $0 }
 END {
   n = length(s)
   for (i = 1; i <= n; i++) {
     c = substr(s, i, 1)
+    if (c == "<" && substr(s, i + 1, 1) == "<" && substr(s, i + 2, 1) != "<") { hd_open(); continue }
+    if (c == "\n") { if (nhd) hd_bodies(0); continue }
     if (c == "$" && substr(s, i + 1, 1) == "(") {
       d = 0; b = ""
       for (j = i + 1; j <= n; j++) { e = substr(s, j, 1); if (e == "(") d++; else if (e == ")" && --d == 0) break; if (j > i + 1) b = b e }
-      print b; i = i + 1
+      gsub(/\n/, " ", b); print b; i = j   # past the body: a nested one is found by the recursion, once (round 4)
     } else if (c == "`") {
       j = index(substr(s, i + 1), "`"); if (j == 0) j = n - i + 1
-      print substr(s, i + 1, j - 1); i += j
+      b = substr(s, i + 1, j - 1); gsub(/\n/, " ", b); print b; i += j
     }
   }
 }'
@@ -1130,6 +1189,7 @@ ctr_guard() { # $1: one view of the command
   # Round 3: the body of every $(...) and backtick, quoted or not, is a command of its own.
   case "$1" in *'$('*|*'`'*) ;; *) return 0 ;; esac
   ctr_depth=$((ctr_depth + 1))
+  [ "$ctr_depth" -gt 6 ] && block "a command with substitutions nested more than 6 deep, which this hook does not unfold. Write it flatter; an ordinary command does not nest that far." "AIC-3, SC-6, CP-2"
   if [ "$ctr_depth" -le 6 ]; then
     mapfile -t bodies < <(printf '%s' "$1" | LC_ALL=C awk "$ctr_subst_awk")
     for b in "${bodies[@]}"; do [ -n "$b" ] && ctr_guard "$b"; done
@@ -1139,7 +1199,10 @@ ctr_guard() { # $1: one view of the command
 cmd="$raw_cmd"; guard
 if [ "$word_cmd" != "$raw_cmd" ]; then cmd="$word_cmd"; guard; fi
 if [ "$ps_cmd" != "$raw_cmd" ] && [ "$ps_cmd" != "$word_cmd" ]; then cmd="$ps_cmd"; guard; fi
-if g '(^|[^A-Za-z0-9_.-])(docker|podman|nerdctl|docker-compose|podman-compose)([.][Ee][Xx][Ee])?([[:space:]]|$)' || [ "$ps_cmd" != "$raw_cmd" ]; then
+# Round 4 (timing): the word judge runs only when a view names a container engine at all,
+# tested in-process. It used to run whenever the PowerShell view differed, which is most commands.
+ctr_eng_re='[Dd][Oo][Cc][Kk][Ee][Rr]|[Pp][Oo][Dd][Mm][Aa][Nn]|[Nn][Ee][Rr][Dd][Cc][Tt][Ll]'
+if [[ $raw_cmd =~ $ctr_eng_re ]] || [[ $ps_cmd =~ $ctr_eng_re ]]; then
   ctr_guard "$raw_cmd"   # round 3: the quote-aware tokenizer reads the raw text; the masked view turns a quoted && into spaces
   [ "$ps_cmd" != "$raw_cmd" ] && ctr_guard "$ps_cmd"
 fi

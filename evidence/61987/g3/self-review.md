@@ -113,6 +113,31 @@ construction. The causes, also fixed in the word judge (the run-cap rule has no 
 - **Interaction:** #199 (TheHub #62031) adds its own tokenizer; whichever merges second reconciles
   the two into one.
 
+## Review round 4 (Fable 5.2 on 3eb0cc2 / 5e80f4b, BLOCK on timing only; the last round)
+
+Correctness held: all 17 round-2 regressions block, as do 127 main-blocked Bash rows and 39
+PowerShell rows. The block was a slowdown against main on every commit.
+1. **No process per word.** `ctr_unq` ran in a subshell for every word, on two views, even
+   with no engine named; a 300-line heredoc forked thousands of times. Now:
+   - words are unquoted in-process (`ctr_u`);
+   - a word with no engine name in it is skipped before any work;
+   - the judge runs only when a view names docker, podman or nerdctl (an in-process test; it
+     used to run whenever the PowerShell view differed, which is most commands);
+   - the tokenizer reads heredocs: a body is a command only when it is fed to a shell
+     (`bash <<EOF`), and text otherwise (`git commit -F -`, `cat > file`).
+2. **The substitution scan no longer doubles per level.** It skips past each body, so a nested
+   one is found once, by the recursion, and it skips heredoc bodies. Deeper than 6 levels, a
+   command naming an engine is refused with a message.
+3. **A timing test that fails on 3eb0cc2:** `test/hook-heredoc-timing.test.py`. A 300-line
+   heredoc must be decided within 4x the same hook's time for a one-line command, plus 1 s,
+   measured on the same machine; with and without engine words in the prose. On 3eb0cc2 it took
+   9.4 s against a 1.2 s limit. Here: 0.14 s and 0.17 s; main is 0.13 s and 0.19 s.
+- **Nit:** `compose exec backend pip install pytest` is blocked on main too (verified), so the
+  backstop keeps main's behavior. It stays a named false positive.
+- **Gaps documented, not fixed (main allows them too):** `Get-Command` with a parameter such as
+  `-CommandType Application` before the name. A full-path `git push origin HEAD:refs/heads/main`
+  is #199's subject, and #199's head blocks it (verified).
+
 ## Not verified
 
 - Git Bash on Windows was not run.
