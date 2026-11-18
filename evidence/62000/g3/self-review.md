@@ -1,7 +1,7 @@
 # Self-review — TheHub #62000 (the hooks are best-effort guidance until the allowlist rebuild)
 
 Mode: solo (POAM-008); agent self-review, pending the independent review before merge
-PR: #PENDING   Author: Claude Sonnet 5.5 (AI-authored)   Date: 2026-11-18
+PR: #191   Author: Claude Sonnet 5.5 (AI-authored)   Date: 2026-11-18
 verdict: pass
 
 Docs only. `docs/11-ai-agent-controls.md` listed each hook rule as "Hook-enforced: a denylist
