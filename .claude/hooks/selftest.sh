@@ -591,7 +591,7 @@ check "an unknown global option, then push" block "$(payload 'git --attr-source 
 check "on main: bash -c 'git push'"        block "$(cwpay "$onmain" "bash -c 'git push origin HEAD'")"            guard-bash.sh
 check "bash -c 'cd <main repo> && push'"   block "$(cwpay "$onfeat" "bash -c 'cd $onmain && git push'")"           guard-bash.sh
 check "on main: eval git push"             block "$(cwpay "$onmain" 'eval git push')"                             guard-bash.sh
-check "on main: git pu\"\"sh"                block "$(cwpay "$onmain" 'git pu""sh')"                               guard-bash.sh
+check "on main: git pu\"\"sh"                block "$(cwpay "$onmain" 'git pu\"\"sh')"                               guard-bash.sh
 check "on main: --dry-run ... --no-dry-run" block "$(cwpay "$onmain" 'git push --dry-run origin HEAD --no-dry-run')" guard-bash.sh
 check "-C \$(pwd), then push"               block "$(cwpay "$onfeat" 'git -C $(pwd) push')"                      guard-bash.sh
 check "-C given twice, then push"          block "$(cwpay "$onfeat" 'git -C .. -C x push')"                        guard-bash.sh
