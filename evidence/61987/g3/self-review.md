@@ -43,6 +43,29 @@ verdict: pass
   reports 0 V / 0 A). When #184 was built it ran the same case in 0.65 s. CI's run is the one to
   trust.
 
+## Review round 1 (Fable 5.2 on c69eff4 / 7860206, BLOCK)
+
+- **B1, regression:** the PowerShell `(Get-Command X).Source` rewrite stopped firing for gh.exe, GH,
+  git.exe, curl.exe, `-Name`, a quoted name and a path, because normalize() had appended the bare
+  name inside the parentheses. The rewrite now accepts any number of appended names.
+- **B2, regression:** `gh alias set Git 'pr merge'` put the gh prefix on the appended `git`, not on
+  the body. The alias rewrite now skips an appended name after the alias name.
+- **N1-N4:** compose run/exec and docker run are now judged as shell words (quotes honoured) on the
+  masked and PowerShell views, not by a regex over the line.
+  - The engine (docker, podman, nerdctl, *-compose) and its global options are read, then the
+    subcommand.
+  - For `run`, the options up to the image are read, and caps are taken only there. The CPU cap is
+    `--cpus` 0<v<=2 or `--cpu-quota`/period <=2. The memory cap is `-m`/`--memory` 0<v<=2g. A
+    variable cap is refused with its own message.
+  - For `compose run|exec`, the options up to the service are read, with `--entrypoint` kept as the
+    command. A service given by a variable is refused.
+  - The runner must BE the command (pytest, py.test, tox, nox, python -m pytest, or a shell -c body
+    that runs one), so `pip install pytest` and `-w /opt/tox` pass.
+- **N5:** `run -d` then `exec`, and `create` then `start`, are documented as not caught.
+- **Red at c69eff4:** selftest 346 passed, 16 failed. **Green:** 362 / 0. The review's inputs, through
+  both tools: 71 checks, 0 wrong. Corpus KB-270..272 (two Get-Command forms and the alias); corpus
+  812 runs, 0 failed.
+
 ## Not verified
 
 - Git Bash on Windows was not run.

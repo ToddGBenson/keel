@@ -183,7 +183,10 @@ for pair in 'gh:[Gg][Hh]' 'git:[Gg][Ii][Tt]' 'curl:[Cc][Uu][Rr][Ll]' 'docker:[Dd
          -e 's#(^|[|;&[:space:](`"'"'"'])(\\?([^[:space:]|;&()`"'"'"'<>]*[/\\])?'"$pat"'(\.[Ee][Xx][Ee])?)([[:space:])`"'"'"'|;&]|$)#\1\2 '"$name"'\5#g'
          -e 's#(^|[|;&[:space:](`"'"'"'])'"$name $name"'([[:space:])`"'"'"'|;&]|$)#\1'"$name"'\2#g')
 done
-norm+=(-e 's#(gh[[:space:]]+alias[[:space:]]+set([[:space:]]+-[^[:space:]]+)*[[:space:]]+[^[:space:]-][^[:space:]]*[[:space:]]+)(["'"'"']?)#\1\3gh #g')
+# Review of #198 (B2): the alias name may itself be a binary's name (gh alias set Git ...),
+# and the loop above appended the bare name after it; skip that word, so the BODY is what
+# gets "gh " in front of it.
+norm+=(-e 's#(gh[[:space:]]+alias[[:space:]]+set([[:space:]]+-[^[:space:]]+)*[[:space:]]+[^[:space:]-][^[:space:]]*[[:space:]]+((gh|git|curl|docker|docker-compose)[[:space:]]+)?)(["'"'"']?)#\1\5gh #g')
 normalize() { sed -E "${norm[@]}"; }
 cmd="$(printf '%s' "$cmd" | normalize)"
 
@@ -392,7 +395,7 @@ END {
 AWK
 ps_sed=(-e 's#(^|[[:space:](])([Ss][Tt][Aa][Rr][Tt]-[Pp][Rr][Oo][Cc][Ee][Ss][Ss]|[Ss][Aa][Pp][Ss]|[Ss][Tt][Aa][Rr][Tt])([[:space:]]+-[Ff][A-Za-z]*)?[[:space:]]+#\1#g'
         -e 's#[[:space:]]-[Aa][Rr][Gg][A-Za-z]*([[:space:]]|$)# #g'
-        -e 's#\(([Gg][Ee][Tt]-[Cc][Oo][Mm][Mm][Aa][Nn][Dd]|[Gg][Cc][Mm])([[:space:]]+-[A-Za-z]+)*[[:space:]]+([^()[:space:]]+)[[:space:]]*\)(\.[A-Za-z]+)?# \3 #g')
+        -e 's#\(([Gg][Ee][Tt]-[Cc][Oo][Mm][Mm][Aa][Nn][Dd]|[Gg][Cc][Mm])([[:space:]]+-[A-Za-z]+)*[[:space:]]+([^()[:space:]]+)([[:space:]]+(gh|git|curl|docker|docker-compose))*[[:space:]]*\)(\.[A-Za-z]+)?# \3 \5 #g')
 ps_cmd="$(printf '%s' "$raw_cmd" | LC_ALL=C awk "$ps_awk" 2>/dev/null | sed -E "${ps_sed[@]}" | normalize)" || ps_cmd="$raw_cmd"
 
 block() {
@@ -914,34 +917,168 @@ prod_ctr='(thehub-backend|thehub-postgres|mykronos-backend)'
 prod_svc='(backend|postgres)'
 test_runner='(pytest|py[.]test|tox|nox|python[0-9.]*([[:space:]]+-[A-Za-z]+)*[[:space:]]+-m[[:space:]]*pytest)'
 runner_after='[[:space:])`"'"'"']([^|;&]*[[:space:]/'"'"'"])?'"$test_runner$E"
-docker_exec="$B"'docker([[:space:]]+[^|;&]*)?[[:space:]](container[[:space:]]+)?exec[[:space:]]+([^|;&]*[[:space:]])?'
-compose_exec="$B"'(docker([[:space:]]+[^|;&]*)?[[:space:]]compose|docker-compose)[[:space:]]+([^|;&]*[[:space:]])?exec[[:space:]]+([^|;&]*[[:space:]])?'
-# Review of keel #190 (TheHub #61987): `compose run` starts a new container from the same
-# production service definition; refused like compose exec. The message names the spelling.
-compose_run="$B"'(docker([[:space:]]+[^|;&]*)?[[:space:]]compose|docker-compose)[[:space:]]+([^|;&]*[[:space:]])?run[[:space:]]+([^|;&]*[[:space:]])?'
-if g "$compose_exec$prod_svc$runner_after" || g "$compose_run$prod_svc$runner_after"; then
-  block "running a test suite in a production compose service with docker compose exec/run (backend or postgres: thehub-backend, thehub-postgres, mykronos-backend). It runs under none of a test container's caps (the 2026-10-23 outage, TheHub #61001). Run it in a capped test container through the shared lock instead: bash scripts/docker-test-lock.sh run <owner> -- bash scripts/test-offline.sh ... (--cpus 2 --memory 2g)." "AIC-3, SC-6, CP-2"
-fi
-# An uncapped `docker run` of a test suite: the outage was uncapped test containers. Each
-# docker run invocation that runs a runner must carry both a CPU cap (--cpus) and a memory
-# cap (--memory or -m); otherwise it is refused with the same route.
-if g "$B"'docker([[:space:]]+[^|;&]*)?[[:space:]](container[[:space:]]+)?run[[:space:]]'; then
-  while IFS= read -r guard_seg; do
-    printf '%s' "$guard_seg" | grep -qE "$B"'docker([[:space:]]+[^|;&]*)?[[:space:]](container[[:space:]]+)?run[[:space:]][^|;&]*(^|[[:space:]/'"'"'"])'"$test_runner$E" || continue
-    # compose run is the compose rule's (a production service, or a dev one with its own limits).
-    printf '%s' "$guard_seg" | grep -qE '(^|[[:space:]])(compose|docker-compose)[[:space:]]' && continue
-    { printf '%s' "$guard_seg" | grep -qE '[[:space:]]--cpus([=[:space:]])' \
-      && printf '%s' "$guard_seg" | grep -qE '[[:space:]](--memory|-m)[=[:space:]]*[0-9]'; } \
-      || block "running a test suite in a docker run without both a CPU cap (--cpus) and a memory cap (--memory). Uncapped test containers took TheHub production down on 2026-10-23 (TheHub #61001). Use the shared lock and the capped route: bash scripts/docker-test-lock.sh run <owner> -- bash scripts/test-offline.sh ... (--cpus 2 --memory 2g)." "AIC-3, SC-6, CP-2"
-  done <<< "$(printf '%s' "$cmd" | tr '|;&' '\n\n\n')"
-fi
+docker_exec="$B"'(docker|podman|nerdctl)([[:space:]]+[^|;&]*)?[[:space:]](container[[:space:]]+)?exec[[:space:]]+([^|;&]*[[:space:]])?'
+#
+# Review of keel #198 (TheHub #61987, round 1): compose run/exec and docker run are judged
+# word by word, not by a regex over the line. The review found the runner read only after
+# the service (--entrypoint pytest backend), a service held in a variable, podman and
+# nerdctl, caps of 0 (no limit) or above the route's 2 CPUs / 2g, cap flags after the image
+# (those are the command's own arguments), a bare word "compose" anywhere skipping the rule,
+# and false blocks on --memory "2g", pip install pytest and -w /opt/tox. So, per invocation:
+# the engine and its global options, then the subcommand; for `run`, the options up to the
+# image (caps are read only there), then the command; for `compose run|exec`, the options up
+# to the service (--entrypoint kept), then the service and the command. The runner must BE
+# the command: pytest, py.test, tox, nox, python -m pytest, or a shell -c body that runs one.
+# Not read: `docker run -d ... sleep; docker exec <it> pytest`, and `docker create` then
+# `docker start` (docs/11-ai-agent-controls.md lists them).
+ctr_route="Run it in a capped test container through the shared lock: bash scripts/docker-test-lock.sh run <owner> -- bash scripts/test-offline.sh ... (--cpus 2 --memory 2g). Uncapped test runs took TheHub production down on 2026-10-23 (TheHub #61001)."
+ctr_unq() { local v=$1; v=${v//\"/}; v=${v//\'/}; printf '%s' "$v"; }
+ctr_is_runner() { # $1: the command line (entrypoint and arguments), quotes removed
+  local c ws
+  read -r -a ws <<< "$1"                                    # one space between words, none at the ends
+  c=" ${ws[*]-} "
+  printf '%s' "$c" | grep -qE '^ ([A-Za-z_][A-Za-z0-9_]*=[^ ]* )*(nice( -n ?[-0-9]+)? )?([^ ]*/)?(pytest|py[.]test|tox|nox) ' && return 0
+  printf '%s' "$c" | grep -qE '^ ([A-Za-z_][A-Za-z0-9_]*=[^ ]* )*(nice( -n ?[-0-9]+)? )?([^ ]*/)?python[0-9.]*( -[A-Za-z]+)* -m ?pytest ' && return 0
+  printf '%s' "$c" | grep -qE '^ ([^ ]*/)?(sh|bash|dash|zsh|ash)( -[a-z]+)* -[a-z]*c .*(^|[ ;&|(/])(pytest|py[.]test|tox|nox|python[0-9.]*( -[A-Za-z]+)* -m ?pytest)( |$)' && return 0
+  return 1
+}
+ctr_cpu_ok() { # $1 --cpus value; $2 --cpu-quota; $3 --cpu-period. True when 0 < CPUs <= 2.
+  guard_run awk 1 -v c="$1" -v q="$2" -v p="${3:-100000}" 'BEGIN { if (c != "") v = c + 0; else if (q != "") v = (q + 0) / (p + 0); else exit 1; exit !(v > 0 && v <= 2) }'
+}
+ctr_mem_ok() { # $1: a --memory value. True when 0 < bytes <= 2g.
+  [ -n "$1" ] || return 1
+  printf '%s' "$1" | guard_run awk 1 '{ v = $0; u = tolower(substr(v, length(v))); n = v + 0
+    if (u == "k") n *= 1024; else if (u == "m") n *= 1048576; else if (u == "g") n *= 1073741824
+    exit !(v ~ /^[0-9.]+[bkmgBKMG]?$/ && n > 0 && n <= 2147483648) }'
+}
+ctr_judge() { # $@: the words of one invocation
+  local w=("$@") n=$# i=0 eng="" sub="" a v
+  while [ "$i" -lt "$n" ]; do
+    a=$(ctr_unq "${w[i]}"); a=${a##*/}; a=${a%.exe}; a=${a%.EXE}
+    case "$a" in docker|podman|nerdctl|docker-compose|podman-compose) eng=$a; break ;; esac
+    i=$((i + 1))
+  done
+  [ -z "$eng" ] && return 0
+  i=$((i + 1))
+  # global options of the engine (and of compose)
+  while [ "$i" -lt "$n" ]; do
+    a=$(ctr_unq "${w[i]}")
+    case "$a" in
+      -H|--host|--context|-c|--config|--log-level|-l|-f|--file|-p|--project-name|--profile|--env-file|--project-directory|--ansi|--progress|--namespace|-n|--address|--url|--connection|--root|--runroot) i=$((i + 2)) ;;
+      -*) i=$((i + 1)) ;;
+      *) break ;;
+    esac
+  done
+  sub=$(ctr_unq "${w[i]:-}")
+  case "$eng" in *-compose) sub="compose-$sub" ;; esac
+  if [ "$sub" = "compose" ]; then
+    i=$((i + 1))
+    while [ "$i" -lt "$n" ]; do
+      a=$(ctr_unq "${w[i]}")
+      case "$a" in -f|--file|-p|--project-name|--profile|--env-file|--project-directory|--ansi|--progress|--parallel) i=$((i + 2)) ;; -*) i=$((i + 1)) ;; *) break ;; esac
+    done
+    sub="compose-$(ctr_unq "${w[i]:-}")"
+  fi
+  [ "$sub" = "container" ] && { i=$((i + 1)); sub=$(ctr_unq "${w[i]:-}"); }
+  i=$((i + 1))
+  local entry="" svc="" rest="" cpus="" quota="" period="" mem=""
+  case "$sub" in
+    compose-run|compose-exec)
+      while [ "$i" -lt "$n" ]; do
+        a=$(ctr_unq "${w[i]}")
+        case "$a" in
+          --entrypoint) entry=$(ctr_unq "${w[i+1]:-}"); i=$((i + 2)) ;;
+          --entrypoint=*) entry=${a#--entrypoint=}; i=$((i + 1)) ;;
+          -e|--env|-l|--label|--name|-p|--publish|-u|--user|-v|--volume|-w|--workdir|--pull|--cap-add|--cap-drop|--env-file|--index) i=$((i + 2)) ;;
+          -*) i=$((i + 1)) ;;
+          *) break ;;
+        esac
+      done
+      svc=$(ctr_unq "${w[i]:-}"); i=$((i + 1))
+      rest=$(ctr_unq "$entry ${w[*]:i}")
+      ctr_is_runner "$rest" || return 0
+      case "$svc" in *'$'*|*'`'*) block "a test suite in a compose service named by a variable ($svc); it may be a production service. Name the service. $ctr_route" "AIC-3, SC-6, CP-2" ;; esac
+      printf '%s' "$svc" | grep -qxE "$prod_svc" \
+        && block "running a test suite in a production compose service with $eng ${sub#compose-} ($svc: thehub-backend, thehub-postgres, mykronos-backend). It runs under none of a test container's caps. $ctr_route" "AIC-3, SC-6, CP-2"
+      return 0 ;;
+    run)
+      while [ "$i" -lt "$n" ]; do
+        a=$(ctr_unq "${w[i]}")
+        case "$a" in
+          --cpus=*) cpus=${a#*=} ;;
+          --cpus) cpus=$(ctr_unq "${w[i+1]:-}"); i=$((i + 1)) ;;
+          --cpu-quota=*) quota=${a#*=} ;;
+          --cpu-quota) quota=$(ctr_unq "${w[i+1]:-}"); i=$((i + 1)) ;;
+          --cpu-period=*) period=${a#*=} ;;
+          --cpu-period) period=$(ctr_unq "${w[i+1]:-}"); i=$((i + 1)) ;;
+          --memory=*) mem=${a#*=} ;;
+          --memory|-m) mem=$(ctr_unq "${w[i+1]:-}"); i=$((i + 1)) ;;
+          -m*) mem=${a#-m} ;;
+          --entrypoint=*) entry=${a#*=} ;;
+          --entrypoint) entry=$(ctr_unq "${w[i+1]:-}"); i=$((i + 1)) ;;
+          --*=*) ;;
+          --rm|--detach|--interactive|--tty|--init|--privileged|--read-only|--publish-all|--no-healthcheck|--oom-kill-disable|--quiet|--sig-proxy|--help) ;;
+          --*) i=$((i + 1)) ;;                              # a long option and its value
+          -[ditPq]|-[ditPq][ditPq]|-[ditPq][ditPq][ditPq]) ;;  # flag clusters (-it, -dit)
+          -?) i=$((i + 1)) ;;                               # a short option and its value
+          -*) ;;                                            # a short option with its value attached
+          *) break ;;
+        esac
+        i=$((i + 1))
+      done
+      i=$((i + 1))                                          # the image
+      rest=$(ctr_unq "$entry ${w[*]:i}")
+      ctr_is_runner "$rest" || return 0
+      case "$cpus$quota$period$mem" in *'$'*|*'`'*) block "a test suite in a docker run whose CPU or memory cap is a variable this hook cannot read. Give the caps as numbers. $ctr_route" "AIC-3, SC-6, CP-2" ;; esac
+      { ctr_cpu_ok "$cpus" "$quota" "$period" && ctr_mem_ok "$mem"; } \
+        || block "running a test suite in a $eng run without a CPU cap of at most 2 (--cpus, or --cpu-quota) and a memory cap of at most 2g (--memory) before the image. $ctr_route" "AIC-3, SC-6, CP-2"
+      return 0 ;;
+  esac
+  return 0
+}
 if g "$docker_exec$prod_ctr$runner_after"; then
   block "running a test suite inside a production container with docker exec. It runs under no --cpus/--memory cap (the 2026-10-23 outage, TheHub #61001). Run it in a capped test container through the shared lock instead: bash scripts/docker-test-lock.sh run <owner> -- bash scripts/test-offline.sh ... (--cpus 2 --memory 2g)." "AIC-3, SC-6, CP-2"
 fi
 }
 
+# Review of #198 (round 1): the container rules read shell words with quotes honoured, so
+# --entrypoint "python -m pytest" is one word and -e X="--cpus 2 -m 2g" is not a cap. Run on
+# the masked view (a separator inside quotes is already a space) and the PowerShell view.
+read -r -d '' ctr_tok_awk <<'AWK'
+function flush() { if (have) { print tok; tok = ""; have = 0 } }
+{ s = (NR > 1) ? s "\n" $0 : $0 }
+END {
+  n = length(s); q = ""
+  for (i = 1; i <= n; i++) {
+    c = substr(s, i, 1)
+    if (q != "") { if (c == q) q = ""; else if (c == "\\" && q == "\"" && i < n) tok = tok substr(s, ++i, 1); else tok = tok c; continue }
+    if (c == "'" || c == "\"") { q = c; have = 1; continue }
+    if (c == "\\" && i < n) { tok = tok substr(s, ++i, 1); have = 1; continue }
+    if (c == " " || c == "\t") { flush(); continue }
+    if (c == "\n" || c == ";" || c == "|" || c == "&" || c == "(" || c == ")" || c == "`") { flush(); print "\001"; continue }
+    tok = tok c; have = 1
+  }
+  flush()
+}
+AWK
+ctr_guard() { # $1: one view of the command
+  local toks=() seg=() t
+  mapfile -t toks < <(printf '%s' "$1" | LC_ALL=C awk "$ctr_tok_awk")
+  toks+=($'\001')
+  for t in "${toks[@]}"; do
+    if [ "$t" = $'\001' ]; then
+      [ "${#seg[@]}" -gt 0 ] && ctr_judge "${seg[@]}"
+      seg=(); continue
+    fi
+    seg+=("$t")
+  done
+}
 cmd="$raw_cmd"; guard
 if [ "$word_cmd" != "$raw_cmd" ]; then cmd="$word_cmd"; guard; fi
 if [ "$ps_cmd" != "$raw_cmd" ] && [ "$ps_cmd" != "$word_cmd" ]; then cmd="$ps_cmd"; guard; fi
+if g "$B"'(docker|podman|nerdctl|docker-compose|podman-compose)([[:space:]]|$)' || [ "$ps_cmd" != "$raw_cmd" ]; then
+  ctr_guard "$masked_cmd"
+  [ "$ps_cmd" != "$raw_cmd" ] && ctr_guard "$ps_cmd"
+fi
 
 exit 0

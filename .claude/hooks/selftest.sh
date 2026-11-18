@@ -549,6 +549,25 @@ check "docker run pytest, capped"            allow "$(payload 'docker run --rm -
 check "docker run pytest, capped, -m/="      allow "$(payload 'docker run --rm --cpus=2 -m 2g python:3.12 pytest')"         guard-bash.sh
 check "compose run backend-staging pytest"   allow "$(payload 'docker compose run backend-staging pytest')"                 guard-bash.sh
 check "docker run, no runner"                allow "$(payload 'docker run --rm alpine cat /etc/os-release')"                guard-bash.sh
+# Review of #198, round 1 (classes; the exact inputs are in the binnacle review).
+check "PS: (Get-Command gh.exe).Source"      block "$(pspayload '& (Get-Command gh.exe).Source pr merge 1')"              guard-bash.sh
+check "PS: (gcm GH).Source"                  block "$(pspayload '& (gcm GH).Source pr merge 1')"                          guard-bash.sh
+check "PS: (Get-Command -Name git.exe)"      block "$(pspayload '& (Get-Command -Name git.exe).Source push --force origin feat')" guard-bash.sh
+check "gh alias set Git 'pr merge'"          block "$(payload "gh alias set Git 'pr merge'")"                             guard-bash.sh
+check "compose run --entrypoint pytest"      block "$(payload 'docker compose run --entrypoint pytest backend')"         guard-bash.sh
+check "compose run, service in a variable"   block "$(payload 'docker compose run $SVC pytest')"                         guard-bash.sh
+check "podman compose run backend"           block "$(payload 'podman compose run backend pytest')"                      guard-bash.sh
+check "docker run, caps of 0"                block "$(payload 'docker run --rm --cpus 0 -m 0 python:3.12 pytest')"       guard-bash.sh
+check "docker run, caps above the route"     block "$(payload 'docker run --rm --cpus 64 -m 512g python:3.12 pytest')"   guard-bash.sh
+check "docker run, caps after the image"     block "$(payload 'docker run --rm python:3.12 pytest --cpus 2 --memory 2g')" guard-bash.sh
+check "docker run, the word compose"         block "$(payload 'docker run --rm python:3.12 pytest -k compose tests')"    guard-bash.sh
+check "docker run, caps inside -e"           block "$(payload 'docker run --rm -e X="--cpus 2 -m 2g" python:3.12 pytest')" guard-bash.sh
+check "docker run, caps from variables"      block "$(payload 'docker run --rm --cpus $C --memory $M python:3.12 pytest')" guard-bash.sh
+check "podman run, uncapped"                 block "$(payload 'podman run --rm python:3.12 pytest')"                     guard-bash.sh
+check "docker run, --memory \"2g\" quoted"    allow "$(payload 'docker run --rm --cpus 2 --memory "2g" python:3.12 pytest')" guard-bash.sh
+check "docker run, --cpu-quota cap"          allow "$(payload 'docker run --rm --cpu-quota 200000 -m 2g python:3.12 pytest')" guard-bash.sh
+check "docker run pip install pytest"        allow "$(payload 'docker run --rm python:3.12 pip install pytest')"         guard-bash.sh
+check "docker run -w /opt/tox"               allow "$(payload 'docker run --rm -w /opt/tox alpine ls')"                  guard-bash.sh
 echo ""
 echo "guard-write.sh — must BLOCK (AU-9, AIC-5)"
 check "hand-edit generated SARIF" block "$(wpayload 'evidence/142/g4/scan.sarif' 'x')"    guard-write.sh
