@@ -573,6 +573,31 @@ check "gh api git/refs, ref=\$VAR"     block "$(payload 'gh api repos/O/R/git/re
 check "gh api git/refs, refs/heads/\$X" block "$(payload 'gh api repos/O/R/git/refs -f ref=refs/heads/$X -f sha=a')" guard-bash.sh
 check "gh api git/refs, ref=\$(...)"   block "$(payload 'gh api repos/O/R/git/refs -f ref=$(cat r) -f sha=a')" guard-bash.sh
 check "gh api git/refs, -F ref=@file"  block "$(payload 'gh api repos/O/R/git/refs -F ref=@ref.txt -f sha=a')" guard-bash.sh
+# Review of keel #192, round 2 (rescoped): quoted text is text; the command word is judged.
+check "commit -m naming git push --tags" allow "$(payload 'git commit -m "docs: git push --tags is refused"')" guard-bash.sh
+check "pr create --body naming git tag v1" allow "$(payload 'gh pr create --title "guard: v* tags" --body "refuses git tag v1.2.3"')" guard-bash.sh
+check "echo / grep naming a tag push"  allow "$(payload "echo 'git push origin v1.2.3' && grep -rn 'git tag v' docs/")" guard-bash.sh
+check "commit -F heredoc naming a tag" allow "$(payload "git commit -F - <<'EOF'
+refuse git push origin v1.2.3
+EOF")" guard-bash.sh
+check "a # comment naming a tag push"  allow "$(payload '# git push origin v1.2.3')"                 guard-bash.sh
+check "PS: commit -m naming a tag"     allow "$(pspayload 'git commit -m "it''s git tag v1.2.3"')"   guard-bash.sh
+check "push 2>&1 before a tag"         block "$(payload 'git push origin 2>&1 v1.2.3')"              guard-bash.sh
+check "push the tags/ shorthand"       block "$(payload 'git push origin tags/v1.2.3')"              guard-bash.sh
+check "push a brace-expanded refspec"  block "$(payload 'git push origin refs/t{ags,}/v1.2.3')"      guard-bash.sh
+check "git \$p (not literal) a tag"    block "$(payload 'p=push; git $p origin v1.2.3')"             guard-bash.sh
+check "xargs git push"                 block "$(payload 'echo v1.2.3 | xargs git push origin')"      guard-bash.sh
+check "two levels of shell"            block "$(payload "bash -c 'sh -c \"git push origin v1.2.3\"'")" guard-bash.sh
+check "heredoc fed to bash"            block "$(payload "bash <<'EOF'
+git push origin v1.2.3
+EOF")" guard-bash.sh
+check "tag --sort with a name"         block "$(payload 'git tag --sort=refname v1.2.3')"            guard-bash.sh
+check "update-ref refs/tags"           block "$(payload 'git update-ref refs/tags/v1.2.3 HEAD')"     guard-bash.sh
+check "gh api -iX POST a tag ref"      block "$(payload 'gh api -iX POST repos/O/R/git/refs -f ref=refs/tags/v9 -f sha=a')" guard-bash.sh
+check "gh api by repository id"        block "$(payload 'gh api repositories/1/git/refs -f ref=refs/tags/v9 -f sha=a')" guard-bash.sh
+check "PS: splatted git @a"            block "$(pspayload "\$a=@('push','origin','v1.2.3'); git @a")" guard-bash.sh
+check "PS: Start-Process git tag push" block "$(pspayload "Start-Process git -ArgumentList 'push origin v1.2.3'")" guard-bash.sh
+check "tag --sort, listing"            allow "$(payload 'git tag --sort=-creatordate')"              guard-bash.sh
 check "gh api git/refs, two refs"      block "$(payload 'gh api repos/O/R/git/refs -f ref=refs/heads/x -f ref=refs/tags/v9 -f sha=a')" guard-bash.sh
 check "push a refs/* glob"             block "$(payload "git push origin 'refs/*'")"                     guard-bash.sh
 check "push a refs/t* glob"            block "$(payload "git push origin 'refs/t*:refs/t*'")"            guard-bash.sh

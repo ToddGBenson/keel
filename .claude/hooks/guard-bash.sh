@@ -137,6 +137,7 @@ AWK
 # would report it even where no jq binary exists.
 if type -P jq >/dev/null 2>&1; then
   cmd="$(printf '%s' "$payload" | jq -r '.tool_input.command // empty')"
+  tool_name="$(printf '%s' "$payload" | jq -r '.tool_name // empty' 2>/dev/null)" || tool_name=""
 else
   # TheHub #61038 review: take the JSON string itself (not everything up to the
   # payload's last quote, which swallowed the "description" field) and decode it, so
@@ -145,6 +146,7 @@ else
   cmd="$(printf '%s' "$payload" | sed -nE 's/.*"command"[[:space:]]*:[[:space:]]*"(([^"\\]|\\.)*)".*/\1/p')"
   cmd_json="$cmd"
   cmd="$(printf '%s' "$cmd_json" | LC_ALL=C awk "$json_unescape_awk" 2>/dev/null)" || cmd="$cmd_json"
+  tool_name="$(printf '%s' "$payload" | sed -nE 's/.*"tool_name"[[:space:]]*:[[:space:]]*"([A-Za-z]+)".*/\1/p')"
 fi
 
 [ -z "$cmd" ] && exit 0
@@ -152,6 +154,7 @@ fi
 # TheHub #61038 review: a backslash-newline continues the command, for every command.
 # This was done for curl only, so `gh api --method POST \<newline> .../pending_deployments`
 # put the endpoint on a line of its own, which no gh api rule read.
+tag_src=$cmd   # the release-tag guard splits words itself; bash deletes a backslash-newline (round 2)
 cmd=${cmd//$'\\\n'/ }
 
 # TheHub #61038 review: the same binary under another name. curl.exe is the natural
@@ -944,29 +947,98 @@ fi
 #                                   slash and the API host are dropped.
 # A branch named v2-migration is allowed; a bare name shaped like a release (v<digits> with
 # dots, or v and a capital) is refused, because it is a tag when one by that name exists.
+# Review of #192, round 2 (rescoped by the PO): the tag guard judges only the command word of
+# each simple command and the words that belong to it. Quoted text (a -m message, a --body, an
+# echo or grep argument), a heredoc body fed to anything but a shell, and a # comment are never
+# read as a command. The text is split the way the shell that runs it would split it: bash
+# (quotes, backslash-newline deleted, a redirect and its target, heredocs, comments) or
+# PowerShell (backtick escapes, '' and "" in quotes, script blocks, (Get-Command x).Source).
+# A Bash payload is read the bash way and a PowerShell payload the PowerShell way. A shell, eval, Invoke-Expression, cmd /c or
+# Start-Process that runs a command is judged on that command. A payload that names no tool is
+# a Bash one: Claude Code's PowerShell tool always sends tool_name.
 read -r -d '' tok_awk <<'AWK'
-function flush() { if (have) { print tok; tok = ""; have = 0 } }
+function flush() { if (have) { gsub(/\n/, "\003", tok); print tok; tok = ""; have = 0 } }
+function bodies(   k, line, body, j, dl) {        # the heredoc bodies that start after this newline
+  for (k = 1; k <= nhd; k++) {
+    body = ""
+    while (i < n) {
+      j = index(substr(s, i + 1), "\n"); if (j == 0) j = n - i + 1
+      line = substr(s, i + 1, j - 1); i += j
+      dl = line; if (hdash[k]) sub(/^\t+/, "", dl)
+      if (dl == hdelim[k]) break
+      body = body line "\n"
+    }
+    gsub(/\n/, "\003", body); print "\002" body
+  }
+  nhd = 0
+}
 { s = (NR > 1) ? s "\n" $0 : $0 }
 END {
-  n = length(s); q = ""; tok = ""; have = 0
+  n = length(s); q = ""; tok = ""; have = 0; nhd = 0
   for (i = 1; i <= n; i++) {
-    c = substr(s, i, 1)
+    c = substr(s, i, 1); d = substr(s, i + 1, 1)
     if (q == "'") { if (c == "'") q = ""; else tok = tok c; continue }
     if (q == "\"") {
       if (c == "\"") q = ""
-      else if (c == "\\" && i < n) tok = tok substr(s, ++i, 1)
+      else if (c == "\\" && d == "\n") i++
+      else if (c == "\\" && (d == "$" || d == "`" || d == "\"" || d == "\\")) { tok = tok d; i++ }
       else tok = tok c
       continue
     }
     if (c == "'" || c == "\"") { q = c; have = 1; continue }
-    if (c == "\\" && i < n) { tok = tok substr(s, ++i, 1); have = 1; continue }
+    if (c == "\\" && i < n) { i++; if (d != "\n") { tok = tok d; have = 1 }; continue }
+    if (c == "#" && !have) { while (i < n && substr(s, i + 1, 1) != "\n") i++; continue }
     if (c == " " || c == "\t") { flush(); continue }
-    if (c == "\n" || c == ";" || c == "|" || c == "&") { flush(); print "\001"; continue }
-    if (c == "(" || c == ")") { flush(); continue }
-    if (c == "`") { flush(); print "`"; continue }
+    if (c == "\n") { flush(); if (nhd) bodies(); print "\001"; continue }
+    if (c == "&" && d == ">") { flush(); i++; while (substr(s, i + 1, 1) ~ /[>|&]/) i++; print ">"; continue }
+    if (c == ";" || c == "|" || c == "&" || c == "(" || c == ")") { flush(); print "\001"; continue }
+    if (c == "`") { tok = tok c; have = 1; flush(); print "\001"; continue }   # a word holding ` is not literal
+    if (c == "<" && d == "<" && substr(s, i + 2, 1) == "<") { flush(); i += 2; print "<<<"; continue }
+    if (c == "<" && d == "<") {
+      flush(); i++
+      dash = 0; if (substr(s, i + 1, 1) == "-") { dash = 1; i++ }
+      while (substr(s, i + 1, 1) ~ /[ \t]/) i++
+      dl = ""
+      while (i < n) { e = substr(s, i + 1, 1); if (e ~ /[ \t\n;|&<>()]/) break; i++; if (e != "'" && e != "\"" && e != "\\") dl = dl e }
+      nhd++; hdelim[nhd] = dl; hdash[nhd] = dash
+      continue
+    }
     if (c == "<" || c == ">") {
       if (tok ~ /^[0-9]+$/) { tok = ""; have = 0 } else flush()
-      while (i < n && (substr(s, i + 1, 1) == ">" || substr(s, i + 1, 1) == "<")) i++
+      while (substr(s, i + 1, 1) ~ /[<>&|]/) i++
+      print ">"; continue
+    }
+    tok = tok c; have = 1
+  }
+  flush()
+}
+AWK
+read -r -d '' ps_tok_awk <<'AWK'
+function flush() { if (have) { gsub(/\n/, "\003", tok); print tok; tok = ""; have = 0 } }
+{ s = (NR > 1) ? s "\n" $0 : $0 }
+END {
+  n = length(s); q = ""; tok = ""; have = 0
+  for (i = 1; i <= n; i++) {
+    c = substr(s, i, 1); d = substr(s, i + 1, 1)
+    if (q == "'") {
+      if (c == "'" && d == "'") { tok = tok "'"; i++ } else if (c == "'") q = ""; else tok = tok c
+      continue
+    }
+    if (q == "\"") {
+      if (c == "`" && i < n) { i++; if (d != "\n") tok = tok d }
+      else if (c == "\"" && d == "\"") { tok = tok "\""; i++ }
+      else if (c == "\"") q = ""
+      else tok = tok c
+      continue
+    }
+    if (c == "'" || c == "\"") { q = c; have = 1; continue }
+    if (c == "`" && i < n) { i++; if (d != "\n") { tok = tok d; have = 1 }; continue }
+    if (c == "#" && !have) { while (i < n && substr(s, i + 1, 1) != "\n") i++; continue }
+    if (c == " " || c == "\t" || c == ",") { flush(); continue }
+    if (c == "\n" || c == ";" || c == "|" || c == "&" || c == "(" || c == ")" || c == "{" || c == "}") { flush(); print "\001"; continue }
+    if (c == "<" || c == ">") {
+      if (tok ~ /^([0-9]+|\*)$/) { tok = ""; have = 0 } else flush()
+      while (substr(s, i + 1, 1) ~ /[<>&]/) i++
       print ">"; continue
     }
     tok = tok c; have = 1
@@ -975,22 +1047,27 @@ END {
 }
 AWK
 tag_msg="A v* tag is the ref a release is cut from, and cutting a release is the operator's decision. Push your branch and open a PR; after merge the operator creates the tag and dispatches release.yml."
-tag_dyn() { case "$1" in *'$'*|*'`'*|*'*'*|*'?'*|*'['*) return 0 ;; esac; return 1; }
+tag_mode=bash; tag_depth=0
+tag_dyn() { # a word this hook cannot read as written
+  case "$1" in *'$'*|*'`'*|*'*'*|*'?'*|*'['*|*'{'*) return 0 ;; esac
+  [ "$tag_mode" = ps ] && case "$1" in @*) return 0 ;; esac
+  return 1
+}
 tag_versionish() { printf '%s' "$1" | grep -qE '^v([0-9]+([.][0-9]+)+([-+.][0-9A-Za-z.-]*)?|[0-9]+|[A-Z][A-Za-z0-9._-]*)$'; }
 tag_side() { # one side of a refspec
   [ -z "$1" ] && return 0
-  tag_dyn "$1" && block "a git push whose refspec ($1) cannot be read here: a variable, a substitution or a glob may name a release tag. Name the branch literally. $tag_msg" "CM-3, AIC-1, AC-5"
+  tag_dyn "$1" && block "a git push whose refspec ($1) cannot be read here: a variable, a substitution, a brace or a glob may name a release tag. Name the branch literally. $tag_msg" "CM-3, AIC-1, AC-5"
   case "$1" in
-    refs/tags/*) block "pushing a release tag ($1). $tag_msg" "CM-3, AIC-1, AC-5" ;;
+    refs/tags/*|tags/*) block "pushing a release tag ($1). $tag_msg" "CM-3, AIC-1, AC-5" ;;
   esac
-  case "$1" in refs/*) return 0 ;; esac
+  case "$1" in refs/*|heads/*) return 0 ;; esac
   tag_versionish "$1" && block "pushing a release tag ($1, a tag when one by that name exists). $tag_msg" "CM-3, AIC-1, AC-5"
   return 0
 }
 tag_cfg() { # a git config key that makes push send tags
   printf '%s' "$1" | grep -qiE '^(push[.]followtags|remote[.].+[.](push|mirror))(=|$)'
 }
-tag_git() { # tag_git <tokens after git>
+tag_git() { # tag_git <words after git>
   local a sub="" cfg_bad="" k
   while [ "$#" -gt 0 ]; do
     a=$1; shift
@@ -999,11 +1076,16 @@ tag_git() { # tag_git <tokens after git>
       -c*) tag_cfg "${a#-c}" && cfg_bad="${a#-c}" ;;
       --config-env=*) tag_cfg "${a#--config-env=}" && cfg_bad="${a#--config-env=}" ;;
       --config-env) [ "$#" -gt 0 ] && { tag_cfg "$1" && cfg_bad="$1"; shift; } ;;
-      -C|--git-dir|--work-tree|--namespace|--super-prefix) [ "$#" -gt 0 ] && shift ;;
+      -C|--git-dir|--work-tree|--namespace|--super-prefix|--attr-source) [ "$#" -gt 0 ] && shift ;;
+      ">") [ "$#" -gt 0 ] && shift ;;                       # a redirect and its target (git 2>&1 push)
       -*) ;;
       *) sub=$a; break ;;
     esac
   done
+  # A subcommand this hook cannot read as written may be push or tag (round 2).
+  if [ -n "$sub" ] && tag_dyn "$sub"; then
+    block "a git command whose subcommand ($sub) is not written literally; it may push or create a tag. Write the command out. $tag_msg" "CM-3, AIC-1, AC-5"
+  fi
   case "$sub" in
     push)
       [ -n "$cfg_bad" ] && block "a git push with $cfg_bad set, which sends tags or every ref. $tag_msg" "CM-3, AIC-1, AC-5"
@@ -1011,7 +1093,6 @@ tag_git() { # tag_git <tokens after git>
       while [ "$#" -gt 0 ]; do
         a=$1; shift
         if [ "$a" = ">" ]; then [ "$#" -gt 0 ] && shift; continue; fi
-        [ "$a" = "\`" ] && continue
         if [ "$dd" -eq 0 ] && [ "$a" = "--" ]; then dd=1; continue; fi
         if [ "$dd" -eq 0 ]; then
           case "$a" in
@@ -1044,14 +1125,30 @@ tag_git() { # tag_git <tokens after git>
       done ;;
     send-pack)
       block "git send-pack, the plumbing under git push, which can send any ref, tags included. $tag_msg" "CM-3, AIC-1, AC-5" ;;
+    update-ref)
+      # Round 2: a tag ref written without git tag. --stdin reads refs this hook cannot see.
+      for a in "$@"; do
+        case "$a" in
+          --stdin) block "git update-ref --stdin, whose refs this hook cannot read; it may write a tag. $tag_msg" "CM-3, AIC-1, AC-5" ;;
+          refs/tags/*|tags/*) block "writing a tag ref with git update-ref ($a). $tag_msg" "CM-3, AIC-1, AC-5" ;;
+        esac
+        tag_dyn "$a" && block "git update-ref with a ref this hook cannot read ($a); it may be a tag. $tag_msg" "CM-3, AIC-1, AC-5"
+      done ;;
+    fetch)
+      # Round 2: a fetch whose refspec writes a local tag (git fetch . HEAD:refs/tags/v1).
+      for a in "$@"; do
+        case "$a" in *:*) case "${a#*:}" in refs/tags/*|tags/*) block "a git fetch that writes a tag ref ($a). $tag_msg" "CM-3, AIC-1, AC-5" ;; esac ;; esac
+      done ;;
     tag)
+      # --sort, --format and --column do not list on their own: with a name they create the
+      # tag (round 2). The options that do list are the ones git documents as implying -l.
       local listing=0 tname=""
       while [ "$#" -gt 0 ]; do
         a=$1; shift
         if [ "$a" = ">" ]; then [ "$#" -gt 0 ] && shift; continue; fi
         case "$a" in
-          -l|--list|-d|--delete|-v|--verify|--contains*|--no-contains*|--points-at*|--merged*|--no-merged*|-n*|--column*|--sort*|--format*) listing=1 ;;
-          -m|-F|-u|--message|--file|--local-user|--cleanup|--trailer) [ "$#" -gt 0 ] && shift ;;
+          -l|--list|-d|--delete|-v|--verify|--contains*|--no-contains*|--points-at*|--merged*|--no-merged*|-n*) listing=1 ;;
+          --sort|--format|-m|-F|-u|--message|--file|--local-user|--cleanup|--trailer) [ "$#" -gt 0 ] && shift ;;
           -*) ;;
           *) [ -z "$tname" ] && tname=$a ;;
         esac
@@ -1061,10 +1158,12 @@ tag_git() { # tag_git <tokens after git>
           && block "creating a release tag ($tname). $tag_msg" "CM-3, AIC-1, AC-5"
       fi ;;
     config)
-      local reading=0 first=""
+      local reading=0 first="" skip=0
       for a in "$@"; do
+        if [ "$skip" -eq 1 ]; then skip=0; continue; fi
         case "$a" in
           --get|--get-all|--get-regexp|--get-urlmatch|--list|-l|--unset|--unset-all|--get-color|--get-colorbool) reading=1 ;;
+          --comment|--type|--file|-f|--blob|--default|--value) skip=1 ;;
           -*) ;;
           *) [ -z "$first" ] && first=$a ;;
         esac
@@ -1087,29 +1186,41 @@ tag_ref_field() { # $1: the flag, $2: key=value. Counts ref= fields; marks one t
   printf '%s' "$v" | grep -qE '^refs/heads/[A-Za-z0-9._/-]+$' || ref_ok=0
   return 0
 }
-tag_ghapi() { # tag_ghapi <tokens after gh api>
-  local a method="" body=0 input=0 ep="" refs=0 ref_ok=1
+tag_ghapi() { # tag_ghapi <words after gh api>
+  local a method="" body=0 input=0 ep="" refs=0 ref_ok=1 k ch v
   while [ "$#" -gt 0 ]; do
     a=$1; shift
     if [ "$a" = ">" ]; then [ "$#" -gt 0 ] && shift; continue; fi
     case "$a" in
       -X|--method) [ "$#" -gt 0 ] && { method=$1; shift; } ;;
       --method=*) method=${a#--method=} ;;
-      --*) ;;
-      -*X*) method=${a#*X} ;;
-    esac
-    case "$a" in
       -f|-F|--field|--raw-field)
         body=1
         if [ "$#" -gt 0 ]; then tag_ref_field "$a" "$1"; shift; fi ;;
-      -f*|-F*)
-        body=1; tag_ref_field "${a:0:2}" "${a:2}" ;;
       --field=*|--raw-field=*)
         body=1; tag_ref_field "${a%%=*}" "${a#*=}" ;;
       --input) body=1; input=1; [ "$#" -gt 0 ] && shift ;;
       --input=*) body=1; input=1 ;;
-      -H|--header|-q|--jq|-t|--template|--cache|-p|--preview|--hostname) [ "$#" -gt 0 ] && shift ;;
-      -*) ;;
+      --header|--jq|--template|--cache|--preview|--hostname) [ "$#" -gt 0 ] && shift ;;
+      --*) ;;
+      -?*)
+        # Round 2: a cluster of short flags, read letter by letter the way gh reads it. A
+        # letter that takes a value takes the rest of the word, or the next word.
+        k=1
+        while [ "$k" -lt "${#a}" ]; do
+          ch=${a:k:1}
+          case "$ch" in
+            X|f|F|H|q|t|p)
+              v=${a:k+1}
+              if [ -z "$v" ] && [ "$#" -gt 0 ]; then v=$1; shift; fi
+              case "$ch" in
+                X) method=$v ;;
+                f|F) body=1; tag_ref_field "-$ch" "$v" ;;
+              esac
+              break ;;
+          esac
+          k=$((k + 1))
+        done ;;
       *) [ -z "$ep" ] && ep=$a ;;
     esac
   done
@@ -1118,45 +1229,176 @@ tag_ghapi() { # tag_ghapi <tokens after gh api>
     [Gg][Ee][Tt]) return 0 ;;
     "") [ "$body" -eq 0 ] && return 0 ;;
   esac
-  ep=${ep%%\?*}; ep=${ep#https://api.github.com}; ep=${ep#http://api.github.com}
+  # Round 2: the endpoint in any case, with any scheme, host and port, a fragment or a
+  # query, and by repository id.
+  ep=$(printf '%s' "$ep" | tr 'A-Z' 'a-z'); ep=${ep%%\#*}; ep=${ep%%\?*}
+  case "$ep" in http://*|https://*) ep=${ep#*://}; case "$ep" in */*) ep=/${ep#*/} ;; *) ep="" ;; esac ;; esac
   while case "$ep" in *//*) true ;; *) false ;; esac; do ep=${ep//\/\//\/}; done
   ep=${ep#/}; while case "$ep" in */) true ;; *) false ;; esac; do ep=${ep%/}; done
-  printf '%s' "$ep" | grep -qE '^repos/[^/]+/[^/]+/git/tags$' \
+  local R='^(repos/[^/]+/[^/]+|repositories/[^/]+)'
+  printf '%s' "$ep" | grep -qE "$R/git/tags\$" \
     && block "creating a tag object through gh api. $tag_msg" "CM-3, AIC-1, AC-5"
-  printf '%s' "$ep" | grep -qE '^repos/[^/]+/[^/]+/git/refs/tags(/|$)' \
+  printf '%s' "$ep" | grep -qE "$R/git/refs/tags(/|\$)" \
     && block "writing a tag ref through gh api. $tag_msg" "CM-3, AIC-1, AC-5"
-  if printf '%s' "$ep" | grep -qE '^repos/[^/]+/[^/]+/git/refs$'; then
+  if printf '%s' "$ep" | grep -qE "$R/git/refs\$"; then
     { [ "$input" -eq 1 ] || [ "$refs" -ne 1 ] || [ "$ref_ok" -eq 0 ]; } \
       && block "creating a ref through gh api that is not one literal ref=refs/heads/<branch> (a tag, a variable, a file, --input or more than one ref). $tag_msg" "CM-3, AIC-1, AC-5"
   fi
   return 0
 }
-tag_guard() { # $1: one view of the command
-  local toks=() seg=() t
-  mapfile -t toks < <(printf '%s' "$1" | LC_ALL=C awk "$tok_awk")
+tag_guard() { # $1: bash|ps, $2: the command text
+  local toks=() seg=() t mode_was=$tag_mode src=$2
+  tag_depth=$((tag_depth + 1))
+  if [ "$tag_depth" -gt 8 ]; then
+    case "$src" in *[Gg][Ii][Tt]*|*[Gg][Hh]*) block "a command nested more than 8 levels deep that names git or gh; this hook cannot read it. Run it directly. $tag_msg" "CM-3, AIC-1, AC-5" ;; esac
+    tag_depth=$((tag_depth - 1)); return 0
+  fi
+  tag_mode=$1
+  if [ "$1" = ps ]; then
+    # (Get-Command git).Source and its spellings run git.
+    src=$(printf '%s' "$src" | sed -E 's/\([[:space:]]*([Gg][Ee][Tt]-[Cc][Oo][Mm][Mm][Aa][Nn][Dd]|[Gg][Cc][Mm])([[:space:]]+-[A-Za-z]+)*[[:space:]]+["'"'"']?([^()"'"'"'[:space:]]+)["'"'"']?[[:space:]]*\)[.][A-Za-z]+/ \3 /g')
+    mapfile -t toks < <(printf '%s' "$src" | LC_ALL=C awk "$ps_tok_awk")
+  else
+    mapfile -t toks < <(printf '%s' "$src" | LC_ALL=C awk "$tok_awk")
+  fi
   toks+=($'\001')
   for t in "${toks[@]}"; do
-    if [ "$t" = $'\001' ] || [ "$t" = "\`" ]; then
+    if [ "$t" = $'\001' ]; then
       [ "${#seg[@]}" -gt 0 ] && tag_seg "${seg[@]}"
       seg=(); continue
     fi
-    seg+=("$t")
+    seg+=("${t//$'\003'/$'\n'}")
   done
+  tag_mode=$mode_was; tag_depth=$((tag_depth - 1))
 }
-tag_seg() {
-  local i n=$#
-  local w=("$@")
-  for ((i = 0; i < n; i++)); do
-    case "${w[i]}" in
-      git) tag_git "${w[@]:i+1}" ;;
-      gh) [ "${w[i+1]:-}" = "api" ] && tag_ghapi "${w[@]:i+2}" ;;
+tag_names_ref_cmd() { # true when a word among $@ is a git subcommand that can write a tag
+  local a; for a in "$@"; do case "$a" in push|tag|send-pack|update-ref|fetch|config) return 0 ;; esac; done; return 1
+}
+# No process per word (the #62031 T1 lesson): a word is classified in any case with
+# nocasematch (bash 3.1+), set only inside these two helpers, into a lower-case name.
+tag_pre() { # $1: a word before the command -> tag_pre_out: skip | assign | <wrapper> | ""
+  local x
+  tag_pre_out=""
+  shopt -s nocasematch
+  case "$1" in
+    '{'|'}'|'!'|if|then|else|elif|do|while|until|time|'&'|'.'|'$env:'*=*) tag_pre_out=skip ;;
+    *)
+      for x in env command builtin exec nohup sudo doas nice timeout stdbuf xargs; do
+        [[ $1 == "$x" ]] && { tag_pre_out=$x; break; }
+      done ;;
+  esac
+  shopt -u nocasematch
+  if [ -z "$tag_pre_out" ] && [[ $1 =~ ^[A-Za-z_][A-Za-z0-9_]*(\[[^]]*\])?[+]?= ]]; then tag_pre_out=assign; fi
+  return 0
+}
+tag_cmdkind() { # $1: a command name, path and .exe removed -> tag_cmdkind_out
+  tag_cmdkind_out=""
+  shopt -s nocasematch
+  case "$1" in
+    sh|bash|dash|zsh|ash|ksh) tag_cmdkind_out="sh" ;;
+    pwsh|powershell) tag_cmdkind_out=pwsh ;;
+    cmd) tag_cmdkind_out=cmd ;;
+    eval) tag_cmdkind_out="eval" ;;
+    iex|invoke-expression) tag_cmdkind_out=iex ;;
+    start-process|saps|start) tag_cmdkind_out=start ;;
+    git) tag_cmdkind_out=git ;;
+    gh) tag_cmdkind_out=gh ;;
+  esac
+  shopt -u nocasematch
+  return 0
+}
+tag_seg() { # $@: the words of one simple command
+  local w=() bodies=() hs=() a lw base i=0 n k xargs=0 rest
+  while [ "$#" -gt 0 ]; do
+    a=$1; shift
+    case "$a" in
+      $'\002'*) bodies+=("${a#?}") ;;
+      "<<<") [ "$#" -gt 0 ] && { hs+=("$1"); shift; } ;;
+      *) w+=("$a") ;;
     esac
   done
+  n=${#w[@]}
+  # The words before the command: assignments, keywords and wrappers that run the rest.
+  while [ "$i" -lt "$n" ]; do
+    a=${w[i]}; tag_pre "$a"; lw=$tag_pre_out
+    case "$lw" in skip|assign) i=$((i + 1)); continue ;; esac
+    case "$lw" in
+      env|command|builtin|exec|nohup|sudo|doas|nice|timeout|stdbuf|xargs)
+        [ "$lw" = xargs ] && xargs=1
+        i=$((i + 1))
+        while [ "$i" -lt "$n" ]; do
+          case "${w[i]}" in
+            -I|-n|-L|-P|-d|-E|-s|-a|-u|-g|-C|-k|--signal|--kill-after|--user|--group|-i|-o|-e) [ "$lw" = env ] && [ "${w[i]}" != -u ] && [ "${w[i]}" != -C ] && { i=$((i + 1)); continue; }; i=$((i + 2)) ;;
+            -*) i=$((i + 1)) ;;
+            *=*) [ "$lw" = env ] && i=$((i + 1)) || break ;;
+            *) break ;;
+          esac
+        done
+        [ "$lw" = timeout ] && [ "$i" -lt "$n" ] && i=$((i + 1))  # the duration
+        continue ;;
+    esac
+    break
+  done
+  [ "$i" -ge "$n" ] && return 0
+  a=${w[i]}; base=${a##*/}; base=${base##*\\}; base=${base%.[Ee][Xx][Ee]}; tag_cmdkind "$base"; lw=$tag_cmdkind_out
+  # A command word this hook cannot read, followed by words a tag write needs (round 2).
+  if tag_dyn "$a" && tag_names_ref_cmd "${w[@]:i+1}"; then
+    block "a command whose name ($a) is not written literally, with arguments that can push or create a tag. Write the command out. $tag_msg" "CM-3, AIC-1, AC-5"
+  fi
+  case "$lw" in
+    sh)
+      for ((k = i + 1; k < n; k++)); do
+        case "${w[k]}" in
+          -*c*) [ $((k + 1)) -lt "$n" ] && tag_guard bash "${w[k+1]}"; return 0 ;;
+          -*) ;;
+          *) return 0 ;;                                    # a script file
+        esac
+      done
+      for a in "${bodies[@]}" "${hs[@]}"; do tag_guard bash "$a"; done ;;
+    pwsh)
+      for ((k = i + 1; k < n; k++)); do
+        case "$(printf '%s' "${w[k]}" | tr 'A-Z' 'a-z')" in
+          -c|-co*) rest="${w[*]:k+1}"; tag_guard ps "$rest"; return 0 ;;
+          -e|-ec|-en*) case "${w[*]:k+1}" in *) block "a PowerShell -EncodedCommand, which this hook cannot read. Run the command directly. $tag_msg" "CM-3, AIC-1, AC-5" ;; esac ;;
+          -*) ;;
+          *) return 0 ;;
+        esac
+      done
+      for a in "${bodies[@]}" "${hs[@]}"; do tag_guard ps "$a"; done ;;
+    cmd)
+      for ((k = i + 1; k < n; k++)); do
+        case "${w[k]}" in /[cCkK]) rest="${w[*]:k+1}"; tag_guard bash "$rest"; tag_guard ps "$rest"; return 0 ;; esac
+      done ;;
+    eval) rest="${w[*]:i+1}"; tag_guard "$tag_mode" "$rest" ;;
+    iex)
+      rest=""; for ((k = i + 1; k < n; k++)); do case "${w[k]}" in -[Cc]*) ;; *) rest="$rest ${w[k]}" ;; esac; done
+      tag_guard ps "$rest" ;;
+    start)
+      rest=""; for ((k = i + 1; k < n; k++)); do
+        case "$(printf '%s' "${w[k]}" | tr 'A-Z' 'a-z')" in
+          -filepath|-file*|-argumentlist|-arg*|-wait|-nonewwindow|-passthru|-noprofile) ;;
+          -workingdirectory|-verb|-windowstyle|-redirectstandard*|-credential) k=$((k + 1)) ;;
+          *) rest="$rest ${w[k]}" ;;
+        esac
+      done
+      tag_guard ps "$rest" ;;
+    git)
+      if [ "$xargs" -eq 1 ] && tag_names_ref_cmd "${w[@]:i+1}"; then
+        block "xargs git with a subcommand that can push or create a tag: the refs come from input this hook cannot read. Name them in the command. $tag_msg" "CM-3, AIC-1, AC-5"
+      fi
+      tag_git "${w[@]:i+1}" ;;
+    gh)
+      [ "${w[i+1]:-}" = "api" ] && tag_ghapi "${w[@]:i+2}" ;;
+  esac
+  return 0
 }
 
 cmd="$raw_cmd"; guard
-tag_guard "$masked_cmd"
-if [ "$ps_cmd" != "$raw_cmd" ]; then tag_guard "$ps_cmd"; fi
+case "$tool_name" in
+  Bash) tag_guard bash "$tag_src" ;;
+  PowerShell) tag_guard ps "$tag_src" ;;
+  *) tag_guard bash "$tag_src" ;;   # no tool named: the Bash tool (the PowerShell tool always names itself)
+esac
 if [ "$word_cmd" != "$raw_cmd" ]; then cmd="$word_cmd"; guard; fi
 if [ "$ps_cmd" != "$raw_cmd" ] && [ "$ps_cmd" != "$word_cmd" ]; then cmd="$ps_cmd"; guard; fi
 

@@ -36,6 +36,46 @@ judges only the arguments that name refs:
   --follow-tags is not read as -f. It is now must-block, and `--no-follow-tags` is the must-allow
   case.
 
+## Round 2 (rescoped by the PO after the 2026-11-18 protection change)
+
+The operator's `keel-release-tags` ruleset has an admin bypass, and the agents push with the
+owner's admin credential, so for the agents this hook is still the only control on release tags
+until TheHub #61039. The PO rescoped this story: fix the false positives first, then the cheap
+bypasses; refuse what cannot be parsed; record the rest as gaps that #61039 closes. One review
+round, then ship. Fable 5.2 reviewed 8316706 (BLOCK).
+
+- **False positives (the first fix):** the guard read the masked and the PowerShell views, which
+  keep heredoc bodies and comments or drop quotes, and it judged every word that said `git`. It
+  now splits the command the way the shell that runs it does, and judges only the command word of
+  each simple command. So a commit message, a PR body, `echo`, `grep`, a heredoc and a comment are
+  text. A Bash payload is read the bash way and a PowerShell payload the PowerShell way. A
+  payload that names no tool is a Bash one, because the PowerShell tool always sends tool_name.
+  Shells, `eval`, `Invoke-Expression`, `cmd /c`, `pwsh -c`, `Start-Process` and a heredoc fed to
+  a shell are judged as the command they run, nested up to 8 levels.
+- **Cheap bypasses closed:**
+  - the `tags/` shorthand;
+  - a redirect before the refspec or the subcommand (`2>&1`, `>&2`, `&>`, `>|`);
+  - backslash-newline, deleted as bash deletes it;
+  - brace expansion and backticks, which are not literal;
+  - `--attr-source` taking a value;
+  - a non-literal subcommand or command word;
+  - `xargs git`;
+  - two levels of shell;
+  - `git tag --sort/--format/--column` with a name;
+  - `git config --comment`;
+  - `git update-ref` writing a tag ref, or with `--stdin`;
+  - `git fetch` writing a tag ref;
+  - gh api short-flag clusters (`-iX`, `-fz=XGET`);
+  - the endpoint by repository id, in any case, with a scheme, host, port or fragment.
+- **Gaps, recorded by class (exact inputs are in binnacle #87's review):** a remote, followTags
+  or include.path config written earlier and then a plain push; a v* destination that is not
+  release-shaped pushed from an existing tag; GraphQL createRef with the name in a file. Also
+  GIT_CONFIG_*, a git alias and curl, as before.
+- **Evidence:** the review's round-2 inputs and the earlier ones, run through the hook with no
+  tool, with Bash and with PowerShell: 270 checks, 0 wrong. Selftest: 17 failing on 8316706,
+  415/0 here, and 415/0 with jq off the PATH. Corpus 884/0 (KB-253..259). No process per word:
+  words are classified with nocasematch (the #62031 T1 lesson); a 300-command line takes 0.3 s.
+
 ## Verified independently
 
 - **Red first, round 1:** 37 new selftest cases (review classes, not its exact inputs).
@@ -67,10 +107,10 @@ judges only the arguments that name refs:
 
 ## The control is the hook alone, for now
 
-**Tag rulesets do not exist yet**: GET rulesets returns `[]`. Until the rulesets script runs
-(TheHub #61006), this hook is the only control on release tags. Branch protection does not cover
-tags.
+Since 2026-11-18 keel has a `keel-release-tags` ruleset on `v*`, but it has an admin bypass, and
+the agents' identity is the owner's admin account. binnacle has no tag ruleset. So for the agents
+this hook is the only control on release tags until they have their own identity (TheHub #61039).
 
 ## Residual risk accepted
 
-The gaps above, until #61006 lands server-side protection.
+The gaps above, until the agents have an identity without admin rights (TheHub #61039).

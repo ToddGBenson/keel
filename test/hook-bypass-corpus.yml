@@ -1824,3 +1824,53 @@ entries:
     why: "create a tag ref through the REST API with curl"
     open_in: [jq, no-jq]
     gap: "curl writes to git/refs and git/tags are not read (the curl path is TheHub #61973's)"
+  # ── TheHub #61972 review round 2 (KB-253..259) ──
+  - id: KB-253
+    hook: guard-bash.sh
+    class: release-tag
+    source: TheHub#61972
+    command: "git push 2>&1 origin v1.2.3"
+    expect: block
+    why: "push a tag with a redirect before the repository"
+  - id: KB-254
+    hook: guard-bash.sh
+    class: release-tag
+    source: TheHub#61972
+    command: "git push origin :tags/v1.2.3"
+    expect: block
+    why: "delete a tag through the tags/ shorthand"
+  - id: KB-255
+    hook: guard-bash.sh
+    class: release-tag
+    source: TheHub#61972
+    command: "git --attr-source HEAD push origin v1.2.3"
+    expect: block
+    why: "a global option whose value is a word of its own"
+  - id: KB-256
+    hook: guard-bash.sh
+    class: release-tag
+    source: TheHub#61972
+    command: "git ${X:-push} origin v1.2.3"
+    expect: block
+    why: "a subcommand that is not written literally"
+  - id: KB-257
+    hook: guard-bash.sh
+    class: release-tag
+    source: TheHub#61972
+    command: "git tag --format=x v1.2.3"
+    expect: block
+    why: "create a tag with an option that does not list"
+  - id: KB-258
+    hook: guard-bash.sh
+    class: release-tag
+    source: TheHub#61972
+    command: "git fetch . HEAD:refs/tags/v1.2.3"
+    expect: block
+    why: "write a local tag through git fetch"
+  - id: KB-259
+    hook: guard-bash.sh
+    class: release-tag
+    source: TheHub#61972
+    command: "gh api https://API.github.com:443/repos/O/R/git/refs -f ref=refs/tags/v9 -f sha=abc"
+    expect: block
+    why: "a tag ref through gh api with the host spelled out"
