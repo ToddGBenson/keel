@@ -436,7 +436,8 @@ guard() {
 #
 # Now anchored: the flag must belong to a git commit/push invocation.
 if printf '%s' "$cmd" | grep -qE "$B"'git[[:space:]]+[^|;&]*(commit|push|merge)[^|;&]*[[:space:]]--no-verify\b' \
-   || printf '%s' "$cmd" | grep -qE "$B"'git[[:space:]]+(commit|push)[[:space:]]+[^|;&]*[[:space:]]-[a-zA-Z]*n'"$E"; then
+   || printf '%s' "$cmd" | grep -qE "$B"'git[[:space:]]+(commit|push)[[:space:]]+[^|;&]*[[:space:]]-[a-zA-Z]*n([[:space:])`"'"'"';|&<>]|$)' \
+   || printf '%s' "$cmd" | grep -qiE "$B"'git[[:space:]]+([^|;&]*[[:space:]])?-c[[:space:]]*core[.]hookspath='; then
   block "hook bypass (--no-verify / -n on a git commit). Fix the cause the hook found." "AIC-3, IA-5"
 fi
 
@@ -469,61 +470,48 @@ $(sed -E 's/^[[:space:]]*[^:#[:space:]]+:[[:space:]]*["'"'"']?!?/gh /' -- "$af" 
 fi
 
 # Destructive git
+# Only git's own global options may stand between `git` and `push` (review round 1): a
+# commit or stash message that contains "push feat:main" or "+1" is not a push.
+GIT_GLOBAL='git(([[:space:]]+(-C|-c|--git-dir|--work-tree|--namespace|--config-env|--exec-path))[[:space:]]+[^[:space:]]+|[[:space:]]+-[^[:space:]]+)*'
 # #120: the flag may come straight after push. `push([[:space:]]|$)` used to eat the one
 # space in front of it, so `git push --force origin feat` passed.
-g "$B"'git[[:space:]]+([^|;&]*[[:space:]])?push[[:space:]]([^|;&]*[[:space:]])?--?(force|f)(-with-lease)?\b' \
+g "$B$GIT_GLOBAL"'[[:space:]]+push[[:space:]]([^|;&]*[[:space:]])?--?(force|f)(-with-lease)?\b' \
   && block "force push. Published history is immutable — it is the AU-12 audit trail." "AIC-3, AU-12, SI-7"
 g "$B"'git[[:space:]]+([^|;&]*[[:space:]])?reset([[:space:]]|$)[^|;&]*--hard\b' \
   && block "git reset --hard. Discards work irrecoverably; use git revert or a branch." "AIC-3"
 g "$B"'git[[:space:]]+(filter-branch|filter-repo)\b' \
   && block "history rewrite. Destroys the attributable, signed commit record." "AU-12, SI-7"
-g "$B"'git[[:space:]]+([^|;&]*[[:space:]])?push([[:space:]]+[^|;&]*)?[[:space:]](origin[[:space:]]+)?(HEAD:)?(main|master)'"$E" \
+# TheHub #62031 review round 1: a push rule's argument ends at a space, a quote, a closing
+# paren or backtick, a separator (; & |) or a redirect (< >): `git push origin feat:main;`
+# and `... feat:main > log` moved main past $E, which has no separators. And `heads/main`
+# is a full ref as git reads it (refs/ is implied), like refs/heads/main.
+EP='([[:space:])`"'"'"';|&<>]|$)'
+MAINREF='(refs/)?(heads/)?(main|master)'
+g "$B$GIT_GLOBAL"'[[:space:]]+push([[:space:]]+[^|;&]*)?[[:space:]](origin[[:space:]]+)?(HEAD:)?(main|master)'"$EP" \
   && block "direct push to main. All change goes through a reviewed PR." "AC-5, CM-5"
 # TheHub #62031: main as a refspec's destination. `git push origin feat:main` (or
-# HEAD:refs/heads/main, +x:main, :main, refs/heads/main) moves main just as `git push origin
-# main` does, and with enforce_admins off and the agents pushing as the owner it lands with no
-# check at all. A `+` refspec is a force push of that ref, whatever the flags say. A git
-# commit's -n is --no-verify inside a cluster of flags too (-an, -anm), not only on its own;
-# -mnotes is a message, not -n, because m takes the rest of the word as its value.
-GIT_PUSH_SEG="$B"'git[[:space:]]+([^|;&]*[[:space:]])?push[[:space:]]([^|;&]*[[:space:]])?'
-g "$GIT_PUSH_SEG"'\+?[^[:space:]:]*:(refs/heads/)?(main|master)'"$E" \
+# HEAD:refs/heads/main, +x:main, :main, refs/heads/main, heads/main) moves main just as `git
+# push origin main` does, and with enforce_admins off and the agents pushing as the owner it
+# lands with no check at all. A `+` refspec is a force push of that ref, whatever the flags
+# say. A git commit's -n is --no-verify inside a cluster of flags too (-an, -anm), not only on
+# its own; -mnotes is a message, not -n, because m takes the rest of the word as its value.
+GIT_PUSH_SEG="$B$GIT_GLOBAL"'[[:space:]]+push[[:space:]]([^|;&]*[[:space:]])?'
+g "$GIT_PUSH_SEG"'\+?[^[:space:]:;|&<>]*:'"$MAINREF$EP" \
   && block "a push to main through a refspec (src:main). All change goes through a reviewed PR." "AC-5, CM-5"
-g "$GIT_PUSH_SEG"'\+?refs/heads/(main|master)'"$E" \
+g "$GIT_PUSH_SEG"'\+?(refs/heads|heads)/(main|master)'"$EP" \
   && block "direct push to main (refs/heads/main). All change goes through a reviewed PR." "AC-5, CM-5"
 g "$GIT_PUSH_SEG"'\+[^[:space:]]' \
   && block "force push (a + refspec). Published history is immutable — it is the AU-12 audit trail." "AIC-3, AU-12, SI-7"
-# A push that names no ref, or names HEAD, pushes the CURRENT branch: `git push`, `git push
-# origin`, `git push -u origin HEAD`. On a checkout that is on main that is a push to main,
-# and the likeliest real one. The branch is read where the push runs (the payload's cwd, or
-# git -C <dir>), with git through a fault-recording wrapper: a git that cannot answer blocks.
-guard_push_current() { # $1: one invocation; true if it pushes the current branch
-  local w pos=0 skip=0 head=0 seen=0
-  for w in $1; do
-    if [ "$seen" -eq 0 ]; then [ "$w" = "push" ] && seen=1; continue; fi
-    if [ "$skip" -eq 1 ]; then skip=0; continue; fi
-    case "$w" in
-      -o|--push-option|--repo|--receive-pack|--exec) skip=1 ;;
-      -*) ;;
-      HEAD) head=1; pos=$((pos + 1)) ;;
-      *) pos=$((pos + 1)) ;;
-    esac
-  done
-  [ "$seen" -eq 1 ] && { [ "$pos" -le 1 ] || [ "$head" -eq 1 ]; }
-}
-if g "$GIT_PUSH_SEG" || g "$B"'git[[:space:]]+([^|;&]*[[:space:]])?push'"$E"; then
-  while IFS= read -r guard_seg; do
-    printf '%s' "$guard_seg" | grep -qE "$B"'git[[:space:]]+([^|;&]*[[:space:]])?push([[:space:]]|$)' || continue
-    guard_push_current "$guard_seg" || continue
-    guard_dir="${payload_cwd:-$PWD}"
-    guard_c=$(printf '%s' "$guard_seg" | grep -oE "$B"'git[[:space:]]+-C[[:space:]]+[^[:space:]]+' | head -n1 | sed -E 's/.*-C[[:space:]]+//')
-    if [ -n "$guard_c" ]; then case "$guard_c" in /*|[A-Za-z]:[/\\]*) guard_dir=$guard_c ;; *) guard_dir="$guard_dir/$guard_c" ;; esac; fi
-    guard_branch=$(guard_run git 1 -C "$guard_dir" symbolic-ref --short -q HEAD)
-    case "$guard_branch" in
-      main|master) block "a push of the current branch, which is $guard_branch (in $guard_dir). All change goes through a reviewed PR: push a feature branch." "AC-5, CM-5" ;;
-    esac
-  done <<< "$(printf '%s' "$cmd" | tr '|;&' '\n\n\n')"
-fi
-g "$B"'git[[:space:]]+([^|;&]*[[:space:]])?commit[[:space:]]([^|;&]*[[:space:]])?-[aeiopqsvzn]*n[a-zA-Z]*'"$E" \
+# Review round 1: pushes that move every branch, main included. --all, --mirror and
+# --branches (by any unique prefix git accepts), a bare ':' refspec (push matching
+# branches), and git send-pack, the plumbing under push.
+g "$GIT_PUSH_SEG"'--(al?l?|mir?r?o?r?|br?a?n?c?h?e?s?)'"$EP" \
+  && block "a push of every branch (--all, --mirror or --branches), main included. Push one feature branch." "AC-5, CM-5"
+g "$GIT_PUSH_SEG"':'"$EP" \
+  && block "a push of every matching branch (a bare ':' refspec), main included. Push one feature branch." "AC-5, CM-5"
+g "$B$GIT_GLOBAL"'[[:space:]]+send-pack'"$EP" \
+  && block "git send-pack, the plumbing under git push, which can move main. Push a feature branch with git push." "AC-5, CM-5"
+g "$B"'git[[:space:]]+([^|;&]*[[:space:]])?commit[[:space:]]([^|;&]*[[:space:]])?-[aeiopqsvzn]*n[a-zA-Z]*'"$EP" \
   && block "hook bypass (-n on a git commit, alone or in a cluster of flags). Fix the cause the hook found." "AIC-3, IA-5"
 
 # Self-approval and self-merge — the control that makes every gate meaningful
@@ -964,8 +952,119 @@ if g "$docker_exec$prod_ctr$runner_after" || g "$compose_exec$prod_svc$runner_af
 fi
 }
 
+# ── A push of the current branch (TheHub #62031, best effort) ────────────────────
+# `git push`, `git push origin`, or a push of HEAD (or `@`, or `head`, which resolves to HEAD
+# on a case-insensitive file system) pushes the CURRENT branch. On a checkout that is on main
+# that is a push to main, the likeliest real one. Review round 1 narrowed this to what can be
+# read without guessing, since enforce_admins server-side is the real control:
+#   - only a literal `git push` invocation, read as shell words with quotes honoured, never
+#     `git stash push`, `git log --grep push` or quoted text;
+#   - git's own -C, -c and --git-dir/--work-tree are read; -c push.* or -c remote.*.push on a
+#     push is refused outright (they can map a push onto main);
+#   - if the command changes directory, sets GIT_DIR or GIT_WORK_TREE, or checks out or
+#     switches a branch anywhere, the branch the push will see cannot be read from here, so
+#     the push is refused with a clear message: run it as a command of its own;
+#   - otherwise the branch is read where the push runs, with git symbolic-ref through the
+#     fault-recording wrapper. Outside a repository (git exits 128) there is nothing to judge,
+#     and the push is allowed.
+# Not read: a git alias, xargs, a push run by a script, and push.default other than
+# simple/current/upstream (a plain push is taken as the current branch).
+read -r -d '' push_tok_awk <<'AWK'
+function flush() { if (have) { print tok; tok = ""; have = 0 } }
+{ s = (NR > 1) ? s "\n" $0 : $0 }
+END {
+  n = length(s); q = ""
+  for (i = 1; i <= n; i++) {
+    c = substr(s, i, 1)
+    if (q != "") { if (c == q) q = ""; else if (c == "\\" && q == "\"" && i < n) tok = tok substr(s, ++i, 1); else tok = tok c; continue }
+    if (c == "'" || c == "\"") { q = c; have = 1; continue }
+    if (c == "\\" && i < n) { tok = tok substr(s, ++i, 1); have = 1; continue }
+    if (c == " " || c == "\t") { flush(); continue }
+    if (c == "\n" || c == ";" || c == "|" || c == "&" || c == "(" || c == ")" || c == "`") { flush(); print "\001"; continue }
+    if (c == "<" || c == ">") { if (tok ~ /^[0-9]+$/) { tok = ""; have = 0 } else flush(); while (i < n && index("<>", substr(s, i + 1, 1))) i++; print ">"; continue }
+    tok = tok c; have = 1
+  }
+  flush()
+}
+AWK
+push_moves=0   # 1 once a word that changes the directory, the git dir or the branch is seen
+push_judge() { # $@: the words of one invocation
+  local w=("$@") n=$# i=0 a dir="" sub="" pos=0 cur=0
+  case "${w[0]:-}" in
+    cd|pushd|popd|chdir|Set-Location|set-location|sl|Push-Location|Pop-Location) push_moves=1; return 0 ;;
+    GIT_DIR=*|GIT_WORK_TREE=*) push_moves=1 ;;
+  esac
+  while [ "$i" -lt "$n" ]; do
+    a=${w[i]##*/}; a=${a%.exe}
+    case "${w[i]}" in GIT_DIR=*|GIT_WORK_TREE=*) push_moves=1 ;; esac
+    [ "$a" = "git" ] && break
+    i=$((i + 1))
+  done
+  [ "$i" -ge "$n" ] && return 0
+  i=$((i + 1))
+  local cfg_bad=""
+  while [ "$i" -lt "$n" ]; do
+    a=${w[i]}
+    case "$a" in
+      -C) dir=${w[i+1]:-}; i=$((i + 2)) ;;
+      -c) case "${w[i+1]:-}" in [Pp][Uu][Ss][Hh].*|[Rr][Ee][Mm][Oo][Tt][Ee].*.[Pp][Uu][Ss][Hh]=*) cfg_bad=${w[i+1]} ;; esac; i=$((i + 2)) ;;
+      -c*) case "${a#-c}" in [Pp][Uu][Ss][Hh].*|[Rr][Ee][Mm][Oo][Tt][Ee].*.[Pp][Uu][Ss][Hh]=*) cfg_bad=${a#-c} ;; esac; i=$((i + 1)) ;;
+      --git-dir*|--work-tree*) push_moves=1; case "$a" in *=*) i=$((i + 1)) ;; *) i=$((i + 2)) ;; esac ;;
+      --config-env=*|--namespace=*|--exec-path=*) i=$((i + 1)) ;;
+      --config-env|--namespace) i=$((i + 2)) ;;
+      -*) i=$((i + 1)) ;;
+      *) break ;;
+    esac
+  done
+  sub=${w[i]:-}
+  case "$sub" in checkout|switch) push_moves=1; return 0 ;; push) ;; *) return 0 ;; esac
+  [ -n "$cfg_bad" ] && block "a git push with -c $cfg_bad, which can map the push onto main. Push a feature branch by name." "AC-5, CM-5"
+  i=$((i + 1))
+  local dyn=0 dry=0
+  while [ "$i" -lt "$n" ]; do
+    a=${w[i]}
+    case "$a" in
+      ">") i=$((i + 2)); continue ;;                       # a redirect and its target
+      -o|--push-option|--repo|--receive-pack|--exec) i=$((i + 2)); continue ;;
+      --dry-run|-n) dry=1 ;;
+      -*) ;;
+      HEAD|@|head) cur=1; pos=$((pos + 1)) ;;
+      '$'*|*'$'*) dyn=1; pos=$((pos + 1)) ;;               # a refspec this hook cannot read
+      *) pos=$((pos + 1)) ;;
+    esac
+    i=$((i + 1))
+  done
+  [ "$pos" -le 1 ] && cur=1
+  # A refspec from a variable or $(...) (git push origin $(git branch --show-current)) is judged
+  # as the current branch: on main it is main.
+  [ "$dyn" -eq 1 ] && cur=1
+  [ "$dry" -eq 1 ] && return 0                             # a dry run moves nothing
+  [ "$cur" -eq 1 ] || return 0
+  [ "$push_moves" -eq 1 ] && block "a push of the current branch after the command changes directory, the git directory or the branch: which branch it pushes cannot be read here. Run the push as a command of its own, from the checkout you mean, or name the branch: git push origin <feature>." "AC-5, CM-5"
+  local base="${payload_cwd:-$PWD}" branch
+  if [ -n "$dir" ]; then case "$dir" in /*|[A-Za-z]:[/\\]*) base=$dir ;; *) base="$base/$dir" ;; esac; fi
+  # 128 is "not a repository" (or the dir is missing): nothing to judge. Higher is a fault.
+  branch=$(guard_run git 128 -C "$base" symbolic-ref --short -q HEAD 2>/dev/null)
+  case "$branch" in
+    main|master) block "a push of the current branch, which is $branch (in $base). All change goes through a reviewed PR: push a feature branch." "AC-5, CM-5" ;;
+  esac
+  return 0
+}
+push_guard() { # $1: one view of the command
+  local toks=() seg=() t
+  mapfile -t toks < <(printf '%s' "$1" | LC_ALL=C awk "$push_tok_awk")
+  toks+=($'\001')
+  for t in "${toks[@]}"; do
+    if [ "$t" = $'\001' ]; then
+      [ "${#seg[@]}" -gt 0 ] && push_judge "${seg[@]}"
+      seg=(); continue
+    fi
+    seg+=("$t")
+  done
+}
 cmd="$raw_cmd"; guard
 if [ "$word_cmd" != "$raw_cmd" ]; then cmd="$word_cmd"; guard; fi
 if [ "$ps_cmd" != "$raw_cmd" ] && [ "$ps_cmd" != "$word_cmd" ]; then cmd="$ps_cmd"; guard; fi
+case "$raw_cmd" in *push*) push_guard "$masked_cmd" ;; esac
 
 exit 0

@@ -559,6 +559,31 @@ check "on main: git push -u origin HEAD"  block "$(cwpay "$onmain" 'git push -u 
 check "elsewhere: git -C <main repo> push" block "$(cwpay "$onfeat" "git -C $onmain push origin HEAD")"          guard-bash.sh
 check "on feat: git push -u origin HEAD"  allow "$(cwpay "$onfeat" 'git push -u origin HEAD')"                   guard-bash.sh
 check "on main: git push origin feat"     allow "$(cwpay "$onmain" 'git push origin feat')"                      guard-bash.sh
+# Review round 1 (classes; the exact inputs are in the binnacle review).
+check "feat:main then ;"                  block "$(payload 'git push origin feat:main; echo done')"              guard-bash.sh
+check "feat:main then &&"                 block "$(payload 'git push origin feat:main&& echo done')"             guard-bash.sh
+check "feat:main then a redirect"         block "$(payload 'git push origin feat:main>log')"                     guard-bash.sh
+check "push main then |"                  block "$(payload 'git push origin main| cat')"                         guard-bash.sh
+check "feat:heads/main"                   block "$(payload 'git push origin feat:heads/main')"                   guard-bash.sh
+check "push --all"                        block "$(payload 'git push --all origin')"                             guard-bash.sh
+check "push --mirr (prefix of --mirror)"  block "$(payload 'git push --mirr origin')"                            guard-bash.sh
+check "push --branches"                   block "$(payload 'git push --branches origin')"                        guard-bash.sh
+check "push a bare : refspec"             block "$(payload 'git push origin :')"                                 guard-bash.sh
+check "push -c push.default=matching"     block "$(payload 'git -c push.default=matching push origin')"          guard-bash.sh
+check "push -c remote.origin.push"        block "$(payload 'git -c remote.origin.push=feat:main push origin')"   guard-bash.sh
+check "git send-pack"                     block "$(payload 'git send-pack origin feat:main')"                    guard-bash.sh
+check "on main: push @"                   block "$(cwpay "$onmain" 'git push origin @')"                         guard-bash.sh
+check "on main: push head"                block "$(cwpay "$onmain" 'git push origin head')"                      guard-bash.sh
+check "-c k=v -C <main repo> push"        block "$(cwpay "$onfeat" "git -c x.y=1 -C $onmain push")"              guard-bash.sh
+check "cd, then push the current branch"  block "$(cwpay "$onfeat" "cd $onmain && git push")"                    guard-bash.sh
+check "GIT_DIR=..., then push"            block "$(cwpay "$onfeat" "GIT_DIR=$onmain/.git git push")"             guard-bash.sh
+check "checkout main, then push"          block "$(cwpay "$onfeat" 'git checkout main && git push')"             guard-bash.sh
+check "on main: git stash push"           allow "$(cwpay "$onmain" 'git stash push -m wip')"                     guard-bash.sh
+check "on main: log --grep push"          allow "$(cwpay "$onmain" 'git log --grep push')"                       guard-bash.sh
+check "on main: commit -m 'push it'"      allow "$(cwpay "$onmain" "git commit -m 'git push later'")"            guard-bash.sh
+check "on main: push a named feature"     allow "$(cwpay "$onmain" 'git push -u origin feat/x')"                 guard-bash.sh
+check "not a repository: git push"        allow "$(cwpay "/" 'git push')"                                        guard-bash.sh
+check "push --atomic to a feature"        allow "$(payload 'git push --atomic origin feat')"                     guard-bash.sh
 rm -rf "$onmain" "$onfeat"
 echo ""
 echo "guard-write.sh — must BLOCK (AU-9, AIC-5)"
