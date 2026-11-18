@@ -24,7 +24,7 @@ Four practice groups: **PO** Prepare the Organization · **PS** Protect the Soft
 
 | SSDF | Practice | Here | 800-53 |
 |---|---|---|---|
-| PS.1 | Protect all forms of code from unauthorized access and tampering | Branch protection, signed commits, no admin bypass, CODEOWNERS | CM-5, SI-7, AC-3 |
+| PS.1 | Protect all forms of code from unauthorized access and tampering | Branch protection for non-admin identities, CODEOWNERS (advisory). Not in force (live 2026-11-18): admin bypass is possible (`enforce_admins` false) and commit signing is not required; rulesets planned (TheHub #61006) | CM-5, SI-7, AC-3 |
 | PS.2 | Provide a mechanism to verify software release integrity | Cosign keyless signing; **verification enforced at deploy** | CM-14, SI-7, SR-11 |
 | PS.3 | Archive and protect each software release | Immutable artifacts by digest; SBOM and attestation retained | CM-8, SR-4, AU-11 |
 

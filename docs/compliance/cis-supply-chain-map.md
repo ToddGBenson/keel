@@ -21,18 +21,18 @@ which controls are achievable — recorded honestly below rather than marked sat
 | CIS | Control | Status | Implementation |
 |---|---|---|---|
 | 1.1.1 | Any change is tracked and traceable | ✅ | Every commit references an issue — enforced by `commit-msg` hook and `pr-governance.yml` (CM-3) |
-| 1.1.2 | Any change is approved | 🟡 | **Solo: structurally impossible.** `/self-review` artifact required by CI; POAM-008 |
+| 1.1.2 | Any change is approved | 🟡 | **Solo: structurally impossible.** The building agent writes a `/self-review` record; no CI check requires it (`pr-governance.yml` has run on `workflow_dispatch` only since 2026-10-20). POAM-008 |
 | 1.1.3 | Any change is reviewed by two people | ➖ | Solo project. Compensated per POAM-008; closes on a second team member |
 | 1.1.4 | Dismiss stale approvals | ✅ | `dismiss_stale_reviews: true` |
 | 1.1.5 | Code owners are set and approve | 🟡 | CODEOWNERS present and routes; **advisory** in solo mode (cannot self-approve) |
 | 1.1.6 | Inactive branches reviewed and removed | 🟡 | Trunk-based, short-lived branches; no automated pruning yet |
-| 1.1.7 | All checks passed before merge | 🟡 | **Declared, not applied** (TheHub #60978): the required check is MyKronos `independent-review`, App-pinned, set by `configure-github.sh` (App id 4551328 by default). Measured 2026-11-04: `main` requires no checks. POAM-014 |
+| 1.1.7 | All checks passed before merge | 🟡 | Two checks are required (live 2026-11-18, `strict: true`): `Concourse / keel` and `library-allowlist`, both pinned to App 4551328. CodeQL, Gitleaks and unit-suites run but are not required. A green `Concourse / keel` can show without the suites having run (TheHub #62015, open), so it is weaker evidence than it looks. With `enforce_admins` off, an admin merge passes a red check. POAM-014 |
 | 1.1.8 | Open comments resolved before merge | ✅ | `required_conversation_resolution: true` |
-| 1.1.9 | Verify signed commits before merge | 🟡 | Capability probed and found incomplete, so **deliberately not enabled** (L0010). POAM-009 |
+| 1.1.9 | Verify signed commits before merge | ❌ | **Not enabled**: `required_signatures` is false (live 2026-11-18). Commits on `main` show as verified because GitHub signs the squash merge it creates (committer GitHub); that attests GitHub made the merge, not who wrote the change. Branch commits are not required to be signed. POAM-009 |
 | 1.1.10 | Linear history required | ✅ | `required_linear_history: true` |
-| 1.1.11 | Branch protection on the default branch | ✅ | Applied and verified 9/9 by `configure-github.sh` |
-| 1.1.12 | Branch rules enforced on administrators | ✅ | **`enforce_admins: true`** — never relaxed, including in solo mode |
-| 1.1.13 | Pushing/merging restricted to trusted users | ✅ | Single owner; direct push to default branch blocked |
+| 1.1.11 | Branch protection on the default branch | 🟡 | Applied (live 2026-11-18); the rows here give what it does and does not hold. No repository rulesets exist (`GET rulesets` returns `[]`); they are planned in TheHub #61006 |
+| 1.1.12 | Branch rules enforced on administrators | ❌ | **`enforce_admins: false`** (live 2026-11-18). The agents' GitHub identity is the owner's admin account (TheHub #61039), so it can merge past a red required check or push straight to `main`, and as an admin it can change the protection itself. Planned: rulesets with no bypass (TheHub #61006) |
+| 1.1.13 | Pushing/merging restricted to trusted users | 🟡 | Single owner. Direct push to `main` is blocked for non-admin identities only; the owner's (and agents') admin identity is not bound while `enforce_admins` is off (live 2026-11-18) |
 | 1.1.14 | Force-push denied | ✅ | `allow_force_pushes: false` |
 | 1.1.15 | Branch deletion denied | ✅ | `allow_deletions: false` |
 | 1.1.16 | Scan for risks in merged code | ✅ | SAST, SCA, secrets, IaC on every PR and on the default branch |
@@ -159,11 +159,14 @@ references), 1.5.x (the five scanners and their no-input honesty), 3.2.1 (AIC-7)
 **The three 🟡 that matter:**
 
 - **1.1.2 / 1.1.3 / 1.1.5 — approval and two-person review.** Structurally impossible solo.
-  Not a configuration failure and not fixable by configuration. POAM-008, with four
-  compensating controls, one mechanically enforced.
-- **1.1.9 — signed commits.** Key generated and git configured, but not registered with
-  GitHub (needs an interactive OAuth scope). The control is correctly *not* enabled rather
-  than falsely claimed. POAM-009.
+  Not a configuration failure and not fixable by configuration. POAM-008, with compensating
+  controls of which **none is mechanically enforced today**: the self-review record is read by
+  reviewers, and no CI check requires it (live 2026-11-18).
+- **1.1.9 — signed commits.** `required_signatures` is false (live 2026-11-18). The squash merges on
+  `main` carry GitHub's signature, which attests the merge, not the author. The control is
+  stated as not in force rather than claimed. POAM-009.
+- **1.1.12 — admins.** `enforce_admins` is false (live 2026-11-18); this map said true until TheHub
+  #62001. Server-side rulesets with no bypass are planned (TheHub #61006).
 - **2.4.4 — reproducible builds.** Aspirational per stack; claimed only where true.
 
 **Nothing here is marked satisfied on the strength of a policy document.** Every ✅ traces to

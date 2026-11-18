@@ -24,7 +24,11 @@ Rotate so every control is assessed at least annually, with these assessed **eve
 because they carry the most weight or drift fastest:
 
 - **AC-5 / CM-5 separation of duties** — sample merged PRs; confirm no author-approved PR
-  reached `main`. Test it: attempt a self-approval and confirm branch protection refuses.
+  reached `main`. Test it from the agents' identity: attempt to approve, and to merge, a PR it
+  did not author, and record what refuses each. GitHub's refusal of an author's approval of
+  their own PR is a platform rule, not branch protection, so that attempt says nothing. As of
+  2026-11-18, nothing server-side refuses either attempt: `main` requires 0 approving reviews and
+  `enforce_admins` is false; only `guard-bash.sh` stands in the way (TheHub #61039, #61006).
 - **SA-11 developer testing** — sample G4 evidence bundles; confirm the negative-case tests
   exist and would actually fail if the control were removed.
 - **CM-3 change control** — sample releases; confirm a human approval record exists with

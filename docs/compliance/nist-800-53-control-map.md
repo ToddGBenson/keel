@@ -35,7 +35,7 @@ should be green in *its* map, backed by its `evidence/<issue>/g2|g4/` bundles.
 | SA-4 | Acquisition process | Dependency justification, license check, maintenance signal check | PR bodies, license scan | ✅ |
 | SA-4(3) | Development methods, techniques, practices | Documented process, test-first, code review, threat modeling | `docs/03`–`docs/06` | ✅ |
 | SA-8 | Security and privacy engineering principles | Applied and stated at G2, item 9 | Design notes | 🟡 **POAM-018** — gate never run |
-| SA-10 | Developer configuration management | Git, signed commits, branch protection, change records | Git history, CM records | ✅ |
+| SA-10 | Developer configuration management | Git, branch protection, change records. Commit signing is not required (live 2026-11-18); squash merges carry GitHub's signature | Git history, CM records | ✅ |
 | SA-10(1) | Software/firmware integrity verification | Cosign signing, SLSA provenance, verify-on-deploy | Attestations | ✅ |
 | SA-11 | Developer testing and evaluation | G4 verification, three independent verdicts | `evidence/<issue>/g4/` | 🟡 **POAM-018** — gate never run |
 | SA-11(1) | Static code analysis | CodeQL + language linters, every PR, gated on new findings | SARIF | ✅ |
@@ -57,7 +57,7 @@ should be green in *its* map, backed by its `evidence/<issue>/g2|g4/` bundles.
 | CM-3(2) | Test, validate, document changes | G3 + G4 before any G5 | Gate evidence | 🟡 **POAM-018** — gate never run |
 | CM-4 | Impact analyses | Change record item 4; AI impact at item 5 | Change records | ✅ |
 | CM-4(1) | Separate test environments | Local / CI / staging / production separation | Environment config | ✅ |
-| CM-5 | Access restrictions for change | Branch protection, CODEOWNERS, no admin bypass, signed commits | GitHub settings, git log | ✅ |
+| CM-5 | Access restrictions for change | Branch protection for non-admin identities (no force-push, no deletion, linear history, two required checks); CODEOWNERS routes review (advisory). **Not in force** (live 2026-11-18): `enforce_admins` is false, so the owner's and agents' admin identity bypasses it; `required_signatures` is false; 0 approving reviews; no rulesets. Planned: TheHub #61006 (rulesets), #61039 (agent identity) | GitHub settings, git log | 🟡 |
 | CM-6 | Configuration settings | IaC scanning (checkov/tfsec), weekly drift detection | Scan reports, drift reports | ✅ |
 | CM-7 | Least functionality | SA-8 review at G2; IaC scan; container minimization | Design notes, scans | 🟡 |
 | CM-8 | System component inventory | SBOM per build, CycloneDX, diffed | SBOM artifacts | ✅ |
