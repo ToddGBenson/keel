@@ -1,7 +1,7 @@
 # Self-review — TheHub #61972 (an agent never pushes a release tag)
 
 Mode: solo (POAM-008); agent self-review, pending the independent review (Fable) before merge
-PR: (set when opened)   Author: Claude Opus 5.5 on the Linux runner laptop (AI-authored)   Date: 2026-11-17
+PR: #192   Author: Claude Opus 5.5 on the Linux runner laptop (AI-authored)   Date: 2026-11-17
 verdict: pass
 
 A v* tag starts a release: release.yml signs as "release.yml@refs/tags/TAG". The hook blocked
