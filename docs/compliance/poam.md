@@ -818,7 +818,7 @@ the one that is structurally impossible.
 
 | # | Control | Enforcement |
 |---|---|---|
-| 1 | `/self-review` artifact — independent agent passes with only the diff, story, and threat model as input | **`pr-governance.yml` blocks the merge without it** |
+| 1 | `/self-review` artifact — independent agent passes with only the diff, story, and threat model as input | Reviewer-enforced: the building agent writes it, the reviewers read it. `pr-governance.yml` blocked the merge without it until it was retired to `workflow_dispatch` on 2026-10-20 (TheHub #60849) |
 | 2 | Cooling-off — no merge in the session the PR was opened | Warned by CI with the measured PR age |
 | 3 | All status checks required — the machine absorbs what the reviewer did | Branch protection |
 | 4 | **Quarterly external review of a random sample** by a competent human outside the project | Manual; recorded in `evidence/assessments/` |
