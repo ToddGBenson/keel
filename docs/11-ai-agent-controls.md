@@ -56,6 +56,25 @@ thinner than the tables suggest:
 - **A sandbox**, if you run the agent in one. keel does not configure one; `.claude/settings.json`
   carries permissions and hooks only.
 
+**The evidence, 2026-11-17/18 (TheHub #62000).** Each independent review of a hook change this
+week found commands the hooks allowed that they were meant to refuse: the release-tag guard
+(TheHub #61972, two rounds blocked), the push-to-`main` rules (#62031), the evidence-path rule
+(#62022, three rounds) and the container rules (#61987). Each round closed what it found, and each
+next round found more. That is what a denylist over command text is like, and it is why the hooks
+are guidance, not the boundary. The bypass classes are recorded by class in those PRs and in
+`test/hook-bypass-corpus.yml`; the exact inputs are kept out of this public repository.
+
+**The controls that actually bound an agent are server-side, and none is in force yet** (live
+2026-11-18: `enforce_admins` false, 0 approving reviews, no rulesets):
+
+- **`enforce_admins` on** for `main`: an operator decision, pending. Until it is on, the owner's
+  admin identity, which is also the agents', merges past a red check and pushes straight to
+  `main`.
+- **Repository rulesets with no bypass** for `main` and for release tags (TheHub #61006).
+- **A required check that is real evidence:** a green `Concourse / keel` can show without the
+  suites having run (TheHub #62015).
+- **An agent identity without admin rights** (TheHub #61039).
+
 A rebuild of the hooks as allowlists over a parsed command is planned (TheHub #60944). Until it
 and #61039 land, treat a hook rule as a guard rail that catches honest mistakes, never as a
 security control.

@@ -109,3 +109,19 @@ under TheHub #62001.
 ## Residual risk accepted
 
 - Single-identity review. No independent human read this diff. The reviewer reads it before merge.
+
+## Follow-up, 2026-11-18 (second PR for TheHub #62000)
+
+A second PR adds two things to *Read this first*, as the PO asked:
+- **The evidence:** this week's independent reviews of the hook changes (TheHub #61972, #62031,
+  #62022, #61987) each found commands the hooks allowed that they were meant to refuse, and each
+  next round found more. These are named by class only; the exact inputs stay out of this public
+  repository.
+- **The real controls, and their state:** `enforce_admins` on (an operator decision, pending),
+  rulesets with no bypass (TheHub #61006), a required check that is real evidence (TheHub
+  #62015), and an agent identity without admin rights (TheHub #61039). The live state was read
+  2026-11-18: `enforce_admins` false, 0 approving reviews, no rulesets.
+
+Checked: every review round cited is a BLOCK or SHIP WITH NITS comment on the named PRs
+(keel #192, #199, #197, #198 and their binnacle pairs). Text only: no hook, CI or settings change.
+validate-platform passes, and so does pinned gitleaks.
