@@ -140,6 +140,8 @@ def load_corpus() -> tuple[list[dict], list[str]]:
                 errors.append(f"{where}: open_in must be a non-empty subset of {MODES}")
             if not e.get("gap"):
                 errors.append(f"{where}: an open entry needs gap: (why the hook misses it)")
+        if e.get("payload_encoding") not in (None, "unicode-escape", "truncated"):
+            errors.append(f"{where}: payload_encoding must be unicode-escape or truncated")
         if e.get("hook") == "guard-bash.sh":
             if e.get("tool", "Bash") not in BASH_TOOLS:
                 errors.append(f"{where}: tool must be one of {BASH_TOOLS}")
@@ -240,7 +242,20 @@ def payload(e: dict, tool: str) -> bytes:
         base["tool_input"] = ti
     # Claude Code is a Node process: JSON.stringify does not escape non-ASCII, so
     # neither do we -- a unicode entry must reach the sed fallback as the raw bytes.
-    return json.dumps(base, ensure_ascii=False).encode("utf-8")
+    text = json.dumps(base, ensure_ascii=False)
+    enc = e.get("payload_encoding")
+    if enc:
+        # [TheHub #61978] The same command in a payload the two parsers read differently.
+        cmd = base["tool_input"]["command"]
+        plain = json.dumps(cmd, ensure_ascii=False)
+        assert text.count(plain) == 1, "the command must appear once in its payload"
+        if enc == "unicode-escape":
+            units = cmd.encode("utf-16-be")
+            escaped = "".join(f"\\u{int.from_bytes(units[i:i + 2], 'big'):04x}" for i in range(0, len(units), 2))
+            text = text.replace(plain, f'"{escaped}"')
+        else:  # truncated: the payload ends inside the command string
+            text = text[:text.index(plain) + len(plain) - 1]
+    return text.encode("utf-8")
 
 
 def make_env(mode: str, tmp: Path) -> dict | None:
@@ -264,16 +279,43 @@ def make_env(mode: str, tmp: Path) -> dict | None:
         return env
     link_dir = tmp / "no-jq"
     link_dir.mkdir(exist_ok=True)
-    try:
-        for t in HOOK_TOOLS:
-            p = shutil.which(t)
-            if p:
-                os.symlink(p, link_dir / t)
-    except OSError as exc:
-        print(f"  [skip] no-jq mode: cannot build a PATH without jq ({exc})")
-        return None
+    # [TheHub #61978] Skipping this mode when symlinks fail hid the whole sed-fallback
+    # parser from the run (Windows without Developer Mode cannot symlink). The tools are
+    # copied instead, and if that fails too the run FAILS: a mode not run is not a pass.
+    for t in HOOK_TOOLS:
+        p = shutil.which(t)
+        if not p:
+            continue
+        try:
+            os.symlink(p, link_dir / t)
+        except OSError:
+            try:
+                shutil.copy2(p, link_dir / Path(p).name)
+            except OSError as exc:
+                print(f"  [FAIL] no-jq mode: cannot build a PATH without jq ({exc}) -- not run is not a pass")
+                return None
     env["PATH"] = str(link_dir)
     return env
+
+
+def find_bash() -> str | None:
+    """The bash that runs the hooks. [TheHub #61978] On Windows, shutil.which("bash") can
+    find WSL's launcher (System32 or WindowsApps), which runs the hook in a Linux VM that
+    cannot see this checkout's Windows paths, not the Git Bash Claude Code uses."""
+    if os.name != "nt":
+        return shutil.which("bash")
+    for d in os.environ.get("PATH", "").split(os.pathsep):
+        cand = Path(d) / "bash.exe"
+        low = str(cand).lower()
+        if cand.is_file() and "\\system32\\" not in low and "\\windowsapps\\" not in low:
+            return str(cand)
+    git = shutil.which("git")
+    if git:
+        for rel in ("../bin/bash.exe", "../../bin/bash.exe", "../usr/bin/bash.exe"):
+            cand = (Path(git).parent / rel).resolve()
+            if cand.is_file():
+                return str(cand)
+    return None
 
 
 def run_one(e: dict, tool: str, env: dict, bash: str) -> tuple[int, str]:
@@ -307,7 +349,7 @@ def main() -> int:
             print(f"  [FAIL] {err}")
         return 1
 
-    bash = shutil.which("bash")
+    bash = find_bash()
     if not bash:
         print("  [FAIL] bash not found -- the hooks cannot be exercised, which is not a pass")
         return 1
@@ -319,6 +361,7 @@ def main() -> int:
         for mode in MODES:
             env = make_env(mode, Path(td))
             if env is None:
+                failures.append(f"{mode}: not run")
                 continue
             jq_kind = ("real jq" if shutil.which("jq") else "jq shim") if mode == "jq" else "sed/python fallback"
             print(f"\n-- mode: {mode} ({jq_kind}) " + "-" * max(0, 50 - len(mode) - len(jq_kind)))

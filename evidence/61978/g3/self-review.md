@@ -1,0 +1,57 @@
+# Self-review — TheHub #61978 (b, c) and #62016 (both parsers give the same verdict)
+
+Mode: solo (POAM-008); agent self-review, pending the independent review before merge
+PR: (set when opened)   Author: Claude Opus 5.5 on the Linux runner laptop (AI-authored)   Date: 2026-11-18
+verdict: pass
+
+Part (a), pinning guard-write.sh's PATH, waits for #189 (TheHub #61843) and is not in this change.
+
+## (b) Parser parity, and #62016
+
+Under the PATH pin a jq outside the system directories is not used, so the sed fallback is the
+live parser on such hosts, and on any host with no jq at all (the operator's Windows host has
+none). It differed from jq in two ways that each allowed a blocked command:
+
+- **`\uXXXX` was left undecoded.** A command sent with its characters as JSON escapes, which is valid
+  JSON, reached the rules as text no rule reads. jq decoded it. The JSON unescape step now decodes
+  `\uXXXX` to UTF-8, joining a surrogate pair into one character. U+0000 becomes a space, and a
+  malformed escape is kept as it was.
+- **A payload it could not parse read as "no command"** (#62016). jq refuses such a payload and the
+  wrapper makes that a block; the fallback exited 0. With nothing extracted, a payload that names a
+  non-empty command, or that does not end in a closing brace, is now refused as an internal error.
+  An empty command (`"command": ""`) is still allowed, as in jq mode.
+- The extraction sed runs in the C locale, so a byte invalid in the host's locale cannot end the match.
+
+The corpus gets a `payload_encoding` key: `unicode-escape` (every character of the command as a
+\uXXXX escape) or `truncated` (the payload ends inside the command string). Three entries,
+class payload-encoding, cover it: KB-229 self-merge escaped, KB-230 force push escaped, KB-231
+self-merge truncated. Each runs in both parser modes and both tools.
+
+## (c) The corpus does not skip a parser
+
+- When symlinks fail (Windows without Developer Mode), the no-jq mode was SKIPPED, so the whole
+  sed fallback could go unrun and the run still passed. The tools are now copied instead. If copying
+  fails too, the run fails ("not run is not a pass"), checked by a control that makes both fail.
+- On Windows, `shutil.which("bash")` can find WSL's launcher, which cannot see the checkout's Windows
+  paths. `find_bash()` skips System32 and WindowsApps and falls back to the bash beside git.
+- hook-path-pinned.test.py's `shutil.which("bash")` and its missed `PATH+=` belong to #189's test
+  file, which is not on main. They are part (a).
+
+## Verified independently
+
+- **Red first:** the new corpus against main 3e12e04's hook gave 227 entries, 816 runs, 6 failed.
+  KB-229, KB-230 and KB-231 were ALLOWED in the no-jq mode, on both tools. jq mode blocked them.
+- **Green after:** 227 entries, 816 runs, 0 failed, 32 open (unchanged). selftest 330 / 0, and
+  hook-fail-closed all passed.
+- `./keel check` green in a capped python:3.12-slim container. shellcheck v0.10.0 `-S warning`
+  clean. Pinned gitleaks v8.18.4: no leaks.
+
+## Not verified
+
+- Git Bash on Windows was not run. The copy fallback and find_bash() are written for it and untested
+  there. The \u decode is plain awk with `sprintf("%c")` in the C locale, which mawk, gawk and busybox
+  awk handle the same way.
+
+## Residual risk accepted
+
+None new.

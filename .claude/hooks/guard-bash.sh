@@ -113,8 +113,26 @@ trap guard_exit EXIT
 payload="$(cat)"
 
 # Decode a JSON string body (the sed fallback below hands over the raw escapes).
-# \uXXXX is left as it is.
+# TheHub #61978: \uXXXX is decoded too, to UTF-8 (a surrogate pair to one character), as
+# jq decodes it. Left as it was, `gh\u0020pr\u0020merge` reached the rules as text that no
+# rule reads, while jq saw `gh pr merge`. U+0000 becomes a space; a malformed escape stays.
 read -r -d '' json_unescape_awk <<'AWK'
+function guard_hex(h,  k, v, x) {
+  v = 0
+  for (k = 1; k <= 4; k++) {
+    x = index("0123456789abcdef", tolower(substr(h, k, 1)))
+    if (x == 0) return -1
+    v = v * 16 + x - 1
+  }
+  return v
+}
+function guard_utf8(v) {
+  if (v == 0) return " "
+  if (v < 128) return sprintf("%c", v)
+  if (v < 2048) return sprintf("%c%c", 192 + int(v / 64), 128 + v % 64)
+  if (v < 65536) return sprintf("%c%c%c", 224 + int(v / 4096), 128 + int(v / 64) % 64, 128 + v % 64)
+  return sprintf("%c%c%c%c", 240 + int(v / 262144), 128 + int(v / 4096) % 64, 128 + int(v / 64) % 64, 128 + v % 64)
+}
 function guard_join(lo, hi,  m) { if (lo == hi) return guard_line[lo]; m = int((lo + hi) / 2); return guard_join(lo, m) "\n" guard_join(m + 1, hi) }
 { guard_line[NR] = $0 }
 END {
@@ -125,7 +143,18 @@ END {
     if (c == "\\" && i < n) {
       d = substr(s, ++i, 1)
       if (d == "n") c = "\n"; else if (d == "t") c = "\t"; else if (d == "r") c = "\r"
-      else if (d == "u") c = "\\u"; else if (d == "b" || d == "f") c = " "; else c = d
+      else if (d == "u") {
+        v = (i + 4 <= n) ? guard_hex(substr(s, i + 1, 4)) : -1
+        if (v < 0) c = "\\u"
+        else {
+          i += 4
+          if (v >= 55296 && v < 56320 && substr(s, i + 1, 2) == "\\u" && (w = guard_hex(substr(s, i + 3, 4))) >= 56320 && w < 57344) {
+            v = 65536 + (v - 55296) * 1024 + (w - 56320); i += 6
+          }
+          c = guard_utf8(v)
+        }
+      }
+      else if (d == "b" || d == "f") c = " "; else c = d
     }
     printf "%s", c
   }
@@ -142,9 +171,22 @@ else
   # payload's last quote, which swallowed the "description" field) and decode it, so
   # this mode sees the command jq would. Undecoded, \" is not a quote and \n is not a
   # newline, and the quote-aware view below could not tell what is quoted.
-  cmd="$(printf '%s' "$payload" | sed -nE 's/.*"command"[[:space:]]*:[[:space:]]*"(([^"\\]|\\.)*)".*/\1/p')"
+  # TheHub #61978: in the C locale, so a byte that is not valid in the host's locale still
+  # matches [^"\\] instead of ending the match.
+  cmd="$(printf '%s' "$payload" | LC_ALL=C sed -nE 's/.*"command"[[:space:]]*:[[:space:]]*"(([^"\\]|\\.)*)".*/\1/p')"
   cmd_json="$cmd"
   cmd="$(printf '%s' "$cmd_json" | LC_ALL=C awk "$json_unescape_awk" 2>/dev/null)" || cmd="$cmd_json"
+  # TheHub #61978 / #62016: jq refuses a payload it cannot parse, and the wrapper makes that a
+  # block. This fallback read the same payload as "no command" and allowed it. So, with
+  # nothing extracted: a payload that names a non-empty command, or that does not end in a
+  # closing brace (truncated), is refused here too.
+  if [ -z "$cmd" ]; then
+    guard_tail="${payload%"${payload##*[![:space:]]}"}"
+    if printf '%s' "$payload" | LC_ALL=C grep -qE '"command"[[:space:]]*:[[:space:]]*"[^"]' || [ "${guard_tail: -1}" != "}" ]; then
+      echo "BLOCKED by .claude/hooks/guard-bash.sh — internal error: it cannot parse the hook payload (no jq here, and the fallback parser could not read the command), so it cannot tell whether the command is allowed. Retry the call; installing jq gives this hook a full JSON parser (TheHub #61978)." >&2
+      exit 2
+    fi
+  fi
 fi
 
 [ -z "$cmd" ] && exit 0
