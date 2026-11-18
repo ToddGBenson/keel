@@ -231,7 +231,10 @@ an admin bypass; `production` admits `v*` tags; the release has not run. So it s
 - **The control in force:** `main` requires the App-pinned `Concourse / keel` check, which runs
   the unit suites on the pull request's head (`pr-checks`, TheHub #61778), and
   `library-allowlist`. `strict` is on, `enforce_admins` is true, and the `keel-main` ruleset
-  (27545123, no bypass) requires a pull request. All measured 2026-11-18.
+  (27545123, no bypass: deletion, non-fast-forward, a pull request with squash only) requires a
+  pull request. All measured 2026-11-18. The ruleset's signature rule was dropped at about
+  14:36Z, because it blocked every PR with unsigned branch commits; `main` is squash-only and
+  GitHub signs each squash merge.
 - **The new closure condition:** that, AND TheHub #62015 merged, so a green `Concourse / keel`
   carries real run evidence (today it can show without the suites having run). Close it when
   #62015 lands.
