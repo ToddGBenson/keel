@@ -1,7 +1,7 @@
 # Self-review — TheHub #62022 (the evidence rule reads a path in any spelling)
 
 Mode: solo (POAM-008); agent self-review, pending the independent review before merge
-PR: #197   Author: Claude Opus 5.5 on the Linux runner laptop (AI-authored)   Date: 2026-11-18
+PR: #197   Pair: binnacle #91   Author: Claude Opus 5.5 on the Linux runner laptop (AI-authored)   Date: 2026-11-18
 verdict: pass
 
 guard-write.sh's evidence rule (AU-9) matched `*/evidence/*` and `evidence/*` on the path as
