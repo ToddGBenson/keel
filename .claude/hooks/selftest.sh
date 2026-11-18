@@ -579,6 +579,16 @@ check "docker run sh -c 'pytest', uncapped" block "$(payload "docker run --rm py
 check "docker run -v \$(pwd), uncapped"      block "$(payload 'docker run --rm -v $(pwd):/app -w /app python:3.12 pytest')" guard-bash.sh
 check "docker run -m 2gb, capped"           allow "$(payload 'docker run --rm --cpus 2 -m 2gb python:3.12 pytest')"  guard-bash.sh
 check "docker build -t pytest"              allow "$(payload 'docker build -t pytest .')"                           guard-bash.sh
+# Review of #198, round 3: main's rule as a backstop, $(...) bodies, every engine word, installs.
+check "x=\$(compose exec backend pytest)"   block "$(payload 'x=$(docker compose exec backend pytest)')"            guard-bash.sh
+check "x=\$(docker run pytest), uncapped"   block "$(payload 'x=$(docker run --rm python:3.12 pytest)')"            guard-bash.sh
+check "compose exec, pip install && pytest" block "$(payload "docker compose exec backend bash --login -c 'pip install pytest && pytest'")" guard-bash.sh
+check "run, pip install; pytest, uncapped"  block "$(payload "docker run --rm python:3.12 bash -euo pipefail -c 'pip install pytest; pytest'")" guard-bash.sh
+check "docker --tlscacert x compose exec"   block "$(payload 'docker --tlscacert /x/ca.pem compose exec backend pytest')" guard-bash.sh
+check "outer docker exec, inner compose"    block "$(payload 'docker exec ci-runner docker compose exec backend pytest')" guard-bash.sh
+check "X=/opt/podman docker compose exec"   block "$(payload 'X=/opt/podman docker compose exec backend pytest')"   guard-bash.sh
+check "run sh -c pip install pytest"        allow "$(payload "docker run --rm python:3.12 sh -c 'pip install pytest'")" guard-bash.sh
+check "docker run -m=2g, capped"            allow "$(payload 'docker run --rm --cpus 2 -m=2g python:3.12 pytest')"  guard-bash.sh
 echo ""
 echo "guard-write.sh — must BLOCK (AU-9, AIC-5)"
 check "hand-edit generated SARIF" block "$(wpayload 'evidence/142/g4/scan.sarif' 'x')"    guard-write.sh

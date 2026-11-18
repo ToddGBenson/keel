@@ -88,6 +88,31 @@ verdict: pass
 - **Documented gaps (unchanged on main):** PowerShell splatting (`docker @a`), Start-Process docker
   -ArgumentList, `run -d` then `exec`, and `create` then `start`.
 
+## Review round 3 (Fable 5.2 on 40d4e89 / 3369664, BLOCK)
+
+17 inputs that main blocks on the #61385 compose-exec rule were allowed at the head. The PO's fix,
+as in #62031's D1: **main's original #61385 patterns run unchanged as a backstop** beside the word
+judge. A command blocks if either blocks, so nothing main blocks can be allowed here, by
+construction. The causes, also fixed in the word judge (the run-cap rule has no main counterpart):
+1. `$(...)` kept as one word hid an invocation: the body of every `$(...)` and backtick, quoted or
+   not, is now judged as a command of its own (up to 6 levels).
+2. The install exemption beat a real run: it now applies only when no runner is left once every
+   `install` and its arguments, up to a separator, are removed. The guard reads the raw command,
+   not the masked view, which turned a quoted `&&` into spaces.
+3. `--tlscacert`, `--tlscert` and `--tlskey` take a value.
+4. Every engine word in a segment is judged, so an outer `docker exec <container>` doesn't hide an
+   inner `docker compose exec`, and a `NAME=value` word is never an engine.
+- Cheap false blocks fixed: an uncapped `sh -c "pip install pytest"`; `-m=2g`. Kept: `alpine echo
+  pytest` (the runner-anywhere reading).
+- **Consequence of the backstop:** `compose exec backend pip install pytest` blocks again, as on
+  main. The docs row names it as a known false positive.
+- **Docs row:** names `npm test` and `python -m unittest` as runners. Adds the gaps `make test`,
+  `--memory-swap -1`, and PowerShell splatting / Start-Process.
+- **Evidence:** the review's 17 regressions, its run-cap gap candidates, and rounds 1-2: 73 checks,
+  0 wrong. Selftest: 9 failing on 40d4e89, 381/0 here. Corpus 828/0. The corpus gains KB-273..276.
+- **Interaction:** #199 (TheHub #62031) adds its own tokenizer; whichever merges second reconciles
+  the two into one.
+
 ## Not verified
 
 - Git Bash on Windows was not run.

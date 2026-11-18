@@ -918,6 +918,14 @@ prod_svc='(backend|postgres)'
 test_runner='(pytest|py[.]test|tox|nox|python[0-9.]*([[:space:]]+-[A-Za-z]+)*[[:space:]]+-m[[:space:]]*pytest)'
 runner_after='[[:space:])`"'"'"']([^|;&]*[[:space:]/'"'"'"])?'"$test_runner$E"
 docker_exec="$B"'(docker|podman|nerdctl)([[:space:]]+[^|;&]*)?[[:space:]](container[[:space:]]+)?exec[[:space:]]+([^|;&]*[[:space:]])?'
+# Review of #198, round 3 (the PO's fix): main's #61385 patterns run unchanged, as a backstop
+# alongside the word judge below. A command blocks if either blocks, so nothing main blocks
+# can be allowed here, by construction.
+main_docker_exec="$B"'docker([[:space:]]+[^|;&]*)?[[:space:]](container[[:space:]]+)?exec[[:space:]]+([^|;&]*[[:space:]])?'
+compose_exec="$B"'(docker([[:space:]]+[^|;&]*)?[[:space:]]compose|docker-compose)[[:space:]]+([^|;&]*[[:space:]])?exec[[:space:]]+([^|;&]*[[:space:]])?'
+if g "$main_docker_exec$prod_ctr$runner_after" || g "$compose_exec$prod_svc$runner_after"; then
+  block "running a test suite inside a production container with docker exec. It runs under no --cpus/--memory cap (the 2026-10-23 outage, TheHub #61001). Run it in a capped test container through the shared lock instead: bash scripts/docker-test-lock.sh run <owner> -- bash scripts/test-offline.sh ... (--cpus 2 --memory 2g)." "AIC-3, SC-6, CP-2"
+fi
 #
 # Review of keel #198 (TheHub #61987, round 1): compose run/exec and docker run are judged
 # word by word, not by a regex over the line. The review found the runner read only after
@@ -939,15 +947,16 @@ ctr_is_runner() { # $1: the command line (entrypoint and arguments), quotes remo
   c=" ${ws[*]-} "
   printf '%s' "$c" | grep -qE '^ ([A-Za-z_][A-Za-z0-9_]*=[^ ]* )*(nice( -n ?[-0-9]+)? )?([^ ]*/)?(pytest|py[.]test|tox|nox) ' && return 0
   printf '%s' "$c" | grep -qE '^ ([A-Za-z_][A-Za-z0-9_]*=[^ ]* )*(nice( -n ?[-0-9]+)? )?([^ ]*/)?python[0-9.]*( -[A-Za-z]+)* -m ?pytest ' && return 0
-  printf '%s' "$c" | grep -qE '^ ([^ ]*/)?(sh|bash|dash|zsh|ash)( -[a-z]+)* -[a-z]*c .*(^|[ ;&|(/])(pytest|py[.]test|tox|nox|python[0-9.]*( -[A-Za-z]+)* -m ?pytest)( |$)' && return 0
   # Review of #198, round 2: a runner anywhere in the command, not only as its first word
   # (timeout 30 pytest, env X=1 pytest, uv run pytest, python -X dev -m pytest, sh -c 'pytest'),
   # as main's rule effectively read it. A package being installed (pip install pytest) is not
   # a run.
-  printf '%s' "$c" | grep -qE '[ /;&|(]((py[.]?test|tox|nox)|-m ?(pytest|unittest)|npm (run )?test)([ ;&|)]|$)' || return 1
-  printf '%s' "$c" | grep -qE '(^| )install( [^ ]+)* (py[.]?test|tox|nox)( |$)' && \
-    ! printf '%s' "$c" | grep -qE -e '-m ?(pytest|unittest)|(^| )(pytest|tox|nox) (-|[^ ]*/|tests?)' && return 1
-  return 0
+  # Round 3: a package being installed (pip install pytest) is not a run, but only when no
+  # runner is left once every `install` and the words after it, up to a separator, are removed
+  # (pip install pytest && pytest is a run).
+  local R='[ /;&|(]((py[.]?test|tox|nox)|-m ?(pytest|unittest)|npm (run )?test)([ ;&|)]|$)'
+  printf '%s' "$c" | grep -qE "$R" || return 1
+  printf '%s' "$c" | sed -E 's/(^|[ ;&|(])install( [^ ;&|()]+)*/\1/g' | grep -qE "$R"
 }
 ctr_cpu_ok() { # $1 --cpus value; $2 --cpu-quota; $3 --cpu-period. True when 0 < CPUs <= 2.
   guard_run awk 1 -v c="$1" -v q="$2" -v p="${3:-100000}" 'BEGIN { if (c != "") v = c + 0; else if (q != "") v = (q + 0) / (p + 0); else exit 1; exit !(v > 0 && v <= 2) }'
@@ -974,7 +983,7 @@ ctr_judge() { # $@: the words of one invocation
   while [ "$i" -lt "$n" ]; do
     a=$(ctr_unq "${w[i]}")
     case "$a" in
-      -H|--host|--context|-c|--config|--log-level|-l|-f|--file|-p|--project-name|--profile|--env-file|--project-directory|--ansi|--progress|--namespace|-n|--address|--url|--connection|--root|--runroot) i=$((i + 2)) ;;
+      -H|--host|--context|-c|--config|--log-level|-l|-f|--file|--tlscacert|--tlscert|--tlskey|-p|--project-name|--profile|--env-file|--project-directory|--ansi|--progress|--namespace|-n|--address|--url|--connection|--root|--runroot) i=$((i + 2)) ;;
       -*) i=$((i + 1)) ;;
       *) break ;;
     esac
@@ -1027,7 +1036,7 @@ ctr_judge() { # $@: the words of one invocation
           --cpu-period) period=$(ctr_unq "${w[i+1]:-}"); i=$((i + 1)) ;;
           --memory=*) mem=${a#*=} ;;
           --memory|-m) mem=$(ctr_unq "${w[i+1]:-}"); i=$((i + 1)) ;;
-          -m*) mem=${a#-m} ;;
+          -m*) mem=${a#-m}; mem=${mem#=} ;;
           --entrypoint=*) entry=${a#*=} ;;
           --entrypoint) entry=$(ctr_unq "${w[i+1]:-}"); i=$((i + 1)) ;;
           --*=*) ;;
@@ -1081,23 +1090,57 @@ END {
   flush()
 }
 AWK
+ctr_seg() { # $@: one segment. Round 3: judged from EVERY engine word (an outer docker exec
+  # <container> docker compose ... is two invocations), and a NAME=value word is never an engine.
+  local w=("$@") k a
+  for ((k = 0; k < $#; k++)); do
+    case "${w[k]}" in [A-Za-z_]*=*) continue ;; esac
+    a=$(ctr_unq "${w[k]}"); a=${a##*/}; a=${a%.exe}; a=${a%.EXE}
+    case "$a" in docker|podman|nerdctl|docker-compose|podman-compose) ctr_judge "${w[@]:k}" ;; esac
+  done
+}
+ctr_subst_awk='
+{ s = (NR > 1) ? s " " $0 : $0 }
+END {
+  n = length(s)
+  for (i = 1; i <= n; i++) {
+    c = substr(s, i, 1)
+    if (c == "$" && substr(s, i + 1, 1) == "(") {
+      d = 0; b = ""
+      for (j = i + 1; j <= n; j++) { e = substr(s, j, 1); if (e == "(") d++; else if (e == ")" && --d == 0) break; if (j > i + 1) b = b e }
+      print b; i = i + 1
+    } else if (c == "`") {
+      j = index(substr(s, i + 1), "`"); if (j == 0) j = n - i + 1
+      print substr(s, i + 1, j - 1); i += j
+    }
+  }
+}'
+ctr_depth=0
 ctr_guard() { # $1: one view of the command
-  local toks=() seg=() t
+  local toks=() seg=() t bodies=() b
   mapfile -t toks < <(printf '%s' "$1" | LC_ALL=C awk "$ctr_tok_awk")
   toks+=($'\001')
   for t in "${toks[@]}"; do
     if [ "$t" = $'\001' ]; then
-      [ "${#seg[@]}" -gt 0 ] && ctr_judge "${seg[@]}"
+      [ "${#seg[@]}" -gt 0 ] && ctr_seg "${seg[@]}"
       seg=(); continue
     fi
     seg+=("$t")
   done
+  # Round 3: the body of every $(...) and backtick, quoted or not, is a command of its own.
+  case "$1" in *'$('*|*'`'*) ;; *) return 0 ;; esac
+  ctr_depth=$((ctr_depth + 1))
+  if [ "$ctr_depth" -le 6 ]; then
+    mapfile -t bodies < <(printf '%s' "$1" | LC_ALL=C awk "$ctr_subst_awk")
+    for b in "${bodies[@]}"; do [ -n "$b" ] && ctr_guard "$b"; done
+  fi
+  ctr_depth=$((ctr_depth - 1))
 }
 cmd="$raw_cmd"; guard
 if [ "$word_cmd" != "$raw_cmd" ]; then cmd="$word_cmd"; guard; fi
 if [ "$ps_cmd" != "$raw_cmd" ] && [ "$ps_cmd" != "$word_cmd" ]; then cmd="$ps_cmd"; guard; fi
 if g '(^|[^A-Za-z0-9_.-])(docker|podman|nerdctl|docker-compose|podman-compose)([.][Ee][Xx][Ee])?([[:space:]]|$)' || [ "$ps_cmd" != "$raw_cmd" ]; then
-  ctr_guard "$masked_cmd"
+  ctr_guard "$raw_cmd"   # round 3: the quote-aware tokenizer reads the raw text; the masked view turns a quoted && into spaces
   [ "$ps_cmd" != "$raw_cmd" ] && ctr_guard "$ps_cmd"
 fi
 
