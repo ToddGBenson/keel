@@ -301,7 +301,7 @@ definitions, fixed through `/learn`. Every AI incident becomes a new seeded case
 | AIC-3 least agency — **write scope by role** | ✓ | ✗ | detection only | partial (CODEOWNERS) |
 | AIC-4 injection isolation | ✓ | ✓ (domain allowlist) | | |
 | AIC-5 secrets | ✓ | ✓ (deny rules) | ✓ | |
-| AIC-6 provenance | ✓ | | ✓ | ✓ (required check) |
+| AIC-6 provenance | ✓ | | ✓ | intended as a required check; not required today (2026-11-18) |
 | AIC-7 supply chain | ✓ | | ✓ | ✓ |
 | AIC-8 model change control | | | ✓ | ✓ (CODEOWNERS) |
 | AIC-9 review calibration | ✓ | | ✓ (template check) | ✓ |
