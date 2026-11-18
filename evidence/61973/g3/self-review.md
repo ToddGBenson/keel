@@ -1,7 +1,7 @@
 # Self-review — TheHub #61973 (the guards fail closed on time and on signals)
 
 Mode: solo (POAM-008); agent self-review, pending the independent review before merge
-PR: #194   Author: Claude Opus 5.5 on the Linux runner laptop (AI-authored)   Date: 2026-11-18
+PR: #194   Pair: binnacle #88   Author: Claude Opus 5.5 on the Linux runner laptop (AI-authored)   Date: 2026-11-18
 verdict: pass
 
 Claude Code gives a hook 60 s and lets the call PROCEED when it runs out. It blocks only on exit 2.
