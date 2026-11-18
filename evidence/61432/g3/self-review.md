@@ -1,6 +1,6 @@
 # Self-review — TheHub #61432: a per-repository release floor
 
-PR: (keel; binnacle pair)   Author: Claude Opus 5.5 (AI-authored)   Date: 2026-11-18
+PR: #202 (binnacle pair: #95)   Author: Claude Opus 5.5 (AI-authored)   Date: 2026-11-18
 Story: keel's `platform-release.sh` held every repository to `RELEASE_FLOOR`, keel's own commit
 af878f1, so every release of a repository without keel's history (a template copy, binnacle) was
 refused. Make the floor per repository, derived from a configured value, with a test that a fork
