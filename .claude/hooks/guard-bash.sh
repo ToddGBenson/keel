@@ -475,6 +475,21 @@ g "$B"'git[[:space:]]+(filter-branch|filter-repo)\b' \
   && block "history rewrite. Destroys the attributable, signed commit record." "AU-12, SI-7"
 g "$B"'git[[:space:]]+([^|;&]*[[:space:]])?push([[:space:]]+[^|;&]*)?[[:space:]](origin[[:space:]]+)?(HEAD:)?(main|master)'"$E" \
   && block "direct push to main. All change goes through a reviewed PR." "AC-5, CM-5"
+# TheHub #62031: main as a refspec's destination. `git push origin feat:main` (or
+# HEAD:refs/heads/main, +x:main, :main, refs/heads/main) moves main just as `git push origin
+# main` does, and with enforce_admins off and the agents pushing as the owner it lands with no
+# check at all. A `+` refspec is a force push of that ref, whatever the flags say. A git
+# commit's -n is --no-verify inside a cluster of flags too (-an, -anm), not only on its own;
+# -mnotes is a message, not -n, because m takes the rest of the word as its value.
+GIT_PUSH_SEG="$B"'git[[:space:]]+([^|;&]*[[:space:]])?push[[:space:]]([^|;&]*[[:space:]])?'
+g "$GIT_PUSH_SEG"'\+?[^[:space:]:]*:(refs/heads/)?(main|master)'"$E" \
+  && block "a push to main through a refspec (src:main). All change goes through a reviewed PR." "AC-5, CM-5"
+g "$GIT_PUSH_SEG"'\+?refs/heads/(main|master)'"$E" \
+  && block "direct push to main (refs/heads/main). All change goes through a reviewed PR." "AC-5, CM-5"
+g "$GIT_PUSH_SEG"'\+[^[:space:]]' \
+  && block "force push (a + refspec). Published history is immutable — it is the AU-12 audit trail." "AIC-3, AU-12, SI-7"
+g "$B"'git[[:space:]]+([^|;&]*[[:space:]])?commit[[:space:]]([^|;&]*[[:space:]])?-[aeiopqsvzn]*n[a-zA-Z]*'"$E" \
+  && block "hook bypass (-n on a git commit, alone or in a cluster of flags). Fix the cause the hook found." "AIC-3, IA-5"
 
 # Self-approval and self-merge — the control that makes every gate meaningful
 g "$B"'gh[[:space:]]+pr[[:space:]]+review\b[^|;&]*--approve\b' \

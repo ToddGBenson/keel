@@ -530,6 +530,25 @@ check "pytest in another container"   allow "$(payload 'docker exec thehub-test-
 check "capped test container"         allow "$(payload 'docker run --rm --cpus 2 --memory 2g python:3.12 pytest')"    guard-bash.sh
 check "exec, then pytest on the host" allow "$(payload 'docker exec thehub-backend cat /proc/meminfo; pytest -q')"    guard-bash.sh
 echo ""
+echo "guard-bash.sh — main through a refspec, a + force push, commit -n (TheHub #62031)"
+# With enforce_admins off and the agents pushing as the owner, a push that names main as its
+# destination lands on main with no check at all.
+check "push feat:main"                    block "$(payload 'git push origin feat:main')"                         guard-bash.sh
+check "push HEAD:refs/heads/main"         block "$(payload 'git push origin HEAD:refs/heads/main')"              guard-bash.sh
+check "push refs/heads/feat:refs/heads/main" block "$(payload 'git push origin refs/heads/feat:refs/heads/main')" guard-bash.sh
+check "push to master by refspec"         block "$(payload 'git push -u origin feat:master')"                    guard-bash.sh
+check "push refs/heads/main"              block "$(payload 'git push origin refs/heads/main')"                   guard-bash.sh
+check "delete main (:main)"               block "$(payload 'git push origin :main')"                             guard-bash.sh
+check "force push by + refspec"           block "$(payload 'git push origin +feat')"                             guard-bash.sh
+check "force push +feat:feat"             block "$(payload 'git push origin +feat:feat')"                        guard-bash.sh
+check "commit -n (no-verify)"             block "$(payload 'git commit -n -m x')"                                guard-bash.sh
+check "commit -an (grouped)"              block "$(payload 'git commit -anm x')"                                 guard-bash.sh
+check "PS: push feat:main"                block "$(pspayload 'git push origin feat:main')"                       guard-bash.sh
+check "push feat:feat"                    allow "$(payload 'git push origin feat:feat')"                         guard-bash.sh
+check "push a branch named main-fix"      allow "$(payload 'git push origin feat:main-fix')"                     guard-bash.sh
+check "push HEAD:feat/main-x"             allow "$(payload 'git push origin HEAD:feat/main-x')"                  guard-bash.sh
+check "commit -m with an n in it"         allow "$(payload 'git commit -m "notes"')"                             guard-bash.sh
+echo ""
 echo "guard-write.sh — must BLOCK (AU-9, AIC-5)"
 check "hand-edit generated SARIF" block "$(wpayload 'evidence/142/g4/scan.sarif' 'x')"    guard-write.sh
 check "hand-edit generated XML"   block "$(wpayload 'evidence/142/g4/results.xml' 'x')"   guard-write.sh
