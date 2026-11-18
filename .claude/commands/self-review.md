@@ -124,6 +124,8 @@ good, and neither is anyone else.
 
 ## Then
 
-Merge via GitHub. Required status checks still block; `enforce_admins` is still on. The only
-control relaxed in solo mode is the approval count — everything else that would have stopped
-a bad change still stops it.
+Merge via GitHub. Required status checks still block a non-admin identity, but `enforce_admins`
+is off on keel's `main` today, so an admin identity is not held to them (see
+`docs/11-ai-agent-controls.md` § Read this first). Solo mode relaxes the approval count, and
+the admin bypass relaxes more than that; the self-review record and cooling-off are the
+compensating controls.
