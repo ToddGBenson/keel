@@ -87,6 +87,14 @@ Branch protection on `main` — configured, not documented-and-hoped:
 - Linear history; no force-push; **no administrator bypass**
 - Security-relevant paths require the security owner (see `.github/CODEOWNERS`)
 
+**What `main` actually enforces (2026-11-18, TheHub #62001):** two required checks, `Concourse / keel`
+and `library-allowlist`, both pinned to App 4551328, `strict: true`; stale approvals dismissed;
+conversations resolved; linear history; no force-push or deletion. **Not in force:**
+`independent-review` is not required; 0 approving reviews and no code-owner requirement (solo
+mode, POAM-008); `required_signatures` off; administrator bypass allowed (`enforce_admins`
+off); no rulesets. The list above is the target configuration. A green `Concourse / keel` can
+show without the suites having run (TheHub #62015). Rulesets are planned in TheHub #61006.
+
 Administrator bypass disabled is what separates a real control from a documented intention.
 If an emergency needs it, that is the emergency change procedure with its own record — not
 a quiet click.

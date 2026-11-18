@@ -74,7 +74,7 @@ A gate is three things. Anything less is theater.
 1. **A checklist** with binary items — each either points at an artifact or it does not.
    Lives in `process/gates/`.
 2. **An approver** who is a *different identity* than the producer. Enforced by CODEOWNERS
-   and branch protection, not by convention.
+   and branch protection in a team setup, not by convention. In keel's solo setup today (2026-11-18) branch protection does not hold it: `main` requires no approving review and `enforce_admins` is off (POAM-008; `docs/13-solo-operation.md`).
 3. **An evidence record** written to `evidence/<work-item>/<gate>/` and indexed by the
    control it satisfies.
 

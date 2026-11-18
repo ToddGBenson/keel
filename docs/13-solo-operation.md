@@ -32,23 +32,32 @@ impossible for a single owner.
 CODEOWNERS still **routes and auto-requests** review — it is advisory rather than blocking.
 The file keeps doing its documentation and notification job.
 
-| Other controls | Team mode | Solo mode | Why |
-|---|---|---|---|
-| No admin bypass | ✔ | ✔ | **Unchanged.** Relaxing this would disable everything at once |
-| Required status checks | ✔ | ✔ **+ all of them** | The machine takes over what the reviewer did |
-| Signed commits | ✔ | ✔ | Attribution is unaffected by team size |
-| Linear history, no force-push, no deletion | ✔ | ✔ | Unchanged |
-| Conversations resolved | ✔ | ✔ | Unchanged |
-| **Self-review artifact** | optional | **required** | New. See below |
-| **Cooling-off before merge** | — | **required** | New. See below |
+| Other controls | Team mode | Solo mode (intended) | `main` today (2026-11-18) | Why |
+|---|---|---|---|---|
+| No admin bypass | ✔ | ✔ | **✗ `enforce_admins` false** | Relaxing this would disable everything at once |
+| Required status checks | ✔ | ✔ **+ all of them** | **two**: `Concourse / keel`, `library-allowlist` (App-pinned, strict) | The machine takes over what the reviewer did |
+| Signed commits | ✔ | ✔ | **✗ `required_signatures` false** (squash merges carry GitHub's signature) | Attribution is unaffected by team size |
+| Linear history, no force-push, no deletion | ✔ | ✔ | ✔ | Unchanged |
+| Conversations resolved | ✔ | ✔ | ✔ | Unchanged |
+| **Self-review artifact** | optional | **required** | expected; **no check requires it** | New. See below |
+| **Cooling-off before merge** | — | **required** | expected; **no check requires it** | New. See below |
 
-The single most important line: **`enforce_admins` stays true.** The tempting shortcut is to
-let the admin bypass protection "just for solo work." That does not relax one control; it
-removes all of them simultaneously, including the ones that still worked.
+The third column is what `GET .../branches/main/protection` and `GET .../rulesets` (`[]`)
+returned on 2026-11-18 (TheHub #62001). Where it differs from the second, the second is the target,
+not the state.
+
+The single most important line was meant to be: **`enforce_admins` stays true.** The tempting
+shortcut is to let the admin bypass protection "just for solo work." That does not relax one
+control; it removes all of them simultaneously, including the ones that still worked. **It is
+false today** (2026-11-18). The owner's identity, which is also the agents' (TheHub #61039), can merge
+past a red required check or push straight to `main`, and as an admin it can change the
+protection itself. Server-side rulesets with no bypass are planned in TheHub #61006.
 
 ## The three compensating controls
 
-A human reviewer provided three things. Each is replaced by something a machine can require.
+A human reviewer provided three things. Each is meant to be replaced by something a machine can
+require. As of 2026-11-18 none of the three is machine-required in keel: they are expectations that
+the building agent and the reviewers keep.
 
 ### 1. Independent analysis → `/self-review`
 

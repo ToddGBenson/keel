@@ -64,8 +64,10 @@ decides in MyKronos. Once `main` requires the check, MyKronos also opens the req
 for every open pull request. An agent requests with its own MyKronos credential and never
 approves its own work.
 
-**`Concourse / keel` stays main-only.** It is the post-merge verdict on each `main` commit
-and never lands on a pull request head, so it is not, and cannot be, a required check.
+**`Concourse / keel` was main-only.** It was the post-merge verdict on each `main` commit and
+never landed on a pull request head. Since TheHub #61778 Concourse judges PR heads, and on
+2026-11-18 `Concourse / keel` is a required check, with `library-allowlist`, both pinned to App 4551328.
+A green `Concourse / keel` can show without the suites having run (TheHub #62015, open).
 
 **Squash merges only.** `required_linear_history` is on, and a squash produces a single
 commit on `main`. `required_signatures` is **not** enforced on `main` (measured 2026-11-04:

@@ -40,7 +40,7 @@ limits that matter are **structural**:
 | Cannot decide what to build | Unattended input is G1-approved issues; no G1 evidence on the issue means the story is skipped |
 | Cannot reach production | It may run only the deploy command `automation-policy.yml` declares; `guard-bash.sh` blocks production regardless of what that file says |
 | Cannot ship untested work | Unit, functional and security suites are re-run **by the runner**; any failure means no PR |
-| Cannot merge or force-push | `guard-bash.sh` blocks it, and branch protection backs that up |
+| Cannot merge or force-push | `guard-bash.sh` blocks it; branch protection backs it for non-admin identities only: the agents' identity is the owner's admin account and `enforce_admins` is off (2026-11-18; TheHub #61039, #61006) |
 | Cannot run forever | 45-minute job timeout; `concurrency` prevents overlapping runs |
 | Cannot proceed past a real decision | Writes `sprint/done/<slug>.BLOCKED.md` and comments on the issue instead |
 

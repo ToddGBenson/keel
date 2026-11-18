@@ -192,12 +192,14 @@ Convention is not enforcement. The mechanisms:
 
 - **CODEOWNERS** (`.github/CODEOWNERS`) routes required reviews by path. Security-relevant
   paths require the security owner; workflow files require both security and release.
-- **Branch protection** on `main`: required status checks, required reviews, dismiss stale
-  approvals on new commits, no force-push, no bypass for administrators.
+- **Branch protection** on `main`: required status checks, dismiss stale approvals on new
+  commits, no force-push. In a team: required reviews and no bypass for administrators. In
+  keel today (2026-11-18) neither holds: 0 approving reviews (solo mode, POAM-008) and
+  `enforce_admins` off.
 - **GitHub Environments** with required reviewers gate the production deploy job — the
   human authorization at G5 is a technical control, not an email.
-- **Signed commits** required, so the producing identity is cryptographically attributable
-  (SI-7, CM-14).
+- **Signed commits**, so the producing identity is cryptographically attributable (SI-7,
+  CM-14). Not required in keel today (2026-11-18): `required_signatures` is off (POAM-009).
 - **Agent tool scoping** — each agent definition grants only the tools its role needs. The
   `product-owner` agent cannot write source files; the `developer` agent cannot approve.
   This is the AI-layer expression of the same principle (see `11-ai-agent-controls.md`).

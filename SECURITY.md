@@ -61,8 +61,11 @@ control is defensible; an overstated one is a finding.
 - **POAM-008 — separation of duties.** Solo operator. AC-5 cannot be satisfied literally;
   independent human approval is not enforced. Compensated by a self-review record the building
   agent writes and the reviewers read (no CI check requires it: `pr-governance.yml` has run on
-  `workflow_dispatch` only since 2026-10-20), a cooling-off period, all-checks-required, and
-  quarterly external review.
+  `workflow_dispatch` only since 2026-10-20), a cooling-off period, two required checks
+  (`Concourse / keel` and `library-allowlist`; CodeQL, Gitleaks and unit-suites run but are not
+  required), and quarterly external review. No check requires the record or the cooling-off,
+  and `enforce_admins` is off, so the owner's (and agents') admin identity can merge past a red
+  check (live 2026-11-18; rulesets planned in TheHub #61006).
 - **Agent write-scope is prompt-enforced**, not tool-enforced (POAM-001). Verified: the
   hook payload carries no agent identity.
 - **Workflows ship as skeletons.** Stack-specific steps are placeholders until

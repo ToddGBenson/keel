@@ -28,6 +28,10 @@ Settings → Branches → Add rule for `main`:
 | Allow force pushes | ❌ | History is the AU-12 audit trail |
 | Allow deletions | ❌ | |
 
+> keel's own `main` does not match this table today (2026-11-18): 0 approvals, no code-owner
+> requirement, `required_signatures` off and bypass allowed (`enforce_admins` off). The table is
+> the setup this template recommends; `docs/13-solo-operation.md` gives the live state and why.
+
 **"Do not allow bypassing" is the difference between a control and a documented
 intention.** With admin bypass enabled, everything above is advisory and an assessor will
 say so. If a genuine emergency needs it, that is the emergency change procedure with its
