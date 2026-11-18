@@ -546,6 +546,18 @@ check "secret-DETECTION code"     allow "$(wpayload 'scripts/scan.sh' 'grep -E a
 check "editing the guard itself"  allow "$(wpayload '.claude/hooks/guard-write.sh' 'grep -qEi api_key_pattern')" guard-write.sh
 
 echo ""
+echo "guard-write.sh — an evidence path in any spelling (TheHub #62022)"
+# Windows paths take backslashes and ignore case; the rule matched forward-slash, lower-case only.
+check "evidence, backslashes"            block "$(wpayload 'evidence\\142\\g4\\scan.sarif' 'x')"            guard-write.sh
+check "evidence, a Windows drive path"   block "$(wpayload 'C:\\repo\\evidence\\142\\g4\\results.xml' 'x')" guard-write.sh
+check "Evidence, capitalised"            block "$(wpayload 'Evidence/142/g4/scan.sarif' 'x')"               guard-write.sh
+check "EVIDENCE, upper case"             block "$(wpayload 'C:/repo/EVIDENCE/142/g4/ci-run.json' 'x')"      guard-write.sh
+check "evidence, ./ and // segments"     block "$(wpayload './evidence/./142//g4/scan.sarif' 'x')"          guard-write.sh
+check "evidence\\ narrative (.md)"        allow "$(wpayload 'evidence\\142\\g4\\verify.md' 'Verified.')"     guard-write.sh
+check "Evidence narrative (.MD)"         allow "$(wpayload 'Evidence/142/g4/verify.MD' 'Verified.')"       guard-write.sh
+check "a file merely named evidence"     allow "$(wpayload 'docs/evidence-model.md' 'x')"                    guard-write.sh
+
+echo ""
 echo "──────────────────────────────────────────────────────────────"
 printf '  %d passed, %d failed\n' "$pass" "$fail"
 if [ "$fail" -ne 0 ]; then

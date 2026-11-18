@@ -60,6 +60,7 @@ grep() { # -q (and --quiet/--silent) dropped, output discarded: grep reads all i
 }
 # shellcheck disable=SC2120  # called with no arguments here (payload="$(cat)"); kept general like guard-bash.sh's
 cat()     { guard_run cat 0 "$@"; }
+tr()      { guard_run tr 0 "$@"; }
 jq()      { guard_run jq 0 "$@"; }
 python3() { guard_run python3 0 "$@"; }
 python()  { guard_run python 0 "$@"; }
@@ -131,9 +132,20 @@ warn() { echo "WARNING  $1" >&2; }
 # A hand-edited scan report or test result is a fabrication regardless of intent, and it is
 # the failure mode that makes an entire compliance posture worthless. If evidence is wrong,
 # regenerate it and record why.
-case "$path" in
+# TheHub #62022: judge the path the way the file system will resolve it. On Windows a path
+# takes backslashes and its case is ignored, so evidence\142\x.sarif and Evidence/x.sarif
+# are the same file as evidence/x.sarif, and the rule (forward slashes, lower case) let them
+# through on every write tool. One normalised spelling: backslashes as slashes, lower case,
+# repeated slashes and ./ segments collapsed. tr, not ${x,,}, so bash 3.2 (macOS) runs it.
+npath=${path//\\//}
+npath="$(printf '%s' "$npath" | LC_ALL=C tr 'A-Z' 'a-z')"
+while case "$npath" in *//*) true ;; *) false ;; esac; do npath=${npath//\/\//\/}; done
+while case "$npath" in */./*) true ;; *) false ;; esac; do npath=${npath//\/.\//\/}; done
+npath=${npath#./}
+
+case "$npath" in
   */evidence/*|evidence/*)
-    case "$path" in
+    case "$npath" in
       # Narrative artifacts an agent legitimately authors during a gate.
       *.md) : ;;
       *) block "hand-editing generated evidence ($path). Regenerate it instead." "AU-9, CA-2" ;;
@@ -167,7 +179,7 @@ if printf '%s' "$content" | grep -qE \
 fi
 
 # ── Notices on high-consequence paths ───────────────────────────────────────
-case "$path" in
+case "$npath" in
   */.github/workflows/*|*/ci/pipeline.yml|*/ci/tasks/*|*/ci/scripts/*)
     warn "Editing a workflow. The pipeline gates every other control here — this change requires security review (CM-5), and relaxing a check is a visible process change, not a quiet diff." ;;
   */.claude/agents/*|*/.claude/commands/*|*/.claude/skills/*)
