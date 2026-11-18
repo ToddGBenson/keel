@@ -74,7 +74,7 @@ got there; the environment is what you are accepting.
 
 There is no auto-merge mode, and adding one would falsify every AC-5 claim this repo makes.
 The runner opens a PR and stops. `guard-bash.sh` blocks `gh pr merge`. Branch protection
-backs it for non-admin identities only: the agents' identity is the owner's admin account and `enforce_admins` is off (2026-11-18; TheHub #61039, #61006), so today the hook is what holds this if a future prompt says otherwise.
+refuses a direct push and a force push to `main` for every identity since 2026-11-18 (`keel-main` ruleset, `enforce_admins` on), but requires no approval, so the agents' identity, which is the owner's (TheHub #61039), can merge a PR whose checks are green; the hook is what stops that merge if a future prompt says otherwise.
 
 ## P5 — Unit, functional and security tests, all enabled
 

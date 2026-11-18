@@ -10,7 +10,7 @@ backs no-self-approval and no-merge. This change makes every current-state claim
 API returns today, dates it, and names the story for each planned control. Text-only: no hook, CI,
 settings or protection change.
 
-## The live state, read 2026-11-18T07:10Z and again at 10:20Z (keel and binnacle alike)
+## The live state, read 2026-11-18T07:10Z and 10:20Z; superseded at 12:09Z (see review round 1 below)
 
 `GET repos/ToddGBenson/<repo>/branches/main/protection` and `GET .../rulesets`:
 
@@ -69,6 +69,38 @@ written. ADRs are decision records and are left too.
   judgement.
 - The wording in docs not touched here (other docs/, process/, the skills) was swept for these
   controls by grep, not read line by line.
+
+## Review round 1 (Fable 5.2 on 4c13aae, BLOCK), and the new protection
+
+**The protection changed during this review.** At about 12:00Z on 2026-11-18 the operator turned on
+`enforce_admins` on keel and binnacle and added two keel rulesets:
+- `keel-main` (27545123): no bypass; deletion, non_fast_forward, required_signatures, and a pull
+  request (0 reviews, squash only);
+- `keel-release-tags` (27545130) on `refs/tags/v*`: creation, update, deletion and
+  non_fast_forward, with an admin bypass (RepositoryRole 5, always).
+
+Everything was re-read at 12:09Z and restated against it. The remaining agent gaps are named where
+they apply: 0 approvals, so the agents' identity (the owner's, TheHub #61039) can merge a green PR;
+the tag ruleset's admin bypass; and an admin can change the protection. binnacle has no rulesets.
+
+The review's findings:
+1. **unit-suites red:** test/self-review-docs.test.py asserted the template's old closing-keyword
+   wording. It now asserts the new wording, with the same strength, plus a check that the template
+   says GitHub itself closes on Fixed.
+2. **Still false:**
+   - **OPERATING.md § Merging:** "branch protection requires independent-review" is now "the intended
+     gate; not required today".
+   - **ci/README.md § 5:** "one approval", "no check has been required again yet" corrected.
+   - **`.sdlc/protection.yaml`:** protection-drift compares it with live every morning, so it now
+     DECLARES the live state, with reasons. `required_approving_review_count` 0 (POAM-008 solo mode),
+     `required_status_checks` [Concourse / keel, library-allowlist] (TheHub #61778), and
+     `enforce_admins` true (the default; no reason needed). `required_signatures` stays false, because
+     that field reads branch protection, and signing is the ruleset's; the reason says so.
+     `protection-drift.py compare` against live: all 6 fields match.
+   - **`.sdlc/process.yaml`:** it is not compared, and describes the process, so its "one approving
+     review" is labelled as the team-mode target, and its Concourse sentence is current.
+3. **POAM-014's row** no longer says Concourse / keel both "stays unrequired" and is required: the
+   first is marked superseded. No date changed.
 
 ## Flags for the operator (not changed here)
 

@@ -24,23 +24,28 @@
 #
 # Values recorded from the API on 2026-11-04 and unchanged since the 2026-10-22
 # reading in TheHub #60979: {checks: null, enforce_admins: false, reviews: 1,
-# signatures: false}.
+# signatures: false}. Re-read 2026-11-18 12:09Z (TheHub #62001): {checks: [Concourse / keel,
+# library-allowlist], enforce_admins: true, reviews: 0, signatures: false}; the fields that had
+# changed are declared as they are now, with the decisions that changed them. Signed commits are
+# required on main since 2026-11-18 by the keel-main ruleset, not by branch protection, so
+# required_signatures (a branch-protection field) stays false here.
 version: 1
 branch: main
 fields:
   enforce_admins:
-    value: false
-    reason: >-
-      TheHub #60849 option C (2026-10-20): the decided protection body in
-      ci/README.md keeps enforce_admins off until Concourse / keel is required
-      (TheHub #60580). The owner's merges can bypass protection meanwhile.
+    value: true
   required_approving_review_count:
-    value: 1
+    value: 0
+    reason: >-
+      POAM-008 solo mode (docs/13-solo-operation.md): GitHub forbids approving your
+      own PR, so a count of 1 makes merging impossible for a single owner. Recorded
+      as live on 2026-11-18 (TheHub #62001).
   required_signatures:
     value: false
     reason: >-
-      TheHub #60979: off on main since at least 2026-10-22, against
-      POAM-009's 2026-08-08 closure note, and no decision re-enabled it.
+      TheHub #60979: off in branch protection since at least 2026-10-22. Since
+      2026-11-18 the keel-main ruleset requires signed commits on main instead
+      (TheHub #62001); this field reads branch protection only.
       Declared as it is so OPERATING.md stops claiming it. Turning it back on
       is the owner's call (ci/README.md gives the command); flip this to true
       in the same change.
@@ -49,8 +54,11 @@ fields:
   allow_force_pushes:
     value: false
   required_status_checks:
-    value: []
+    value: [Concourse / keel, library-allowlist]
     reason: >-
-      TheHub #60849 option C (2026-10-20): no check is required until
-      Concourse / keel can arrive on a pull request head (TheHub #60580).
-      POAM-014 is open at High for exactly this.
+      TheHub #61778: Concourse judges pull request heads and posts Concourse / keel
+      on them, so it is required (with library-allowlist), both pinned to App
+      4551328. Recorded as live on 2026-11-18 (TheHub #62001). MyKronos
+      independent-review, configure-github.sh's default, is not required; POAM-014
+      stays open. A green Concourse / keel can show without the suites having run
+      (TheHub #62015).

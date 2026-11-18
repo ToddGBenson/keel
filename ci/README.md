@@ -42,8 +42,11 @@ approve anything. Gate approval stays a human act recorded in GitHub (PD-2).
 >
 > **Live protection on `main`, read 2026-11-18 (TheHub #62001):** 0 approving reviews; **two required
 > checks**, `Concourse / keel` and `library-allowlist`, both pinned to App 4551328, `strict`;
-> linear history, resolved conversations, no force-push or deletion; `enforce_admins` **off**;
-> `required_signatures` off; no rulesets. A green `Concourse / keel` can show without the suites
+> linear history, resolved conversations, no force-push or deletion; `enforce_admins` **on**
+> (since 12:09Z that day); branch protection's `required_signatures` off, but signed commits
+> required by the `keel-main` ruleset (no bypass: deletion, non-fast-forward, signed commits, a
+> pull request with squash only); release tags under the `keel-release-tags` ruleset, which
+> admins bypass. A green `Concourse / keel` can show without the suites
 > having run (TheHub #62015, open). This supersedes the 2026-11-16 reading (one approving review,
 > no required checks) and every "private" or "Actions does not start" statement below.
 >
@@ -609,9 +612,9 @@ This section used to say eleven required status checks protect `main`. **Read on
 2026-10-11, 2026-10-20 and again on 2026-11-16, none did:** `required_status_checks`
 was off. **On 2026-11-18 two are required:** `Concourse / keel` and `library-allowlist`, App-pinned
 (TheHub #61778 made Concourse judge PR heads). They were removed in 2026-08 when Actions could not run on the then-private
-repository, so that anything could merge (POAM-014). keel is public and Actions runs
-now, but no check has been required again yet. Reviews (one approval,
-`enforce_admins` off), linear history and conversation resolution are on. `PR Governance` is
+repository, so that anything could merge (POAM-014). Reviews: 0 approvals (2026-11-18; one
+until solo mode was recorded), `enforce_admins` on since 2026-11-18; linear history and conversation
+resolution are on. `PR Governance` is
 `disabled_manually` and retired (TheHub #60849).
 
 ```sh

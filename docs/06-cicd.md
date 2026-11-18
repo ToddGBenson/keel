@@ -91,8 +91,10 @@ Branch protection on `main` — configured, not documented-and-hoped:
 and `library-allowlist`, both pinned to App 4551328, `strict: true`; stale approvals dismissed;
 conversations resolved; linear history; no force-push or deletion. **Not in force:**
 `independent-review` is not required; 0 approving reviews and no code-owner requirement (solo
-mode, POAM-008); `required_signatures` off; administrator bypass allowed (`enforce_admins`
-off); no rulesets. The list above is the target configuration. A green `Concourse / keel` can
+mode, POAM-008). **Since 2026-11-18:** `enforce_admins` on, and the `keel-main` ruleset (no
+bypass) refuses deletion and non-fast-forward pushes and requires signed commits and a pull
+request (squash only); release tags have the `keel-release-tags` ruleset, which admins bypass,
+the agents' identity included (TheHub #61039). The list above is the target configuration. A green `Concourse / keel` can
 show without the suites having run (TheHub #62015). Rulesets are planned in TheHub #61006.
 
 Administrator bypass disabled is what separates a real control from a documented intention.

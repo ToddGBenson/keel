@@ -28,8 +28,9 @@ Settings → Branches → Add rule for `main`:
 | Allow force pushes | ❌ | History is the AU-12 audit trail |
 | Allow deletions | ❌ | |
 
-> keel's own `main` does not match this table today (2026-11-18): 0 approvals, no code-owner
-> requirement, `required_signatures` off and bypass allowed (`enforce_admins` off). The table is
+> keel's own `main` does not match this table today (2026-11-18): 0 approvals and no code-owner
+> requirement (solo mode). Signed commits are required by the `keel-main` ruleset rather than by
+> branch protection, and bypass is not allowed (`enforce_admins` on, no ruleset bypass). The table is
 > the setup this template recommends; `docs/13-solo-operation.md` gives the live state and why.
 
 **"Do not allow bypassing" is the difference between a control and a documented

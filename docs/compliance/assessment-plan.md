@@ -27,8 +27,10 @@ because they carry the most weight or drift fastest:
   reached `main`. Test it from the agents' identity: attempt to approve, and to merge, a PR it
   did not author, and record what refuses each. GitHub's refusal of an author's approval of
   their own PR is a platform rule, not branch protection, so that attempt says nothing. As of
-  2026-11-18, nothing server-side refuses either attempt: `main` requires 0 approving reviews and
-  `enforce_admins` is false; only `guard-bash.sh` stands in the way (TheHub #61039, #61006).
+  2026-11-18, nothing server-side refuses either attempt: `main` requires 0 approving reviews, so
+  a PR with green checks can be merged by the agents' identity (the owner's, TheHub #61039); only
+  `guard-bash.sh` stands in the way. A direct push to `main` is refused (the `keel-main` ruleset).
+  Test the release-tag ruleset too: the agents' identity, as an admin, bypasses it.
 - **SA-11 developer testing** — sample G4 evidence bundles; confirm the negative-case tests
   exist and would actually fail if the control were removed.
 - **CM-3 change control** — sample releases; confirm a human approval record exists with
