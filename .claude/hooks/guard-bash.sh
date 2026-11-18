@@ -13,6 +13,32 @@
 
 set -uo pipefail
 
+# TheHub #61843: PIN PATH. Every rule reads the command through grep, sed, awk, tr, cat
+# and jq, looked up on PATH. A directory earlier on PATH that an agent can write to
+# (~/bin, ~/.local/bin, a venv's bin) could hold a grep that always answers "no match" or
+# a jq that prints nothing, and the hook would allow anything. A planted helper that exits
+# 0 or 1 is not a fault, so #61794's wrappers cannot see it. So the hook finds its helpers
+# only in the system's own directories:
+#
+#   Linux, macOS: /usr/bin:/bin:/usr/sbin:/sbin. Not /usr/local/bin: Homebrew on Intel
+#                 Macs makes it user-writable. A jq installed only there is not found,
+#                 and the hook reads the command with its sed fallback instead.
+#   Git Bash:     /usr/bin:/bin:/mingw64/bin, Git for Windows' own tools. A jq from winget
+#                 or scoop lives outside them, so the sed fallback runs there too.
+#
+# A helper missing from these directories exits 127, which the wrappers record as a fault,
+# so the hook blocks rather than allows.
+#
+# The test seam: the hook tests run a COPY of this file with the one marked line below
+# rewritten to name their shim directory. The live hook takes no override (no variable,
+# flag or file), so nothing an agent sends or sets can widen its PATH.
+case "${OSTYPE:-}" in
+  msys*|cygwin*) guard_path="/usr/bin:/bin:/mingw64/bin" ;;
+  *)             guard_path="/usr/bin:/bin:/usr/sbin:/sbin" ;;
+esac
+PATH="$guard_path"; export PATH  # guard-path-pin: the hook tests rewrite this line, and only it
+hash -r
+
 # TheHub #61794: FAIL CLOSED. Every rule below reads the command through text tools
 # inside $(...) captures and `printf ... | grep -q` tests, and nothing checked that
 # they worked: a helper that errored or was killed left a capture empty, no rule
