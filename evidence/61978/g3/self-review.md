@@ -69,6 +69,21 @@ and that nothing new is falsely blocked. These fixes are folded in, in the story
   KB-233 fail in both tools; KB-234 and KB-235 already blocked there by other paths and are
   regression guards. Corpus 832/0. Selftest 330/0 with jq and without.
 
+## Review round 2 (Fable 5.2 on a1c060d / d3f320f, BLOCK; the scope stop)
+
+- **(a) A new false positive, fixed.** With no jq, a command holding the literal text `\u0000`
+  (an escaped backslash, then `u0000`) was refused; main and jq allow it. The refusal is now the
+  decoder's own: it exits 3 when it decodes a real `\u0000` escape, and only that is refused.
+- **(b) A fail-open main shares, fixed.** A key spelled with `\u` escapes (alone, or after a plain
+  `"command":"ls"` decoy) was not seen. Keys are now counted with each letter in either spelling
+  (Fable's pattern), and any key not spelled plainly is refused. An escaped backslash before the
+  `u` is a different key and does not match.
+- **(c) Nit:** the 256 KB cap counts bytes, under `LC_ALL=C`, not characters.
+- **Evidence:** corpus KB-236 and KB-237 (an escaped key, with and without a decoy) plus a selftest
+  allow case for the literal text. At a1c060d: corpus 4 runs fail, selftest without jq 1 fails.
+  Here: corpus 840/0; selftest 331/0 with jq and without; hook-fail-closed passes.
+- **Scope stop:** after this round, anything new that is not a regression is a documented gap.
+
 ## Not verified
 
 - Git Bash on Windows was not run. The copy fallback and find_bash() are written for it and untested

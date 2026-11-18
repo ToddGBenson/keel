@@ -151,6 +151,7 @@ END {
           if (v >= 55296 && v < 56320 && substr(s, i + 1, 2) == "\\u" && (w = guard_hex(substr(s, i + 3, 4))) >= 56320 && w < 57344) {
             v = 65536 + (v - 55296) * 1024 + (w - 56320); i += 6
           }
+          if (v == 0) guard_nul = 1   # a real \u0000 escape (review of #196, round 2)
           c = guard_utf8(v)
         }
       }
@@ -158,6 +159,7 @@ END {
     }
     printf "%s", c
   }
+  exit guard_nul ? 3 : 0
 }
 AWK
 
@@ -186,19 +188,29 @@ else
     echo "BLOCKED by .claude/hooks/guard-bash.sh — internal error: $1 with no jq here, so this hook cannot tell whether the command is allowed. Installing jq gives this hook a full JSON parser (TheHub #61978)." >&2
     exit 2
   }
-  [ "${#payload}" -gt 262144 ] && guard_nojq_refuse "the hook payload is over 256 KB, too large to judge"
+  guard_len="$(LC_ALL=C; printf '%s' "${#payload}")"   # bytes, not characters (round 2)
+  [ "$guard_len" -gt 262144 ] && guard_nojq_refuse "the hook payload is over 256 KB, too large to judge"
   payload_flat="$(printf '%s' "$payload" | LC_ALL=C tr '\n\r' '  ')"
   # A key is a quoted "command" whose closing quote is not escaped and is followed by a colon;
   # the opening quote may be escaped (the end of a key like "x\"command"). Text in a value
   # (\"command\") is neither.
-  guard_keys="$(printf '%s' "$payload_flat" | LC_ALL=C grep -oE '\\?"command"[[:space:]]*:' | LC_ALL=C grep -c .)"
+  # Round 2: each letter in either spelling (c or \u0063, ...), so a \u-escaped key is counted
+  # too, and any key not spelled plainly is refused. An escaped backslash before the u is a
+  # different key and does not match.
+  guard_kp='\\?"(c|\\u0063)(o|\\u006[fF])(m|\\u006[dD])(m|\\u006[dD])(a|\\u0061)(n|\\u006[eE])(d|\\u0064)"[[:space:]]*:'
+  guard_keys="$(printf '%s' "$payload_flat" | LC_ALL=C grep -oE "$guard_kp" | LC_ALL=C grep -c .)"
   [ "${guard_keys:-0}" -gt 1 ] && guard_nojq_refuse "the hook payload names more than one \"command\" key"
+  printf '%s' "$payload_flat" | LC_ALL=C grep -oE "$guard_kp" | LC_ALL=C grep -qvE '^"command"[[:space:]]*:' \
+    && guard_nojq_refuse "the hook payload spells its \"command\" key with escapes"
   printf '%s' "$payload_flat" | LC_ALL=C grep -qE '\\"command"[[:space:]]*:' \
     && guard_nojq_refuse "the hook payload has a key ending in an escaped quote and \"command\""
   cmd="$(printf '%s' "$payload_flat" | LC_ALL=C sed -nE 's/.*"command"[[:space:]]*:[[:space:]]*"(([^"\\]|\\.)*)".*/\1/p')"
   cmd_json="$cmd"
-  case "$cmd_json" in *'\u0000'*) guard_nojq_refuse "the command holds \\u0000" ;; esac
-  cmd="$(printf '%s' "$cmd_json" | LC_ALL=C awk "$json_unescape_awk" 2>/dev/null)" || cmd="$cmd_json"
+  cmd="$(printf '%s' "$cmd_json" | LC_ALL=C awk "$json_unescape_awk" 2>/dev/null)"; guard_rc=$?
+  # Round 2: the decoder itself says whether the value held a real \u0000 escape. A text match
+  # refused a command holding the literal text (an escaped backslash, then u0000).
+  [ "$guard_rc" -eq 3 ] && guard_nojq_refuse "the command holds a \\u0000 escape"
+  [ "$guard_rc" -eq 0 ] || cmd="$cmd_json"
   # TheHub #61978 / #62016: jq refuses a payload it cannot parse, and the wrapper makes that a
   # block. This fallback read the same payload as "no command" and allowed it. So, with
   # nothing extracted: a payload that names a non-empty command, or that does not end in a

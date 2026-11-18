@@ -28,7 +28,8 @@
 #             escapes (valid JSON; jq decodes them). truncated: the payload ends inside
 #             the command string (not valid JSON). second-key, newline-colon, nul, oversize:
 #             the review of #196's shapes (a later "command" key, a newline around the colon,
-#             a \u0000 escape, a payload over the no-jq cap). Either way both parsers must block.
+#             a \u0000 escape, a payload over the no-jq cap). escaped-key, escaped-key-decoy: the
+#             command key spelled with a \u escape, alone or after a plain decoy. Both parsers must block.
 #   open_in   OPTIONAL. Parser modes in which an entry is a known, tracked gap: the
 #             runner reports it instead of failing, and FAILS once it is blocked, so
 #             the fix must delete open_in and the entry becomes a regression test.
@@ -1789,3 +1790,19 @@ entries:
     command: gh pr merge 12
     expect: block
     why: "self-merge in a payload over the no-jq size cap"
+  - id: KB-236
+    hook: guard-bash.sh
+    class: payload-encoding
+    source: TheHub#61978
+    payload_encoding: escaped-key
+    command: gh pr merge 12
+    expect: block
+    why: "self-merge under a command key spelled with a u-escape, which sed did not read"
+  - id: KB-237
+    hook: guard-bash.sh
+    class: payload-encoding
+    source: TheHub#61978
+    payload_encoding: escaped-key-decoy
+    command: gh pr merge 12
+    expect: block
+    why: "self-merge under a u-escaped command key, after a plain command key holding ls"

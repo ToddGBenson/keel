@@ -529,6 +529,7 @@ check "read-only exec: pytest.ini"    allow "$(payload 'docker exec thehub-backe
 check "pytest in another container"   allow "$(payload 'docker exec thehub-test-61385 pytest')"                       guard-bash.sh
 check "capped test container"         allow "$(payload 'docker run --rm --cpus 2 --memory 2g python:3.12 pytest')"    guard-bash.sh
 check "exec, then pytest on the host" allow "$(payload 'docker exec thehub-backend cat /proc/meminfo; pytest -q')"    guard-bash.sh
+check "literal \\u0000 text in a command (61978 r2)" allow "$(payload "grep -P '\\u0000' f")" guard-bash.sh
 echo ""
 echo "guard-write.sh — must BLOCK (AU-9, AIC-5)"
 check "hand-edit generated SARIF" block "$(wpayload 'evidence/142/g4/scan.sarif' 'x')"    guard-write.sh

@@ -140,8 +140,8 @@ def load_corpus() -> tuple[list[dict], list[str]]:
                 errors.append(f"{where}: open_in must be a non-empty subset of {MODES}")
             if not e.get("gap"):
                 errors.append(f"{where}: an open entry needs gap: (why the hook misses it)")
-        if e.get("payload_encoding") not in (None, "unicode-escape", "truncated", "second-key", "newline-colon", "nul", "oversize"):
-            errors.append(f"{where}: payload_encoding must be unicode-escape, truncated, second-key, newline-colon, nul or oversize")
+        if e.get("payload_encoding") not in (None, "unicode-escape", "truncated", "second-key", "newline-colon", "nul", "oversize", "escaped-key", "escaped-key-decoy"):
+            errors.append(f"{where}: payload_encoding must be unicode-escape, truncated, second-key, newline-colon, nul, oversize, escaped-key or escaped-key-decoy")
         if e.get("hook") == "guard-bash.sh":
             if e.get("tool", "Bash") not in BASH_TOOLS:
                 errors.append(f"{where}: tool must be one of {BASH_TOOLS}")
@@ -259,6 +259,10 @@ def payload(e: dict, tool: str) -> bytes:
             text = text.replace('"command": ' + plain, '"command"\n:\n' + plain)
         elif enc == "nul":  # \u0000 inside the value
             text = text.replace(plain, plain[:-1] + '\\u0000"')
+        elif enc == "escaped-key":  # [review of #196, round 2] the key spelled with a \u escape
+            text = text.replace('"command": ' + plain, '"\\u0063ommand": ' + plain)
+        elif enc == "escaped-key-decoy":  # the same, after a plain "command" decoy
+            text = text.replace('"command": ' + plain, '"command": "ls", "\\u0063\\u006fmmand": ' + plain)
         elif enc == "oversize":  # over the no-jq size cap
             text = text[:-1] + ', "pad": "' + "a" * 300_000 + '"}'
         else:  # truncated: the payload ends inside the command string
