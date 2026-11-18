@@ -100,9 +100,15 @@ and reviewers will not accept the PR without it. The agent that builds the PR ru
 `/self-review <PR>` and fills this section before asking for review; the operator does not, and
 MyKronos `independent-review` does not replace it.
 
-- **Record:** `evidence/<issue>/g3/self-review.md`. `<issue>` is the issue the PR closes
-  (`Closes`/`Fixes`/`Resolves #<n>`); with none, the first `Refs #<n>`; with none, the first
-  `#<n>` in the title. Close one issue per PR, or the issue cannot be resolved.
+- **Record:** `evidence/<issue>/g3/self-review.md`, and link `evidence/<issue>/g3/self-review.md`
+  in the PR body (the path with the real issue number; a record the body does not link is not
+  found). The record carries a `PR: #<n>` line and a `verdict: pass|fail` line. `<issue>` is
+  resolved in this order:
+  1. `Closes`, `Fixes` or `Resolves #<n>` in the body. Only those three words close. `Fixed #<n>`
+     (or `Closed`, `Resolved`) does not, and falls to the `Refs` rule. A PR that closes more than
+     one issue cannot be resolved: close one issue per PR.
+  2. With none, the first `Ref` or `Refs` (any case, with or without a colon) `#<n>`.
+  3. With none, the first `#<n>` in the title.
 - **Opened / reviewed:** `<timestamp>` → `<timestamp>` (cooling-off: don't merge same session)
 - **Verified independently:** *specific claims you checked, not "reviewed it"*
 - **Agent findings:** developer · security-engineer · qa-engineer

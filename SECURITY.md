@@ -59,8 +59,10 @@ This project is deliberately explicit about what it does **not** enforce. A docu
 control is defensible; an overstated one is a finding.
 
 - **POAM-008 — separation of duties.** Solo operator. AC-5 cannot be satisfied literally;
-  independent human approval is not enforced. Compensated by a CI-required self-review
-  artifact, a cooling-off period, all-checks-required, and quarterly external review.
+  independent human approval is not enforced. Compensated by a self-review record the building
+  agent writes and the reviewers read (no CI check requires it: `pr-governance.yml` has run on
+  `workflow_dispatch` only since 2026-10-20), a cooling-off period, all-checks-required, and
+  quarterly external review.
 - **Agent write-scope is prompt-enforced**, not tool-enforced (POAM-001). Verified: the
   hook payload carries no agent identity.
 - **Workflows ship as skeletons.** Stack-specific steps are placeholders until
