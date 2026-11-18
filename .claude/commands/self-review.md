@@ -16,13 +16,18 @@ replace it.
 
 **Who reads it.** In keel the record is read by the reviewers; keel's `pr-governance.yml` was
 retired on 2026-10-20 (TheHub #60849) and runs on `workflow_dispatch` only, so nothing in keel
-blocks a merge on it. A fork that restores `pr-governance.yml` gets the shape check in
-`scripts/selfreview-check.js`, which counts a record only if it has a `verdict: pass|fail` line
-(`scripts/control-liveness.py`, POAM-018) and names the PR.
+blocks a merge on it. Two scripts read the record, and each reads its own line:
+
+- `scripts/control-liveness.py` counts a record only if it has a `verdict: pass|fail` line
+  (`VERDICT_RE`, POAM-018). A record without one does not count.
+- `scripts/selfreview-check.js` requires a `PR: #<n>` line naming the pull request, and a
+  substantive "Not verified" and "Cold-read notes" (the shape check a fork gets by restoring the
+  workflow). It does not read the verdict line.
 
 **Which issue.** The record's `<issue>` is the issue the PR closes: `Closes`, `Fixes` or
-`Resolves #<n>` in the body (a PR that closes more than one fails the check). With none, the
-first `Refs #<n>`; with none, the first `#<n>` in the PR title.
+`Resolves #<n>` in the body (a PR that closes more than one fails the check; `Fixed #<n>` does
+not close). With none, the first `Ref` or `Refs #<n>` (any case, colon optional); with none, the
+first `#<n>` in the PR title. The PR body must also link the record path.
 
 **Read `docs/13-solo-operation.md` first.** This is a compensating control for a declared gap
 (POAM-008), not an equivalent to independent human review. Treating it as equivalent is the
@@ -74,7 +79,7 @@ Ask the two questions only you can:
 
 ## The artifact
 
-Write `evidence/<issue>/g3/self-review.md`. Its `verdict: pass|fail` line is what `scripts/control-liveness.py` counts; a record without one does not count (POAM-018):
+Write `evidence/<issue>/g3/self-review.md`. Its `verdict: pass|fail` line is what `scripts/control-liveness.py` counts (POAM-018); its `PR: #<n>` line is what `scripts/selfreview-check.js` requires. Example:
 
 ```markdown
 # Self-review — #142
@@ -124,6 +129,8 @@ good, and neither is anyone else.
 
 ## Then
 
-Merge via GitHub. Required status checks still block; `enforce_admins` is still on. The only
-control relaxed in solo mode is the approval count — everything else that would have stopped
-a bad change still stops it.
+Merge via GitHub. Required status checks still block a non-admin identity, but `enforce_admins`
+is off on keel's `main` today, so an admin identity is not held to them (see
+`docs/11-ai-agent-controls.md` § Read this first). Solo mode relaxes the approval count, and
+the admin bypass relaxes more than that; the self-review record and cooling-off are the
+compensating controls.

@@ -503,6 +503,33 @@ check "PS: contents feat, irm Put"    allow "$(pspayload "irm -Method Put https:
 check "PS: merges feat, iwr Post"     allow "$(pspayload "iwr -Method Post -Uri https://api.github.com/repos/O/R/merges -Body '{\"base\":\"feat\",\"head\":\"x\"}'")" guard-bash.sh
 
 echo ""
+echo "guard-bash.sh — test suites never run inside production's containers (TheHub #61385)"
+check "pytest in thehub-backend"      block "$(payload 'docker exec thehub-backend pytest tests/unit')"                guard-bash.sh
+check "python -m pytest, exec -it"    block "$(payload 'docker exec -it -w /app thehub-backend python -m pytest -x')"  guard-bash.sh
+check "python3 -u -m pytest"          block "$(payload 'docker exec thehub-backend python3 -u -m pytest')"            guard-bash.sh
+check "tox in mykronos-backend"       block "$(payload 'docker exec mykronos-backend tox -e py312')"                   guard-bash.sh
+check "nox in thehub-postgres"        block "$(payload 'docker exec thehub-postgres nox')"                            guard-bash.sh
+check "pytest by path"                block "$(payload 'docker exec thehub-backend /usr/local/bin/pytest')"           guard-bash.sh
+check "pytest inside sh -c"           block "$(payload "docker exec thehub-backend sh -c 'cd /app && pytest -q'")"     guard-bash.sh
+check "docker container exec"         block "$(payload 'docker container exec -u app mykronos-backend pytest')"       guard-bash.sh
+check "nice'd pytest is still pytest" block "$(payload 'docker exec thehub-backend nice -n 19 pytest')"               guard-bash.sh
+check "PS: pytest in thehub-backend"  block "$(pspayload 'docker exec thehub-backend pytest')"                         guard-bash.sh
+check "docker compose exec backend"   block "$(payload 'docker compose exec backend pytest -x')"                     guard-bash.sh
+check "docker compose -f, exec -T"    block "$(payload 'docker compose -f deploy/docker-compose.yml exec -T backend python -m pytest')" guard-bash.sh
+check "docker-compose exec postgres"  block "$(payload 'docker-compose exec postgres tox')"                          guard-bash.sh
+check "docker global option first"    block "$(payload 'docker -H unix:///var/run/docker.sock exec thehub-backend pytest')"          guard-bash.sh
+check "docker.exe on Windows"         block "$(payload 'docker.exe exec thehub-backend pytest')"                     guard-bash.sh
+check "docker by path"                block "$(payload '/usr/bin/docker exec mykronos-backend pytest')"              guard-bash.sh
+check "PS: docker compose exec"       block "$(pspayload 'docker compose exec backend pytest')"                     guard-bash.sh
+check "compose: backend-staging"      allow "$(payload 'docker compose exec backend-staging pytest')"               guard-bash.sh
+check "compose: postgres-staging"     allow "$(payload 'docker-compose exec postgres-staging pytest')"              guard-bash.sh
+check "compose: read-only exec"       allow "$(payload 'docker compose exec backend cat /proc/loadavg')"            guard-bash.sh
+check "read-only exec: /proc"         allow "$(payload 'docker exec thehub-backend cat /proc/loadavg')"               guard-bash.sh
+check "read-only exec: pytest.ini"    allow "$(payload 'docker exec thehub-backend cat /app/pytest.ini')"             guard-bash.sh
+check "pytest in another container"   allow "$(payload 'docker exec thehub-test-61385 pytest')"                       guard-bash.sh
+check "capped test container"         allow "$(payload 'docker run --rm --cpus 2 --memory 2g python:3.12 pytest')"    guard-bash.sh
+check "exec, then pytest on the host" allow "$(payload 'docker exec thehub-backend cat /proc/meminfo; pytest -q')"    guard-bash.sh
+echo ""
 echo "guard-write.sh — must BLOCK (AU-9, AIC-5)"
 check "hand-edit generated SARIF" block "$(wpayload 'evidence/142/g4/scan.sarif' 'x')"    guard-write.sh
 check "hand-edit generated XML"   block "$(wpayload 'evidence/142/g4/results.xml' 'x')"   guard-write.sh
