@@ -476,23 +476,6 @@ g "$B"'git[[:space:]]+(filter-branch|filter-repo)\b' \
 g "$B"'git[[:space:]]+([^|;&]*[[:space:]])?push([[:space:]]+[^|;&]*)?[[:space:]](origin[[:space:]]+)?(HEAD:)?(main|master)'"$E" \
   && block "direct push to main. All change goes through a reviewed PR." "AC-5, CM-5"
 
-# TheHub #61972: agents never push a release tag. Every v* tag is a release candidate
-# (release.yml signs "release.yml@refs/tags/TAG"), so pushing one is cutting a release.
-# Caught in one git push invocation: a v<digit> tag by name or as `tag v1`, any
-# refs/tags/v* or refs/tags/* refspec (as source, destination, +forced or :deleted),
-# --tags, --follow-tags and --mirror (which push every tag), and push.followTags given
-# with -c or set with git config. --no-follow-tags, git tag -l and git fetch --tags stay
-# allowed. Not read: GIT_CONFIG_* environment variables, a remote.<name>.push or
-# .mirror setting made earlier, or an alias (open entries in docs/11-ai-agent-controls.md).
-GIT_PUSH="$B"'git[[:space:]]+([^|;&]*[[:space:]])?push([[:space:]]|$)'
-TAG_REF='(refs/tags/(v|\*)|v[0-9])[^[:space:]]*'
-g "$GIT_PUSH"'([^|;&]*[[:space:]])?(\+?([^[:space:]:]*:)?'"$TAG_REF"'|tag[[:space:]]+v[0-9][^[:space:]]*)'"$E" \
-  && block "pushing a release tag. a v* tag starts a release, and releases are the operator's: the Keel-Rulesets-Release script, or a release.yml dispatch. Push your branch and open a PR; the operator tags after merge." "CM-3, AIC-1, AC-5"
-g "$GIT_PUSH"'([^|;&]*[[:space:]])?--(tags|follow-tags|mirror)'"$E" \
-  && block "a git push that sends tags (--tags, --follow-tags or --mirror). a v* tag starts a release, and releases are the operator's: the Keel-Rulesets-Release script, or a release.yml dispatch. Push your branch and open a PR; the operator tags after merge." "CM-3, AIC-1, AC-5"
-g "$B"'git[[:space:]]+([^|;&]*[[:space:]])?(-c[[:space:]]*|config[[:space:]]+([^|;&]*[[:space:]])?)[Pp][Uu][Ss][Hh][.][Ff][Oo][Ll][Ll][Oo][Ww][Tt][Aa][Gg][Ss]' \
-  && block "setting push.followTags, which makes git push send tags. a v* tag starts a release, and releases are the operator's: the Keel-Rulesets-Release script, or a release.yml dispatch. Push your branch and open a PR; the operator tags after merge." "CM-3, AIC-1, AC-5"
-
 # Self-approval and self-merge — the control that makes every gate meaningful
 g "$B"'gh[[:space:]]+pr[[:space:]]+review\b[^|;&]*--approve\b' \
   && block "approving a PR. Agents recommend; a human or a separate identity approves." "AC-5, AIC-2"
@@ -606,16 +589,6 @@ if gh_api_write; then
     | grep -oE '(-[fF][[:space:]]*|--(raw-)?field[[:space:]=]+)'"$1"'=[^[:space:]|;&)`"'"'"']+' \
     | head -n1 | sed -E 's/^[^=]*=//'; }
   is_main() { printf '%s' "$1" | grep -qE '^(refs/heads/)?(main|master)$'; }
-  # TheHub #61972: a tag through the git data API. A tag object (git/tags), a move or
-  # delete of a tag ref (git/refs/tags/...), or a new ref (git/refs) that names a tag or
-  # whose ref this hook cannot read (--input, $(...)). A branch ref stays allowed.
-  g "$B"'gh[[:space:]]+api[^|;&]*/git/(tags|refs/tags/)' \
-    && block "writing a tag through gh api. a v* tag starts a release, and releases are the operator's: the Keel-Rulesets-Release script, or a release.yml dispatch. Push your branch and open a PR; the operator tags after merge." "CM-3, AIC-1, AC-5"
-  if g "$B"'gh[[:space:]]+api[^|;&]*/git/refs'"$E"; then
-    rf=$(api_field ref)
-    { [ -z "$rf" ] || printf '%s' "$rf" | grep -qE '^refs/tags/'; } \
-      && block "creating a tag ref through gh api (or a ref this hook cannot read; pass -f ref=refs/heads/<branch>). a v* tag starts a release, and releases are the operator's: the Keel-Rulesets-Release script, or a release.yml dispatch. Push your branch and open a PR; the operator tags after merge." "CM-3, AIC-1, AC-5"
-  fi
   # A contents write is a commit. With no branch field it lands on the default branch.
   if g "$B"'gh[[:space:]]+api[^|;&]*/contents/'; then
     br=$(api_field branch)
@@ -664,7 +637,7 @@ gql_mutations() {
   # as "main". Push a feature branch with git instead.
   # TheHub #61972: createRef with a tag name is a pushed tag.
   m 'createRef' && printf '%s' "$gql" | grep -qE 'refs/tags/' \
-    && block "creating a tag through GraphQL$via. a v* tag starts a release, and releases are the operator's: the Keel-Rulesets-Release script, or a release.yml dispatch. Push your branch and open a PR; the operator tags after merge." "CM-3, AIC-1, AC-5"
+    && block "creating a tag through GraphQL$via. A v* tag is the ref a release is cut from, and cutting a release is the operator's decision. Push your branch and open a PR; after merge the operator creates the tag and dispatches release.yml." "CM-3, AIC-1, AC-5"
   m 'updateRefs?' \
     && block "moving a ref through GraphQL$via. A ref id may be main; push a feature branch with git." "AC-5, CM-5"
   if m 'createCommitOnBranch'; then
@@ -944,7 +917,246 @@ if g "$docker_exec$prod_ctr$runner_after" || g "$compose_exec$prod_svc$runner_af
 fi
 }
 
+# ── Release tags (TheHub #61972) ──────────────────────────────────────────────
+# A v* tag is the ref a release is cut from (release.yml signs "release.yml@refs/tags/TAG"),
+# so an agent never creates one, pushes one, or writes one through the API. Regexes over the
+# command line both missed and over-matched here (review of keel #192): git accepts any
+# unique prefix of a long option (--tag, --follow-tag, --mirr), v-words in a commit message
+# or a redirect target (> v1.log) are not refspecs, and `git stash push` is not a push. So
+# the command is split into shell words (quotes honoured, $(...) and backticks as word
+# breaks) and only the arguments that name refs are judged:
+#
+#   git [global options] push ...  --tags, --follow-tags, --mirror by any unique prefix;
+#       a refspec that names refs/tags/..., a version-like bare name (v1, v1.2.3, vNext),
+#       `tag <v...>`, or anything this hook cannot resolve from the text ($VAR, $(...), a
+#       glob such as refs/* or refs/t*); -c / --config-env of push.followTags,
+#       remote.<name>.push or remote.<name>.mirror.
+#   git send-pack                   always (the plumbing under push).
+#   git tag <name>                  creating a tag named v*, or one named by a variable.
+#                                   Listing (-l, --list, no name), -d and -v stay allowed.
+#   git config                      setting push.followTags, remote.<name>.push or .mirror;
+#                                   --get, --list and get/list stay allowed.
+#   gh api                          a write to git/tags or git/refs/tags/...; a write to
+#                                   git/refs unless it carries exactly one literal
+#                                   ref=refs/heads/<name> (-f/--raw-field, or -F without @)
+#                                   and no --input. The endpoint is normalised first: a
+#                                   query string, trailing or doubled slashes, a leading
+#                                   slash and the API host are dropped.
+# A branch named v2-migration is allowed; a bare name shaped like a release (v<digits> with
+# dots, or v and a capital) is refused, because it is a tag when one by that name exists.
+read -r -d '' tok_awk <<'AWK'
+function flush() { if (have) { print tok; tok = ""; have = 0 } }
+{ s = (NR > 1) ? s "\n" $0 : $0 }
+END {
+  n = length(s); q = ""; tok = ""; have = 0
+  for (i = 1; i <= n; i++) {
+    c = substr(s, i, 1)
+    if (q == "'") { if (c == "'") q = ""; else tok = tok c; continue }
+    if (q == "\"") {
+      if (c == "\"") q = ""
+      else if (c == "\\" && i < n) tok = tok substr(s, ++i, 1)
+      else tok = tok c
+      continue
+    }
+    if (c == "'" || c == "\"") { q = c; have = 1; continue }
+    if (c == "\\" && i < n) { tok = tok substr(s, ++i, 1); have = 1; continue }
+    if (c == " " || c == "\t") { flush(); continue }
+    if (c == "\n" || c == ";" || c == "|" || c == "&") { flush(); print "\001"; continue }
+    if (c == "(" || c == ")") { flush(); continue }
+    if (c == "`") { flush(); print "`"; continue }
+    if (c == "<" || c == ">") {
+      if (tok ~ /^[0-9]+$/) { tok = ""; have = 0 } else flush()
+      while (i < n && (substr(s, i + 1, 1) == ">" || substr(s, i + 1, 1) == "<")) i++
+      print ">"; continue
+    }
+    tok = tok c; have = 1
+  }
+  flush()
+}
+AWK
+tag_msg="A v* tag is the ref a release is cut from, and cutting a release is the operator's decision. Push your branch and open a PR; after merge the operator creates the tag and dispatches release.yml."
+tag_dyn() { case "$1" in *'$'*|*'`'*|*'*'*|*'?'*|*'['*) return 0 ;; esac; return 1; }
+tag_versionish() { printf '%s' "$1" | grep -qE '^v([0-9]+([.][0-9]+)+([-+.][0-9A-Za-z.-]*)?|[0-9]+|[A-Z][A-Za-z0-9._-]*)$'; }
+tag_side() { # one side of a refspec
+  [ -z "$1" ] && return 0
+  tag_dyn "$1" && block "a git push whose refspec ($1) cannot be read here: a variable, a substitution or a glob may name a release tag. Name the branch literally. $tag_msg" "CM-3, AIC-1, AC-5"
+  case "$1" in
+    refs/tags/*) block "pushing a release tag ($1). $tag_msg" "CM-3, AIC-1, AC-5" ;;
+  esac
+  case "$1" in refs/*) return 0 ;; esac
+  tag_versionish "$1" && block "pushing a release tag ($1, a tag when one by that name exists). $tag_msg" "CM-3, AIC-1, AC-5"
+  return 0
+}
+tag_cfg() { # a git config key that makes push send tags
+  printf '%s' "$1" | grep -qiE '^(push[.]followtags|remote[.].+[.](push|mirror))(=|$)'
+}
+tag_git() { # tag_git <tokens after git>
+  local a sub="" cfg_bad="" k
+  while [ "$#" -gt 0 ]; do
+    a=$1; shift
+    case "$a" in
+      -c) [ "$#" -gt 0 ] && { tag_cfg "$1" && cfg_bad="$1"; shift; } ;;
+      -c*) tag_cfg "${a#-c}" && cfg_bad="${a#-c}" ;;
+      --config-env=*) tag_cfg "${a#--config-env=}" && cfg_bad="${a#--config-env=}" ;;
+      --config-env) [ "$#" -gt 0 ] && { tag_cfg "$1" && cfg_bad="$1"; shift; } ;;
+      -C|--git-dir|--work-tree|--namespace|--super-prefix) [ "$#" -gt 0 ] && shift ;;
+      -*) ;;
+      *) sub=$a; break ;;
+    esac
+  done
+  case "$sub" in
+    push)
+      [ -n "$cfg_bad" ] && block "a git push with $cfg_bad set, which sends tags or every ref. $tag_msg" "CM-3, AIC-1, AC-5"
+      local dd=0 pos=0 name want_tag=0
+      while [ "$#" -gt 0 ]; do
+        a=$1; shift
+        if [ "$a" = ">" ]; then [ "$#" -gt 0 ] && shift; continue; fi
+        [ "$a" = "\`" ] && continue
+        if [ "$dd" -eq 0 ] && [ "$a" = "--" ]; then dd=1; continue; fi
+        if [ "$dd" -eq 0 ]; then
+          case "$a" in
+            --no-*) continue ;;
+            --*)
+              name=${a#--}; name=${name%%=*}
+              for k in tags follow-tags mirror; do
+                case "$k" in "$name"*) block "a git push that sends tags (--$name, read as --$k: git accepts any unique prefix). $tag_msg" "CM-3, AIC-1, AC-5" ;; esac
+              done
+              case "$a" in *=*) ;; --repo|--receive-pack|--exec|--push-option) [ "$#" -gt 0 ] && shift ;; esac
+              continue ;;
+            -o) [ "$#" -gt 0 ] && shift; continue ;;
+            -*) continue ;;
+          esac
+        fi
+        if [ "$want_tag" -eq 1 ]; then
+          want_tag=0
+          { tag_dyn "$a" || case "$a" in v*) true ;; *) false ;; esac; } \
+            && block "pushing a release tag (tag $a). $tag_msg" "CM-3, AIC-1, AC-5"
+          continue
+        fi
+        pos=$((pos + 1))
+        [ "$pos" -eq 1 ] && continue                  # the repository
+        [ "$a" = "tag" ] && { want_tag=1; continue; }
+        a=${a#+}
+        case "$a" in
+          *:*) tag_side "${a%%:*}"; tag_side "${a#*:}" ;;
+          *)   tag_side "$a" ;;
+        esac
+      done ;;
+    send-pack)
+      block "git send-pack, the plumbing under git push, which can send any ref, tags included. $tag_msg" "CM-3, AIC-1, AC-5" ;;
+    tag)
+      local listing=0 tname=""
+      while [ "$#" -gt 0 ]; do
+        a=$1; shift
+        if [ "$a" = ">" ]; then [ "$#" -gt 0 ] && shift; continue; fi
+        case "$a" in
+          -l|--list|-d|--delete|-v|--verify|--contains*|--no-contains*|--points-at*|--merged*|--no-merged*|-n*|--column*|--sort*|--format*) listing=1 ;;
+          -m|-F|-u|--message|--file|--local-user|--cleanup|--trailer) [ "$#" -gt 0 ] && shift ;;
+          -*) ;;
+          *) [ -z "$tname" ] && tname=$a ;;
+        esac
+      done
+      if [ "$listing" -eq 0 ] && [ -n "$tname" ]; then
+        { tag_dyn "$tname" || case "$tname" in v*) true ;; *) false ;; esac; } \
+          && block "creating a release tag ($tname). $tag_msg" "CM-3, AIC-1, AC-5"
+      fi ;;
+    config)
+      local reading=0 first=""
+      for a in "$@"; do
+        case "$a" in
+          --get|--get-all|--get-regexp|--get-urlmatch|--list|-l|--unset|--unset-all|--get-color|--get-colorbool) reading=1 ;;
+          -*) ;;
+          *) [ -z "$first" ] && first=$a ;;
+        esac
+      done
+      case "$first" in get|list|unset) reading=1 ;; esac
+      if [ "$reading" -eq 0 ]; then
+        for a in "$@"; do
+          tag_cfg "$a" && block "setting $a, which makes git push send tags or every ref. $tag_msg" "CM-3, AIC-1, AC-5"
+        done
+      fi ;;
+  esac
+  return 0
+}
+tag_ref_field() { # $1: the flag, $2: key=value. Counts ref= fields; marks one this hook cannot trust.
+  case "$2" in ref=*) ;; *) return 0 ;; esac
+  refs=$((refs + 1))
+  local v=${2#ref=}
+  if tag_dyn "$v"; then ref_ok=0; return 0; fi
+  case "$1" in -F|--field) case "$v" in @*) ref_ok=0; return 0 ;; esac ;; esac
+  printf '%s' "$v" | grep -qE '^refs/heads/[A-Za-z0-9._/-]+$' || ref_ok=0
+  return 0
+}
+tag_ghapi() { # tag_ghapi <tokens after gh api>
+  local a method="" body=0 input=0 ep="" refs=0 ref_ok=1
+  while [ "$#" -gt 0 ]; do
+    a=$1; shift
+    if [ "$a" = ">" ]; then [ "$#" -gt 0 ] && shift; continue; fi
+    case "$a" in
+      -X|--method) [ "$#" -gt 0 ] && { method=$1; shift; } ;;
+      --method=*) method=${a#--method=} ;;
+      --*) ;;
+      -*X*) method=${a#*X} ;;
+    esac
+    case "$a" in
+      -f|-F|--field|--raw-field)
+        body=1
+        if [ "$#" -gt 0 ]; then tag_ref_field "$a" "$1"; shift; fi ;;
+      -f*|-F*)
+        body=1; tag_ref_field "${a:0:2}" "${a:2}" ;;
+      --field=*|--raw-field=*)
+        body=1; tag_ref_field "${a%%=*}" "${a#*=}" ;;
+      --input) body=1; input=1; [ "$#" -gt 0 ] && shift ;;
+      --input=*) body=1; input=1 ;;
+      -H|--header|-q|--jq|-t|--template|--cache|-p|--preview|--hostname) [ "$#" -gt 0 ] && shift ;;
+      -*) ;;
+      *) [ -z "$ep" ] && ep=$a ;;
+    esac
+  done
+  # A write: a write method, or a body with no explicit GET. A method this hook cannot read is a write.
+  case "$method" in
+    [Gg][Ee][Tt]) return 0 ;;
+    "") [ "$body" -eq 0 ] && return 0 ;;
+  esac
+  ep=${ep%%\?*}; ep=${ep#https://api.github.com}; ep=${ep#http://api.github.com}
+  while case "$ep" in *//*) true ;; *) false ;; esac; do ep=${ep//\/\//\/}; done
+  ep=${ep#/}; while case "$ep" in */) true ;; *) false ;; esac; do ep=${ep%/}; done
+  printf '%s' "$ep" | grep -qE '^repos/[^/]+/[^/]+/git/tags$' \
+    && block "creating a tag object through gh api. $tag_msg" "CM-3, AIC-1, AC-5"
+  printf '%s' "$ep" | grep -qE '^repos/[^/]+/[^/]+/git/refs/tags(/|$)' \
+    && block "writing a tag ref through gh api. $tag_msg" "CM-3, AIC-1, AC-5"
+  if printf '%s' "$ep" | grep -qE '^repos/[^/]+/[^/]+/git/refs$'; then
+    { [ "$input" -eq 1 ] || [ "$refs" -ne 1 ] || [ "$ref_ok" -eq 0 ]; } \
+      && block "creating a ref through gh api that is not one literal ref=refs/heads/<branch> (a tag, a variable, a file, --input or more than one ref). $tag_msg" "CM-3, AIC-1, AC-5"
+  fi
+  return 0
+}
+tag_guard() { # $1: one view of the command
+  local toks=() seg=() t
+  mapfile -t toks < <(printf '%s' "$1" | LC_ALL=C awk "$tok_awk")
+  toks+=($'\001')
+  for t in "${toks[@]}"; do
+    if [ "$t" = $'\001' ] || [ "$t" = "\`" ]; then
+      [ "${#seg[@]}" -gt 0 ] && tag_seg "${seg[@]}"
+      seg=(); continue
+    fi
+    seg+=("$t")
+  done
+}
+tag_seg() {
+  local i n=$#
+  local w=("$@")
+  for ((i = 0; i < n; i++)); do
+    case "${w[i]}" in
+      git) tag_git "${w[@]:i+1}" ;;
+      gh) [ "${w[i+1]:-}" = "api" ] && tag_ghapi "${w[@]:i+2}" ;;
+    esac
+  done
+}
+
 cmd="$raw_cmd"; guard
+tag_guard "$masked_cmd"
+if [ "$ps_cmd" != "$raw_cmd" ]; then tag_guard "$ps_cmd"; fi
 if [ "$word_cmd" != "$raw_cmd" ]; then cmd="$word_cmd"; guard; fi
 if [ "$ps_cmd" != "$raw_cmd" ] && [ "$ps_cmd" != "$word_cmd" ]; then cmd="$ps_cmd"; guard; fi
 
