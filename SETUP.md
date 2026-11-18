@@ -40,7 +40,7 @@ own record — not a quiet click.
 
 ## 2. Required status checks
 
-**The merge gate is MyKronos `independent-review`** (TheHub #60978). MyKronos posts it on
+**The intended merge gate is MyKronos `independent-review`** (TheHub #60978; keel's own `main` does not require it today, 2026-11-18). MyKronos posts it on
 each pull request head through its GitHub App and opens the approval request itself, but
 only on a repository whose default branch requires it. Require it **pinned to the App**, so
 a workflow job with the same name cannot satisfy it:

@@ -151,10 +151,14 @@ controls:
     kind: authorization
     stride: tampering
     description: >-
-      main requires one approving review before merge (API read 2026-10-18).
-      enforce_admins is false, so the owner can bypass it, and no required
-      status checks appear on the classic protection; the PR governance checks
-      are therefore advisory to an admin. Re-read 2026-11-04 unchanged. The
+      Re-read 2026-11-18 (TheHub #62001): main requires 0 approving reviews
+      (solo mode, POAM-008) and two status checks (Concourse / keel and
+      library-allowlist, App-pinned); enforce_admins is on, and the keel-main
+      ruleset (no bypass) refuses deletion and non-fast-forward pushes and
+      requires signed commits and a pull request. The owner's identity, which
+      the agents use, can still merge a green PR and bypasses the release-tag
+      ruleset as an admin (TheHub #61039). Before: one approving review and
+      enforce_admins false (2026-10-18, 2026-11-04). The
       intended values are declared in .sdlc/protection.yaml, and the
       protection-drift job compares them with the API every morning (TheHub
       #60979).

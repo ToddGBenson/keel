@@ -10,7 +10,9 @@ approve anything. Gate approval stays a human act recorded in GitHub (PD-2).
 
 ## What runs where, after the port
 
-> ## ⚠️ READ THIS FIRST — the merge gate is MyKronos `independent-review`; PR Governance is retired
+> ## ⚠️ READ THIS FIRST (2026-11-04) — the intended merge gate is MyKronos `independent-review`; PR Governance is retired
+>
+> **Superseded in part on 2026-11-18:** `independent-review` is not required today; see the live reading below.
 >
 > **2026-11-04 (TheHub #60978).** The gate is **`independent-review`**, not `Concourse / keel`.
 > MyKronos posts it on every pull request head through its GitHub App, App-pinned, and opens
@@ -43,7 +45,7 @@ approve anything. Gate approval stays a human act recorded in GitHub (PD-2).
 > **Live protection on `main`, read 2026-11-18 (TheHub #62001):** 0 approving reviews; **two required
 > checks**, `Concourse / keel` and `library-allowlist`, both pinned to App 4551328, `strict`;
 > linear history, resolved conversations, no force-push or deletion; `enforce_admins` **on**
-> (since 12:09Z that day); branch protection's `required_signatures` off, but signed commits
+> (since about 11:58Z that day, read at 12:09Z); branch protection's `required_signatures` off, but signed commits
 > required by the `keel-main` ruleset (no bypass: deletion, non-fast-forward, signed commits, a
 > pull request with squash only); release tags under the `keel-release-tags` ruleset, which
 > admins bypass. A green `Concourse / keel` can show without the suites

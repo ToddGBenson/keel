@@ -73,9 +73,9 @@ never landed on a pull request head. Since TheHub #61778 Concourse judges PR hea
 A green `Concourse / keel` can show without the suites having run (TheHub #62015, open).
 
 **Squash merges only.** `required_linear_history` is on, and a squash produces a single
-commit on `main`. `required_signatures` is **not** enforced on `main` (measured 2026-11-04:
-`required_signatures.enabled` is false). `scripts/configure-github.sh` turns it on only once
-the operator can sign (L0010); until then SI-7/CM-14 are open in the POA&M.
+commit on `main`. Branch protection's `required_signatures` is off (measured 2026-11-04 and
+2026-11-18), but since 2026-11-18 the `keel-main` ruleset requires signed commits on `main`.
+The squash merges are signed by GitHub, which attests the merge, not the author (POAM-009).
 
 ## The rules that never bend
 

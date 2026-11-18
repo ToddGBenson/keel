@@ -250,7 +250,7 @@ check and changes nothing else; the App id defaults to 4551328);
 (3) a PR is observed blocked on `independent-review` until approved, then merging. Closing
 needs (3). Two residuals stay recorded here. With `enforce_admins` off, an admin merge
 bypasses the check. The agents' GitHub identity is the owner's account, so `enforce_admins`
-must be on for this to bind anyone. That is a separate operator decision (`--solo` sets it).
+must be on for this to bind anyone. That is a separate operator decision (`--solo` sets it). *(2026-11-18: `enforce_admins` is on; this residual is closed for the required checks.)*
 And a check about approval still is not a check about the code: tests and scans still run
 after the merge in Concourse.
 
@@ -825,9 +825,9 @@ approvals, that identity can merge any PR whose checks are green.
 
 | # | Control | Enforcement |
 |---|---|---|
-| 1 | `/self-review` artifact — independent agent passes with only the diff, story, and threat model as input | **`pr-governance.yml` blocks the merge without it** |
+| 1 | `/self-review` artifact — independent agent passes with only the diff, story, and threat model as input | Intended: `pr-governance.yml` blocks the merge without it. **Not in force:** it runs on `workflow_dispatch` only and no check requires the record (2026-11-18) |
 | 2 | Cooling-off — no merge in the session the PR was opened | Warned by CI with the measured PR age |
-| 3 | All status checks required — the machine absorbs what the reviewer did | Branch protection |
+| 3 | All status checks required — the machine absorbs what the reviewer did | Branch protection, in part: two checks are required (`Concourse / keel`, `library-allowlist`; 2026-11-18) |
 | 4 | **Quarterly external review of a random sample** by a competent human outside the project | Manual; recorded in `evidence/assessments/` |
 
 Control 4 is the one an assessor will find most credible, because it is the only one

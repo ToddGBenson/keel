@@ -75,7 +75,7 @@ should be green in *its* map, backed by its `evidence/<issue>/g2|g4/` bundles.
 | SI-2 | Flaw remediation | Severity SLAs (7/30/90 days); POA&M tracking | Finding register | ✅ |
 | SI-3 | Malicious code protection | Container scanning, dependency integrity verification | Scan reports | 🟡 |
 | SI-4 | System monitoring | `docs/08-operate-and-respond.md` monitoring table | Alert config | 🟡 |
-| SI-7 | Software/firmware/information integrity | Signed commits, signed artifacts, provenance, verify-on-deploy | Signatures, attestations | ✅ |
+| SI-7 | Software/firmware/information integrity | Signed commits on `main` (GitHub-signed squash merges, by the `keel-main` ruleset; they attest the merge, not the author), signed artifacts, provenance, verify-on-deploy | Signatures, attestations | ✅ |
 | SI-10 | Information input validation | Allocated at G2; negative-case tested at G4 | Tests, SAST | 🟡 **POAM-018** — gate never run |
 | SI-12 | Information management and retention | `docs/10-definitions.md` § Retention | Retention config | 🟡 |
 

@@ -32,7 +32,7 @@ which controls are achievable — recorded honestly below rather than marked sat
 | 1.1.10 | Linear history required | ✅ | `required_linear_history: true` |
 | 1.1.11 | Branch protection on the default branch | ✅ | Branch protection, plus the `keel-main` ruleset (no bypass: deletion, non-fast-forward, signed commits, a pull request with squash only) (live 2026-11-18 12:09Z). Release tags have the `keel-release-tags` ruleset, with an admin bypass |
 | 1.1.12 | Branch rules enforced on administrators | 🟡 | **`enforce_admins: true`** since 2026-11-18 (false before; this map said true throughout), and the `keel-main` ruleset has no bypass actors. As an admin the owner, whose identity the agents use (TheHub #61039), can still change the protection, and the `keel-release-tags` ruleset's admin bypass lets it create or move a `v*` tag |
-| 1.1.13 | Pushing/merging restricted to trusted users | ✅ | Single owner. A direct push to `main` is refused for every identity, the owner's included (`keel-main` ruleset, no bypass; `enforce_admins` on; since 2026-11-18). With 0 approvals required, an identity that can merge can merge any PR whose checks are green |
+| 1.1.13 | Pushing/merging restricted to trusted users | 🟡 | Single owner. A direct push to `main` is refused for every identity, the owner's included (`keel-main` ruleset, no bypass; `enforce_admins` on; since 2026-11-18). With 0 approvals required, an identity that can merge can merge any PR whose checks are green |
 | 1.1.14 | Force-push denied | ✅ | `allow_force_pushes: false` |
 | 1.1.15 | Branch deletion denied | ✅ | `allow_deletions: false` |
 | 1.1.16 | Scan for risks in merged code | ✅ | SAST, SCA, secrets, IaC on every PR and on the default branch |
@@ -43,7 +43,7 @@ which controls are achievable — recorded honestly below rather than marked sat
 
 | CIS | Control | Status | Implementation |
 |---|---|---|---|
-| 1.2.1 | Public repositories track their contributions | ✅ | Signed commits, AI-authorship trailers, PR provenance (AIC-6) |
+| 1.2.1 | Public repositories track their contributions | ✅ | AI-authorship trailers, PR provenance (AIC-6); the squash merges on `main` are GitHub-signed (the `keel-main` ruleset requires signed commits), which attests the merge, not the author |
 | 1.2.2 | Repository creation limited | ➖ | Personal account, single owner |
 | 1.2.3 | Repository deletion limited | ✅ | Owner-only by account structure |
 | 1.2.4 | Issue deletion limited | ✅ | Owner-only |
