@@ -46,6 +46,29 @@ self-merge truncated. Each runs in both parser modes and both tools.
 - `./keel check` green in a capped python:3.12-slim container. shellcheck v0.10.0 `-S warning`
   clean. Pinned gitleaks v8.18.4: no leaks.
 
+## Review round 1 (Fable 5.2 on 9cdef78 / 3bdc0b9, BLOCK; no regression against main)
+
+Fable confirmed that empty, truncated and \u-escaped payloads now block, that escapes match jq,
+and that nothing new is falsely blocked. These fixes are folded in, in the story's own scope
+("refuse what it cannot parse"); all of them are in the no-jq branch:
+1. **More than one "command" key** anywhere (a sibling or nested object, or a key ending in an
+   escaped quote and `command`) is refused: sed and jq would read different ones. A key is a
+   quoted `command` whose closing quote is unescaped and followed by a colon, so `\"command\"`
+   inside a value is not one.
+2. **Whitespace around the colon may include a newline:** the payload is read as one line (a
+   newline outside a string is JSON whitespace).
+3. **`\u0000` in the value** is refused.
+4. **Timing:** a 1 MB command with no jq took 1.5 s on main and 1.4 s here (linux, mawk). It is
+   the same, not a regression. Fable's Git Bash run passed 10 minutes, which is past the hook
+   timeout, and a timeout allows. So with no jq, a payload **over 256 KB is refused** as too
+   large to judge. hook-fail-closed's 400 KB must-block cases still block, now at once.
+- **Nit:** the corpus test's Windows copy fallback copied `sed.exe` without its DLLs (exit 127),
+  so the no-jq mode passed vacuously. It now copies the DLLs beside each tool and probes `sed`
+  from the jq-less PATH, failing the run if it cannot start.
+- **Corpus KB-232..235** (second-key, newline-colon, nul, oversize). At 9cdef78, KB-232 and
+  KB-233 fail in both tools; KB-234 and KB-235 already blocked there by other paths and are
+  regression guards. Corpus 832/0. Selftest 330/0 with jq and without.
+
 ## Not verified
 
 - Git Bash on Windows was not run. The copy fallback and find_bash() are written for it and untested

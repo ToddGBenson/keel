@@ -173,8 +173,31 @@ else
   # newline, and the quote-aware view below could not tell what is quoted.
   # TheHub #61978: in the C locale, so a byte that is not valid in the host's locale still
   # matches [^"\\] instead of ending the match.
-  cmd="$(printf '%s' "$payload" | LC_ALL=C sed -nE 's/.*"command"[[:space:]]*:[[:space:]]*"(([^"\\]|\\.)*)".*/\1/p')"
+  # Review of #196 (round 1), each refused rather than read differently from jq:
+  #   - a payload over 256 KB: the fallback cannot judge it inside the budget on a slow host
+  #     (a 1 MB command ran past 10 minutes on Git Bash, which is past the hook timeout, which
+  #     allows), so with no jq it is refused as too large to judge;
+  #   - whitespace between the key, the colon and the value may include a newline: a newline
+  #     outside a string is JSON whitespace, so the payload is read as one line;
+  #   - more than one "command" key anywhere (a sibling or nested object, or a key that ends
+  #     in an escaped quote and command): sed and jq would pick different ones;
+  #   - \u0000 in the value: the command jq passes on cannot be rebuilt here.
+  guard_nojq_refuse() {
+    echo "BLOCKED by .claude/hooks/guard-bash.sh — internal error: $1 with no jq here, so this hook cannot tell whether the command is allowed. Installing jq gives this hook a full JSON parser (TheHub #61978)." >&2
+    exit 2
+  }
+  [ "${#payload}" -gt 262144 ] && guard_nojq_refuse "the hook payload is over 256 KB, too large to judge"
+  payload_flat="$(printf '%s' "$payload" | LC_ALL=C tr '\n\r' '  ')"
+  # A key is a quoted "command" whose closing quote is not escaped and is followed by a colon;
+  # the opening quote may be escaped (the end of a key like "x\"command"). Text in a value
+  # (\"command\") is neither.
+  guard_keys="$(printf '%s' "$payload_flat" | LC_ALL=C grep -oE '\\?"command"[[:space:]]*:' | LC_ALL=C grep -c .)"
+  [ "${guard_keys:-0}" -gt 1 ] && guard_nojq_refuse "the hook payload names more than one \"command\" key"
+  printf '%s' "$payload_flat" | LC_ALL=C grep -qE '\\"command"[[:space:]]*:' \
+    && guard_nojq_refuse "the hook payload has a key ending in an escaped quote and \"command\""
+  cmd="$(printf '%s' "$payload_flat" | LC_ALL=C sed -nE 's/.*"command"[[:space:]]*:[[:space:]]*"(([^"\\]|\\.)*)".*/\1/p')"
   cmd_json="$cmd"
+  case "$cmd_json" in *'\u0000'*) guard_nojq_refuse "the command holds \\u0000" ;; esac
   cmd="$(printf '%s' "$cmd_json" | LC_ALL=C awk "$json_unescape_awk" 2>/dev/null)" || cmd="$cmd_json"
   # TheHub #61978 / #62016: jq refuses a payload it cannot parse, and the wrapper makes that a
   # block. This fallback read the same payload as "no command" and allowed it. So, with
@@ -182,7 +205,7 @@ else
   # closing brace (truncated), is refused here too.
   if [ -z "$cmd" ]; then
     guard_tail="${payload%"${payload##*[![:space:]]}"}"
-    if printf '%s' "$payload" | LC_ALL=C grep -qE '"command"[[:space:]]*:[[:space:]]*"[^"]' || [ "${guard_tail: -1}" != "}" ]; then
+    if printf '%s' "$payload_flat" | LC_ALL=C grep -qE '"command"[[:space:]]*:[[:space:]]*"[^"]' || [ "${guard_tail: -1}" != "}" ]; then
       echo "BLOCKED by .claude/hooks/guard-bash.sh — internal error: it cannot parse the hook payload (no jq here, and the fallback parser could not read the command), so it cannot tell whether the command is allowed. Retry the call; installing jq gives this hook a full JSON parser (TheHub #61978)." >&2
       exit 2
     fi

@@ -140,8 +140,8 @@ def load_corpus() -> tuple[list[dict], list[str]]:
                 errors.append(f"{where}: open_in must be a non-empty subset of {MODES}")
             if not e.get("gap"):
                 errors.append(f"{where}: an open entry needs gap: (why the hook misses it)")
-        if e.get("payload_encoding") not in (None, "unicode-escape", "truncated"):
-            errors.append(f"{where}: payload_encoding must be unicode-escape or truncated")
+        if e.get("payload_encoding") not in (None, "unicode-escape", "truncated", "second-key", "newline-colon", "nul", "oversize"):
+            errors.append(f"{where}: payload_encoding must be unicode-escape, truncated, second-key, newline-colon, nul or oversize")
         if e.get("hook") == "guard-bash.sh":
             if e.get("tool", "Bash") not in BASH_TOOLS:
                 errors.append(f"{where}: tool must be one of {BASH_TOOLS}")
@@ -253,6 +253,14 @@ def payload(e: dict, tool: str) -> bytes:
             units = cmd.encode("utf-16-be")
             escaped = "".join(f"\\u{int.from_bytes(units[i:i + 2], 'big'):04x}" for i in range(0, len(units), 2))
             text = text.replace(plain, f'"{escaped}"')
+        elif enc == "second-key":  # [review of #196] a later sibling "command" key that sed would read
+            text = text[:-1] + ', "z": {"command": "echo ok"}}'
+        elif enc == "newline-colon":  # JSON whitespace, a newline included, around the colon
+            text = text.replace('"command": ' + plain, '"command"\n:\n' + plain)
+        elif enc == "nul":  # \u0000 inside the value
+            text = text.replace(plain, plain[:-1] + '\\u0000"')
+        elif enc == "oversize":  # over the no-jq size cap
+            text = text[:-1] + ', "pad": "' + "a" * 300_000 + '"}'
         else:  # truncated: the payload ends inside the command string
             text = text[:text.index(plain) + len(plain) - 1]
     return text.encode("utf-8")
@@ -291,10 +299,22 @@ def make_env(mode: str, tmp: Path) -> dict | None:
         except OSError:
             try:
                 shutil.copy2(p, link_dir / Path(p).name)
+                # [TheHub #61978 review] A copied msys tool needs the DLLs beside it
+                # (msys-2.0.dll and friends); without them sed.exe exits 127 and every
+                # no-jq run passed vacuously.
+                for dll in Path(p).parent.glob("*.dll"):
+                    if not (link_dir / dll.name).exists():
+                        shutil.copy2(dll, link_dir / dll.name)
             except OSError as exc:
                 print(f"  [FAIL] no-jq mode: cannot build a PATH without jq ({exc}) -- not run is not a pass")
                 return None
     env["PATH"] = str(link_dir)
+    # The PATH must actually work: a sed that cannot start makes every no-jq run vacuous.
+    sed = shutil.which("sed", path=env["PATH"])
+    probe = subprocess.run([sed or "sed", "-n", "s/a/b/p"], input=b"a\n", capture_output=True, env=env)
+    if probe.returncode != 0 or probe.stdout.strip() != b"b":
+        print(f"  [FAIL] no-jq mode: sed does not run from the jq-less PATH (exit {probe.returncode}) -- not run is not a pass")
+        return None
     return env
 
 
