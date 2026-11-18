@@ -33,6 +33,7 @@
 /ci/                            @ToddGBenson
 /.github/CODEOWNERS             @ToddGBenson
 /.github/dependabot.yml         @ToddGBenson
+/.github/release-floor          @ToddGBenson
 
 # ---------------------------------------------------------------------------
 # Agent and command definitions are configuration items under change control.

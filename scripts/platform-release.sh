@@ -41,8 +41,9 @@
 #       af878f1, preflight held `id-token: write` and interpolated the free-text
 #       input inputs.change_record into `run:`, so a tag on an old main commit
 #       could mint release.yml's OIDC identity from injected code. So the tag's
-#       commit must also DESCEND from RELEASE_FLOOR, hard-coded below. A
-#       repository that does not hold the floor commit is refused, not skipped.
+#       commit must also DESCEND from the release floor (TheHub #61432: per
+#       repository, see release_floor() below). A shallow clone is refused, not
+#       skipped, and upstream keel is always held to its own floor.
 #
 # Every refusal exits 1 and says which check refused. There is no warn-only
 # mode: a signature nobody is made to fail on is decoration.
@@ -60,6 +61,51 @@ WORKFLOW_PATH=".github/workflows/release.yml"
 # HEAD. Not a parameter, and no environment override: whoever runs the
 # verifier must not be able to lower it. Move it forward, never back.
 RELEASE_FLOOR="af878f1517fe8352192e5f5213d3260d914d4a78"
+# The repository whose release.yml the floor above was measured on. A signature from it is
+# always held to RELEASE_FLOOR, whatever the clone holds.
+KEEL_UPSTREAM="ToddGBenson/keel"
+
+# TheHub #61432: the floor is per repository. RELEASE_FLOOR is keel's own commit, and a
+# repository made from keel without its history (a template copy, binnacle) does not hold it,
+# so every one of its releases was refused. The floor that applies:
+#   1. a shallow clone is refused: missing history is not "no keel history";
+#   2. a repository that holds RELEASE_FLOOR (keel, a GitHub fork with keel's history), or
+#      whose signer is KEEL_UPSTREAM, is held to RELEASE_FLOOR;
+#   3. any other repository is held to its own floor: the commit sha in .github/release-floor
+#      as committed on the TRUSTED ref. That is reviewed content, not a parameter, so whoever
+#      runs the verifier cannot lower it. It must be in the repository and reachable from the
+#      trusted ref. It names the first commit whose release.yml has the G5 gate and takes no
+#      workflow input as program text (keel's af878f1 fix). With no such file the release is
+#      refused. There is no implicit default: a repository's first commit may carry the
+#      pre-gate release.yml (binnacle's does), so the root is not a safe floor.
+# A repository holding RELEASE_FLOOR may still configure a floor, but only one that descends
+# from RELEASE_FLOOR: a configured floor can only move the floor forward.
+release_floor() { # $1 git dir, $2 trusted sha, $3 OWNER/REPO -> prints the floor sha
+  local gitdir=$1 trusted=$2 repo=$3 cfg base=""
+  [ "$(git -C "$gitdir" rev-parse --is-shallow-repository 2>/dev/null)" = "false" ] \
+    || die "the repository at ${gitdir} is a shallow clone (or not a repository); fetch its full history (no --depth) and retry: the release floor cannot be judged on part of it"
+  if git -C "$gitdir" cat-file -e "${RELEASE_FLOOR}^{commit}" 2>/dev/null; then
+    base=$RELEASE_FLOOR
+  elif [ "$repo" = "$KEEL_UPSTREAM" ]; then
+    die "the release floor ${RELEASE_FLOOR} is not in the repository at ${gitdir}; fetch the full history of ${KEEL_UPSTREAM} and retry"
+  fi
+  cfg=$(git -C "$gitdir" show "${trusted}:.github/release-floor" 2>/dev/null | tr -d ' \t\r\n' || true)
+  if [ -z "$cfg" ]; then
+    [ -n "$base" ] && { printf '%s' "$base"; return 0; }
+    die "${repo} does not hold keel's release floor and its trusted ref has no .github/release-floor; commit that file (through a reviewed PR) naming the first commit whose release.yml has the G5 gate and passes workflow inputs as data"
+  fi
+  printf '%s' "$cfg" | grep -qE '^[0-9a-f]{40}$' \
+    || die ".github/release-floor on the trusted ref is not a 40-character commit sha"
+  git -C "$gitdir" cat-file -e "${cfg}^{commit}" 2>/dev/null \
+    || die ".github/release-floor names ${cfg}, which is not in the repository at ${gitdir}"
+  git -C "$gitdir" merge-base --is-ancestor "$cfg" "$trusted" \
+    || die ".github/release-floor names ${cfg}, which is not reachable from the trusted ref"
+  if [ -n "$base" ]; then
+    git -C "$gitdir" merge-base --is-ancestor "$base" "$cfg" \
+      || die ".github/release-floor names ${cfg}, which does not descend from the floor it would replace (${base:0:12}): a configured floor may only move forward"
+  fi
+  printf '%s' "$cfg"
+}
 
 die() { echo "REFUSED: $*" >&2; exit 1; }
 
@@ -134,12 +180,12 @@ verify() {
   if ! git -C "$gitdir" merge-base --is-ancestor "$commit" "$trusted_sha"; then
     die "tag ${tag} is on commit ${commit}, which is not reachable from ${trusted} (${trusted_sha}): its release.yml was never on ${trusted}, so its signature says nothing about the G5 gate"
   fi
-  git -C "$gitdir" cat-file -e "${RELEASE_FLOOR}^{commit}" 2>/dev/null \
-    || die "the release floor ${RELEASE_FLOOR} is not in the repository at ${gitdir}; fetch the full history of the release repository (no shallow clone) and retry"
-  if ! git -C "$gitdir" merge-base --is-ancestor "$RELEASE_FLOOR" "$commit"; then
-    die "tag ${tag} is on commit ${commit}, which does not descend from the release floor ${RELEASE_FLOOR}: its release.yml predates the G5 gate and could sign from injected input"
+  local floor
+  floor=$(release_floor "$gitdir" "$trusted_sha" "$repo") || exit 1
+  if ! git -C "$gitdir" merge-base --is-ancestor "$floor" "$commit"; then
+    die "tag ${tag} is on commit ${commit}, which does not descend from the release floor ${floor}: its release.yml predates the G5 gate and could sign from injected input"
   fi
-  echo "tag: ${tag} -> ${commit}, on ${trusted}, at or above the release floor ${RELEASE_FLOOR:0:12}"
+  echo "tag: ${tag} -> ${commit}, on ${trusted}, at or above the release floor ${floor:0:12}"
 
   command -v cosign >/dev/null 2>&1 || die "cosign is not installed; cannot verify, so this is not a pass"
 
