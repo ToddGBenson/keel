@@ -546,6 +546,39 @@ check "secret-DETECTION code"     allow "$(wpayload 'scripts/scan.sh' 'grep -E a
 check "editing the guard itself"  allow "$(wpayload '.claude/hooks/guard-write.sh' 'grep -qEi api_key_pattern')" guard-write.sh
 
 echo ""
+echo "guard-write.sh — every write tool (TheHub #61391)"
+# NotebookEdit names its file notebook_path and its text new_source; MultiEdit carries its
+# text in edits[].new_string. guard-write.sh was bound to Write|Edit and read neither.
+nbpayload() { # $1 = notebook path, $2 = cell source
+  esc=$(printf '%s' "$2" | sed 's/\\/\\\\/g; s/"/\\"/g')
+  printf '{"tool_name":"NotebookEdit","tool_input":{"notebook_path":"%s","new_source":"%s","cell_id":"c1"}}' "$1" "$esc"
+}
+mepayload() { # $1 = path, $2 = first edit's text, $3 = second edit's text
+  e1=$(printf '%s' "$2" | sed 's/\\/\\\\/g; s/"/\\"/g'); e2=$(printf '%s' "$3" | sed 's/\\/\\\\/g; s/"/\\"/g')
+  printf '{"tool_name":"MultiEdit","tool_input":{"file_path":"%s","edits":[{"old_string":"a","new_string":"%s"},{"old_string":"b","new_string":"%s"}]}}' "$1" "$e1" "$e2"
+}
+read -r -d '' wbound_py <<'PY'
+import json
+s = json.load(open(".claude/settings.json", encoding="utf-8"))
+print(" ".join(g.get("matcher", "") for g in s.get("hooks", {}).get("PreToolUse", [])
+               if any("guard-write.sh" in h.get("command", "") for h in g.get("hooks", []))))
+PY
+wbound=$(python3 -c "$wbound_py" 2>/dev/null || python -c "$wbound_py" 2>/dev/null)
+for tool in Write Edit MultiEdit NotebookEdit; do
+  if printf '|%s|' "$wbound" | tr ' ' '|' | grep -q "|$tool|"; then
+    printf '  [ok]   %-52s %s\n' "guard-write.sh bound to the $tool tool" "bound"; pass=$((pass+1))
+  else
+    printf '  [FAIL] %-52s %s\n' "guard-write.sh bound to the $tool tool" "NOT BOUND (matchers: ${wbound:-none})"; fail=$((fail+1))
+  fi
+done
+check "NotebookEdit: cloud key in a cell"  block "$(nbpayload 'notebooks/explore.ipynb' "k = '$AKIA_FAKE'")"  guard-write.sh
+check "NotebookEdit: generated evidence"   block "$(nbpayload 'evidence/142/g4/results.ipynb' 'x')"          guard-write.sh
+check "MultiEdit: credential, 2nd edit"    block "$(mepayload 'src/config.py' 'x = 1' "$ASSIGN_FAKE")"      guard-write.sh
+check "MultiEdit: generated evidence"      block "$(mepayload 'evidence/142/g4/scan.sarif' 'x' 'y')"        guard-write.sh
+check "NotebookEdit: an ordinary cell"     allow "$(nbpayload 'notebooks/explore.ipynb' 'df.head()')"       guard-write.sh
+check "MultiEdit: ordinary edits"          allow "$(mepayload 'src/drafts.py' 'def save():' '    pass')"   guard-write.sh
+
+echo ""
 echo "──────────────────────────────────────────────────────────────"
 printf '  %d passed, %d failed\n' "$pass" "$fail"
 if [ "$fail" -ne 0 ]; then

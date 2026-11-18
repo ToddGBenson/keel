@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# PreToolUse hook for Write|Edit — protects evidence integrity and flags secrets.
+# PreToolUse hook for Write|Edit|MultiEdit|NotebookEdit — protects evidence integrity and flags secrets.
 # Controls: AU-9 (protection of audit information), AIC-5, IA-5, AIC-8
 #
 # NOTE (verified 2026-08-07): the PreToolUse payload carries cwd, session_id, tool_name,
@@ -101,14 +101,18 @@ payload="$(cat)"
 # on multi-line content.
 # `type -P`, not `command -v`: jq() and python3() are wrapper functions now, and
 # `command -v` would report them even where no binary exists (TheHub #61794).
+# TheHub #61391: every write tool. NotebookEdit names its file notebook_path and its text
+# new_source; MultiEdit carries its new text in edits[].new_string. Read as Write and Edit
+# alone, both gave an empty path, and the hook allowed the write without reading it. All new
+# text the call carries is scanned, joined by newlines; old_string never is.
 if type -P jq >/dev/null 2>&1; then
-  path="$(printf '%s' "$payload" | jq -r '.tool_input.file_path // empty')"
-  content="$(printf '%s' "$payload" | jq -r '(.tool_input.content // .tool_input.new_string // "")')"
+  path="$(printf '%s' "$payload" | jq -r '.tool_input.file_path // .tool_input.notebook_path // empty')"
+  content="$(printf '%s' "$payload" | jq -r '[.tool_input.content, .tool_input.new_string, .tool_input.new_source, (.tool_input.edits // [] | .[]? | .new_string?)] | map(select(type == "string")) | join("\n")')"
 elif type -P python3 >/dev/null 2>&1 || type -P python >/dev/null 2>&1; then
   # The wrapper's name, not a path, so a failing interpreter is recorded as a fault.
   PY=python3; type -P python3 >/dev/null 2>&1 || PY=python
-  path="$(printf '%s' "$payload" | "$PY" -c 'import sys,json;d=json.load(sys.stdin);print(d.get("tool_input",{}).get("file_path",""))' 2>/dev/null)"
-  content="$(printf '%s' "$payload" | "$PY" -c 'import sys,json;d=json.load(sys.stdin);t=d.get("tool_input",{});print(t.get("content") or t.get("new_string") or "")' 2>/dev/null)"
+  path="$(printf '%s' "$payload" | "$PY" -c 'import sys,json;t=json.load(sys.stdin).get("tool_input",{});print(t.get("file_path") or t.get("notebook_path") or "")' 2>/dev/null)"
+  content="$(printf '%s' "$payload" | "$PY" -c 'import sys,json;t=json.load(sys.stdin).get("tool_input",{});e=[x.get("new_string") for x in (t.get("edits") or []) if isinstance(x,dict)];print("\n".join(s for s in [t.get("content"),t.get("new_string"),t.get("new_source")]+e if isinstance(s,str)))' 2>/dev/null)"
 else
   # No reliable parser. Fail OPEN on content scanning rather than blocking all edits,
   # and say so — CI secret scanning is authoritative and will catch it server-side.
