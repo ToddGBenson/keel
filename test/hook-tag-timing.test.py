@@ -44,6 +44,17 @@ check(f"300 `git push origin feat` lines: {took:.2f} s, within 4x one line ({bas
       took <= limit and rc == 0, f"rc={rc}")
 rc, took = timed("cmd /c " * 7 + "echo hi", "PowerShell")
 check(f"PowerShell `cmd /c` nested 7 times: {took:.2f} s, within {limit:.2f} s", took <= limit and rc == 0, f"rc={rc}")
+# Review of binnacle #87 at 7f6e00e5, round 4: every nested pwsh -c ran the judge (and its
+# tokenizer process) again: 300 lines took 342 s on Git Bash (main 4.5 s), 30 lines 23 s.
+for lines in (300, 30):
+    rc, took = timed("\n".join(["pwsh -NoProfile -c Write-Host hi"] * lines), "PowerShell")
+    check(f"{lines} nested `pwsh -NoProfile -c Write-Host hi` lines: {took:.2f} s, within {limit:.2f} s",
+          took <= limit and rc == 0, f"rc={rc}")
+rc, took = timed("\n".join(["cmd /c " * 7 + "echo hi"] * 3), "PowerShell")
+check(f"3 lines of `cmd /c` nested 7 times: {took:.2f} s, within {limit:.2f} s", took <= limit and rc == 0, f"rc={rc}")
+rc, took = timed("\n".join(["pwsh -NoProfile -c Write-Host hi"] * 60 + ["git push origin v1.2.3"]), "PowerShell")
+check(f"60 nested pwsh lines and a tag push: refused in {took:.2f} s, within {limit:.2f} s",
+      took <= limit and rc == 2, f"rc={rc}")
 
 print()
 if failures:

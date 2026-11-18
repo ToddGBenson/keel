@@ -1248,7 +1248,7 @@ tag_ghapi() { # tag_ghapi <words after gh api>
   esac
   # Round 2: the endpoint in any case, with any scheme, host and port, a fragment or a
   # query, and by repository id.
-  ep=$(printf '%s' "$ep" | tr 'A-Z' 'a-z'); ep=${ep%%\#*}; ep=${ep%%\?*}
+  ep=${ep,,}; ep=${ep%%\#*}; ep=${ep%%\?*}
   case "$ep" in http://*|https://*) ep=${ep#*://}; case "$ep" in */*) ep=/${ep#*/} ;; *) ep="" ;; esac ;; esac
   while case "$ep" in *//*) true ;; *) false ;; esac; do ep=${ep//\/\//\/}; done
   ep=${ep#/}; while case "$ep" in */) true ;; *) false ;; esac; do ep=${ep%/}; done
@@ -1263,8 +1263,29 @@ tag_ghapi() { # tag_ghapi <words after gh api>
   fi
   return 0
 }
+# Round 4 (timing, keel #192 / binnacle #87): a nested shell, pwsh -c, cmd /c, eval or iex runs
+# this whole judge again on its text, and the tokenizer is a process. 300 `pwsh -c Write-Host hi`
+# lines took 342 s on Git Bash (main 4.5 s). Nested text is judged only when it could reach a
+# rule below: a word this judge acts on (git, gh, a tag-writing subcommand, an encoded command)
+# or a word shaped like a release tag. In-process; the text is read with its quoting and escape
+# characters removed, so `g"i"t` and `pu`sh` still count.
+tag_ere='(^|[[:space:];|&(])-e(c|n[a-z]*)?([[:space:]]|$)'   # pwsh -e / -ec / -EncodedCommand
+tag_gate() { # $1: nested command text -> true when it must be judged
+  local t=$1 r=0 deep=()
+  t=${t//[\'\"\`\\^\$]/}
+  shopt -s nocasematch
+  case "$t" in
+    *git*|*gh*|*push*|*tag*|*send-pack*|*update-ref*|*fetch*|*config*|*api*) r=1 ;;
+  esac
+  [ "$r" -eq 0 ] && [[ $t =~ $tag_ere ]] && r=1
+  shopt -u nocasematch
+  [ "$r" -eq 1 ] && return 0
+  read -r -a deep <<< "${t//[;|&(){}<>=,]/ }"
+  tag_shaped "${deep[@]}"
+}
 tag_guard() { # $1: bash|ps, $2: the command text
   local toks=() seg=() t mode_was=$tag_mode src=$2
+  [ "$tag_depth" -gt 0 ] && ! tag_gate "$src" && return 0
   tag_depth=$((tag_depth + 1))
   if [ "$tag_depth" -gt 8 ]; then
     # Round 3: past the cap, refuse only when a word shaped like a release tag (or a tag-sending
@@ -1277,8 +1298,8 @@ tag_guard() { # $1: bash|ps, $2: the command text
   fi
   tag_mode=$1
   if [ "$1" = ps ]; then
-    # (Get-Command git).Source and its spellings run git.
-    src=$(printf '%s' "$src" | sed -E 's/\([[:space:]]*([Gg][Ee][Tt]-[Cc][Oo][Mm][Mm][Aa][Nn][Dd]|[Gg][Cc][Mm])([[:space:]]+-[A-Za-z]+)*[[:space:]]+["'"'"']?([^()"'"'"'[:space:]]+)["'"'"']?[[:space:]]*\)[.][A-Za-z]+/ \3 /g')
+    # (Get-Command git).Source and its spellings run git. (Round 4: sed only when one is there.)
+    shopt -s nocasematch; [[ $src == *gcm* || $src == *get-command* ]] && src=$(printf '%s' "$src" | sed -E 's/\([[:space:]]*([Gg][Ee][Tt]-[Cc][Oo][Mm][Mm][Aa][Nn][Dd]|[Gg][Cc][Mm])([[:space:]]+-[A-Za-z]+)*[[:space:]]+["'"'"']?([^()"'"'"'[:space:]]+)["'"'"']?[[:space:]]*\)[.][A-Za-z]+/ \3 /g'); shopt -u nocasematch
     mapfile -t toks < <(printf '%s' "$src" | LC_ALL=C awk "$ps_tok_awk")
   else
     mapfile -t toks < <(printf '%s' "$src" | LC_ALL=C awk "$tok_awk")
@@ -1385,7 +1406,7 @@ tag_seg() { # $@: the words of one simple command
       for a in "${bodies[@]}" "${hs[@]}"; do tag_guard bash "$a"; done ;;
     pwsh)
       for ((k = i + 1; k < n; k++)); do
-        case "$(printf '%s' "${w[k]}" | tr 'A-Z' 'a-z')" in
+        case "${w[k],,}" in
           -c|-co*) rest="${w[*]:k+1}"; tag_guard ps "$rest"; return 0 ;;
           -e|-ec|-en*) case "${w[*]:k+1}" in *) block "a PowerShell -EncodedCommand, which this hook cannot read. Run the command directly. $tag_msg" "CM-3, AIC-1, AC-5" ;; esac ;;
           -*) ;;
@@ -1403,7 +1424,7 @@ tag_seg() { # $@: the words of one simple command
       tag_guard ps "$rest" ;;
     start)
       rest=""; for ((k = i + 1; k < n; k++)); do
-        case "$(printf '%s' "${w[k]}" | tr 'A-Z' 'a-z')" in
+        case "${w[k],,}" in
           -filepath|-file*|-argumentlist|-arg*|-wait|-nonewwindow|-passthru|-noprofile) ;;
           -workingdirectory|-verb|-windowstyle|-redirectstandard*|-credential) k=$((k + 1)) ;;
           *) rest="$rest ${w[k]}" ;;

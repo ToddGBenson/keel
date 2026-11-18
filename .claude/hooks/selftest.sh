@@ -598,6 +598,15 @@ check "gh api by repository id"        block "$(payload 'gh api repositories/1/g
 check "PS: splatted git @a"            block "$(pspayload "\$a=@('push','origin','v1.2.3'); git @a")" guard-bash.sh
 check "PS: Start-Process git tag push" block "$(pspayload "Start-Process git -ArgumentList 'push origin v1.2.3'")" guard-bash.sh
 check "tag --sort, listing"            allow "$(payload 'git tag --sort=-creatordate')"              guard-bash.sh
+# Review of binnacle #87, round 4 (timing): nested text is judged only when it could name a tag
+# write; one that does is still refused at every level.
+check "PS: pwsh -c push a v* tag"      block "$(pspayload "pwsh -NoProfile -c 'git push origin v1.2.3'")" guard-bash.sh
+check "PS: pwsh -c g\"i\"t push --tags" block "$(pspayload "pwsh -c 'g\"i\"t push --tags'")"        guard-bash.sh
+check "PS: cmd /c pwsh -c --follow-tags" block "$(pspayload 'cmd /c pwsh -c git push origin feat --follow-tags')" guard-bash.sh
+check "pwsh -Command, nested 3, a tag"  block "$(payload "bash -c \"pwsh -Command 'cmd /c git push origin v2'\"")" guard-bash.sh
+check "PS: pwsh -EncodedCommand nested" block "$(pspayload 'cmd /c pwsh -EncodedCommand ZwBpAHQA')"  guard-bash.sh
+check "PS: pwsh -c Write-Host hi"      allow "$(pspayload 'pwsh -NoProfile -c Write-Host hi')"        guard-bash.sh
+check "PS: pwsh -c git push a branch"  allow "$(pspayload 'pwsh -c git push -u origin feat')"         guard-bash.sh
 # Review of keel #192, the final round: ordinary work main allows (round 3 false positives).
 check "PS: \$url = git config --get"    allow "$(pspayload '$url = git config --get remote.origin.url')" guard-bash.sh
 check "PS: \$tags = git tag -l"         allow "$(pspayload '$tags = git tag -l')"                     guard-bash.sh
