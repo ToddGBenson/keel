@@ -40,16 +40,20 @@ command text: it refuses the spellings it knows, and a command that is re-worded
 quoting, a different tool, an indirection the parser does not follow) can get past it. The
 open entries in `test/hook-bypass-corpus.yml` are those known gaps.
 
-What actually bounds an agent is what its GitHub credential can do, and today that boundary is
-thinner than the tables suggest:
+What actually bounds an agent is what its GitHub credential can do and what the server refuses
+it (live 2026-11-18 at 12:09Z):
 
-- **Branch protection on `main`** restricts direct pushes, force-pushes and deletion for
-  identities it binds, and its required checks are pinned to a GitHub App, so a status posted
-  with the agent's token cannot satisfy them. It does **not** stop an agent merging: no
-  approving review is required, and the agent's `gh` signs in as the repository owner with
-  admin rights (TheHub #61039). With `enforce_admins` off that identity can merge past a red
-  required check or push straight to `main`, and as an admin it can change the protection
-  itself.
+- **`main` is held server-side for every identity, the owner's included.** `enforce_admins` is
+  on, and the `keel-main` ruleset, with no bypass actors, refuses deletion and non-fast-forward
+  pushes and requires signed commits and a pull request (squash only). The required checks are
+  pinned to a GitHub App, so a status posted with the agent's token cannot satisfy them. It does
+  **not** stop an agent merging a PR whose checks are green: no approving review is required,
+  and the agent's `gh` signs in as the repository owner (TheHub #61039). As an admin that
+  identity can also change the protection itself.
+- **Release tags are not held against the agents.** The `keel-release-tags` ruleset protects
+  `v*` (creation, update, deletion, non-fast-forward), but admins bypass it, and the agents'
+  identity is the owner's admin account. Until agents have their own identity (TheHub #61039),
+  the hook is the only control on release tags.
 - **Least-privilege credentials** are the target, not the current state. Until agents have their
   own GitHub identity without admin rights (TheHub #61039), the agent's `gh` token can do
   everything the hooks forbid.
@@ -62,15 +66,13 @@ week found commands the hooks allowed that they were meant to refuse: the releas
 (#62022, three rounds) and the container rules (#61987). Each round closed what it found, and each
 next round found more. That is what a denylist over command text is like, and it is why the hooks
 are guidance, not the boundary. The bypass classes are recorded by class in those PRs and in
-`test/hook-bypass-corpus.yml`; the exact inputs are kept out of this public repository.
+`test/hook-bypass-corpus.yml`; the bypass inputs found in review are not published here.
 
-**The controls that actually bound an agent are server-side, and none is in force yet** (live
-2026-11-18: `enforce_admins` false, 0 approving reviews, no rulesets):
+**The controls that actually bound an agent are server-side.** In force since 2026-11-18:
+`enforce_admins` on, and the `keel-main` ruleset with no bypass. Still to come:
 
-- **`enforce_admins` on** for `main`: an operator decision, pending. Until it is on, the owner's
-  admin identity, which is also the agents', merges past a red check and pushes straight to
-  `main`.
-- **Repository rulesets with no bypass** for `main` and for release tags (TheHub #61006).
+- **A release-tag control the agents cannot bypass:** the tag ruleset's admin bypass covers
+  the agents until they have their own identity (TheHub #61039).
 - **A required check that is real evidence:** a green `Concourse / keel` can show without the
   suites having run (TheHub #62015).
 - **An agent identity without admin rights** (TheHub #61039).

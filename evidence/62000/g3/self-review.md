@@ -1,7 +1,7 @@
 # Self-review — TheHub #62000 (the hooks are best-effort guidance until the allowlist rebuild)
 
 Mode: solo (POAM-008); agent self-review, pending the independent review before merge
-PR: #191   Author: Claude Sonnet 5.5 (AI-authored)   Date: 2026-11-18
+PR: #201   Author: Claude Sonnet 5.5 (AI-authored)   Date: 2026-11-18
 verdict: pass
 Opened: 2026-11-18 02:24:58 UTC (first commit; PR opened 02:25:12Z)   Reviewed: first self-review at the round-1 fix commit 02:32:21Z; this record last updated for round 2 at 02:43:13 UTC
 Cooling-off: none (same session). Measured: round-1 independent review posted 02:29:25Z, round-1 fix commit 02:32:21Z (about 3 minutes later), round-2 independent review posted 02:40:34Z, round-2 fix written at 02:43:13 UTC (about 18 minutes after the first commit). The independent review is the compensating read.
