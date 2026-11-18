@@ -584,6 +584,24 @@ check "on main: commit -m 'push it'"      allow "$(cwpay "$onmain" "git commit -
 check "on main: push a named feature"     allow "$(cwpay "$onmain" 'git push -u origin feat/x')"                 guard-bash.sh
 check "not a repository: git push"        allow "$(cwpay "/" 'git push')"                                        guard-bash.sh
 check "push --atomic to a feature"        allow "$(payload 'git push --atomic origin feat')"                     guard-bash.sh
+# Review round 2 (classes; the exact inputs are in the binnacle review).
+check "a quoted global value, then force"  block "$(payload "git -c user.name='A B' push --force origin feat")"   guard-bash.sh
+check "-C \"a dir\", then push to main"     block "$(payload 'git -C "my dir" push origin main')"                  guard-bash.sh
+check "an unknown global option, then push" block "$(payload 'git --attr-source HEAD push origin feat:main')"     guard-bash.sh
+check "on main: bash -c 'git push'"        block "$(cwpay "$onmain" "bash -c 'git push origin HEAD'")"            guard-bash.sh
+check "bash -c 'cd <main repo> && push'"   block "$(cwpay "$onfeat" "bash -c 'cd $onmain && git push'")"           guard-bash.sh
+check "on main: eval git push"             block "$(cwpay "$onmain" 'eval git push')"                             guard-bash.sh
+check "on main: git pu\"\"sh"                block "$(cwpay "$onmain" 'git pu""sh')"                               guard-bash.sh
+check "on main: --dry-run ... --no-dry-run" block "$(cwpay "$onmain" 'git push --dry-run origin HEAD --no-dry-run')" guard-bash.sh
+check "-C \$(pwd), then push"               block "$(cwpay "$onfeat" 'git -C $(pwd) push')"                      guard-bash.sh
+check "-C given twice, then push"          block "$(cwpay "$onfeat" 'git -C .. -C x push')"                        guard-bash.sh
+check "a wildcard refspec"                 block "$(payload "git push origin 'refs/heads/*:refs/heads/*'")"       guard-bash.sh
+check "PS: \$env:GIT_DIR, then push"        block "$(cwpay "$onfeat" "\$env:GIT_DIR='$onmain/.git'; git push" | sed 's/^{/{"tool_name":"PowerShell",/')" guard-bash.sh
+check "PS: CD (upper case), then push"     block "$(cwpay "$onfeat" "CD $onmain; git push" | sed 's/^{/{"tool_name":"PowerShell",/')" guard-bash.sh
+check "on main: echo use git push"         allow "$(cwpay "$onmain" 'echo use git push')"                         guard-bash.sh
+check "a notes message naming send-pack"   allow "$(payload 'git notes add -m "git send-pack"')"                  guard-bash.sh
+check "push -o ci.skip:main to a feature"  allow "$(payload 'git push origin feat -o ci.skip:main')"               guard-bash.sh
+check "on main: git push --dry-run"        allow "$(cwpay "$onmain" 'git push --dry-run')"                        guard-bash.sh
 rm -rf "$onmain" "$onfeat"
 echo ""
 echo "guard-write.sh — must BLOCK (AU-9, AIC-5)"

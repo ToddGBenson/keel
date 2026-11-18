@@ -69,6 +69,40 @@ predate the hook sprint.
   5 more, run with real on-main and on-feature repos: 60 checks, 0 wrong. Corpus 816 runs, 0
   failed, in both modes, with the shim.
 
+## Review round 2 (Fable 5.2 on acad2f5 / 5aff46a, BLOCK; the PO's last full round)
+
+- **D1, regression:** a quoted global value with a space (`-c user.name='A B'`, `-C "my dir"`) or an
+  option not on the list (`--attr-source`) took the command out of every push rule.
+  - The force-push and push-to-main rules are back on main's prefix, which these do not break.
+  - Every rule #62031 added (refspec to main, `+` refspec, --all/--mirror/--branches, `:`,
+    `-c push.*`, send-pack, a wildcard refspec) moved into the quote-aware word judge. That judge
+    parses git's global options, and refuses one it does not know before a push.
+- **D4:** the branch is read with git directly. Only exit 128 (not a repository), from the plain
+  payload cwd with no -C, allows. A detached HEAD (exit 1) allows. Anything else blocks: no git, a
+  git that exits 2, a missing -C dir.
+- **D2:**
+  - `sh -c`, `bash -c` and `eval` bodies are judged as commands of their own.
+  - A non-literal subcommand is refused. `pu""sh` and `pu\sh` read as push. The PowerShell view is
+    judged too, so `` pu`sh `` reads as push.
+  - The last of --dry-run/--no-dry-run wins.
+  - A -C that is not literal (`$VAR`, `$(...)`, `~`) or that is repeated is refused for a
+    current-branch push. `$(...)` stays inside one word.
+- **D3:** PowerShell `$env:GIT_DIR` and `$env:GIT_WORK_TREE` move the push like `GIT_DIR=`. CD and
+  Set-Location are matched in any case.
+- **False blocks cleared:** `git` counts only as the command word (after assignments and env,
+  command, builtin, exec, nice, nohup, time, sudo, doas), so `echo use git push` is not a push.
+  send-pack and `-o ci.skip:main` are read as words, so a notes message naming send-pack, and an
+  option's value, are not refspecs.
+- **The review's inputs for rounds 1 and 2,** run against real on-main and on-feature repos laid
+  out as in the review: 109 checks, 1 differs. `git commit -m "never push --force"` is blocked,
+  by main's own force rule, which this round restored; main blocks it too.
+
+**Documented gaps (the PO's list; same on main, the server-side control's job):** cd not as the
+first word (via builtin, command, if, for, `env -C`, `{ ...; }`); PowerShell script blocks;
+`git symbolic-ref` then `push HEAD`; `GIT_CONFIG_COUNT`/`GIT_CONFIG_PARAMETERS`/`--config-env`; git
+aliases; xargs; a push run by a script. The two #199 tokenizers (this one and #198's) are to be
+reconciled into one by whichever merges second.
+
 ## Not verified
 
 - Git Bash on Windows was not run.
