@@ -168,7 +168,9 @@ cmd=${cmd//$'\\\n'/ }
 # it (`gh alias set m 'pr merge'` too). A --shell body that already starts with gh
 # becomes "gh gh ...", which the rules read the same way.
 norm=()
-for pair in 'gh:[Gg][Hh]' 'git:[Gg][Ii][Tt]' 'curl:[Cc][Uu][Rr][Ll]'; do
+# TheHub #61385 review: docker too (docker.exe, /usr/bin/docker, docker-compose.exe).
+for pair in 'gh:[Gg][Hh]' 'git:[Gg][Ii][Tt]' 'curl:[Cc][Uu][Rr][Ll]' 'docker:[Dd][Oo][Cc][Kk][Ee][Rr]' \
+            'docker-compose:[Dd][Oo][Cc][Kk][Ee][Rr]-[Cc][Oo][Mm][Pp][Oo][Ss][Ee]'; do
   name=${pair%%:*}; pat=${pair#*:}
   norm+=(-e 's#"([^"]*[/\\])?'"$pat"'(\.[Ee][Xx][Ee])?"#'"$name"'#g'
          -e "s#'([^']*[/\\\\])?$pat(\\.[Ee][Xx][Ee])?'#$name#g"
@@ -883,6 +885,33 @@ case "$cmd" in
   *"kubectl"*"prod"*|*"--context"*"prod"*|*"--profile"*"prod"*|*"terraform apply"*)
     block "production or infrastructure mutation. The pipeline deploys, never an agent." "AIC-3, CM-5, AC-6" ;;
 esac
+
+# ── Test suites never run inside production's containers (TheHub #61385) ───────
+# `docker exec` runs INSIDE the production container, under none of the --cpus/--memory
+# caps a test container gets. Uncapped test runs on the operator's host took TheHub
+# production down on 2026-10-23 (TheHub #61001). A suite in thehub-backend, thehub-postgres
+# or mykronos-backend competes with production for CPU and memory; `nice` lowers its CPU
+# priority but not its memory. Tests run in a capped container through the shared lock.
+# Read-only exec (cat /proc/..., a status query) is untouched. The runner must be in the
+# same exec segment, so `docker exec ... cat x; pytest` (pytest on the host) is not caught.
+#
+# Review of keel #190: TheHub's compose file names the services backend and postgres
+# (container_name thehub-backend and thehub-postgres), so `docker compose exec backend`
+# and `docker-compose exec postgres` reach the same containers. Docker's global options
+# may stand before the subcommand (docker --context x exec, docker compose -f f.yml exec).
+# backend-staging and postgres-staging are other services and stay allowed.
+# Not read: a runner fed on stdin or a heredoc (docker exec -i ... sh < run-tests.sh), a
+# runner under another name (pytest-3, a script or Makefile target), python -m unittest,
+# and a container reached by id or renamed (docs/11-ai-agent-controls.md lists them).
+prod_ctr='(thehub-backend|thehub-postgres|mykronos-backend)'
+prod_svc='(backend|postgres)'
+test_runner='(pytest|py[.]test|tox|nox|python[0-9.]*([[:space:]]+-[A-Za-z]+)*[[:space:]]+-m[[:space:]]*pytest)'
+runner_after='[[:space:])`"'"'"']([^|;&]*[[:space:]/'"'"'"])?'"$test_runner$E"
+docker_exec="$B"'docker([[:space:]]+[^|;&]*)?[[:space:]](container[[:space:]]+)?exec[[:space:]]+([^|;&]*[[:space:]])?'
+compose_exec="$B"'(docker([[:space:]]+[^|;&]*)?[[:space:]]compose|docker-compose)[[:space:]]+([^|;&]*[[:space:]])?exec[[:space:]]+([^|;&]*[[:space:]])?'
+if g "$docker_exec$prod_ctr$runner_after" || g "$compose_exec$prod_svc$runner_after"; then
+  block "running a test suite inside a production container with docker exec. It runs under no --cpus/--memory cap (the 2026-10-23 outage, TheHub #61001). Run it in a capped test container through the shared lock instead: bash scripts/docker-test-lock.sh run <owner> -- bash scripts/test-offline.sh ... (--cpus 2 --memory 2g)." "AIC-3, SC-6, CP-2"
+fi
 }
 
 cmd="$raw_cmd"; guard
