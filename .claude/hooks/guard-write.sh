@@ -147,6 +147,15 @@ warn() { echo "WARNING  $1" >&2; }
 # Case is ignored by the matches below (nocasematch), not by rewriting the path: no
 # external tool, so nothing planted on PATH can change the answer.
 guard_slash() { local s=${1//\\//}; printf '%s' "$s"; }
+guard_unread() { # the path cannot be judged: refuse it (review of #197, round 2)
+  echo "BLOCKED by .claude/hooks/guard-write.sh — the write's path ($1) cannot be judged safely: $2. Name the file plainly." >&2
+  echo "" >&2
+  echo "Control: AU-9, CA-2. See docs/11-ai-agent-controls.md." >&2
+  exit 2
+}
+# A line feed or carriage return in the path or the cwd would split it below; no real file
+# name an agent writes has one.
+case "$path${pcwd:-}" in *$'\n'*|*$'\r'*) guard_unread "with a line break" "it contains a line feed or carriage return" ;; esac
 npath=$(guard_slash "$path")
 pcwd=$(guard_slash "${pcwd:-}")
 case "$npath" in
@@ -157,27 +166,39 @@ esac
 guard_segs=() guard_lead=""
 case "$npath" in /*) guard_lead="/" ;; esac
 IFS='/' read -r -a guard_parts <<< "$npath"
-for guard_seg in "${guard_parts[@]}"; do
-  if [ "${#guard_segs[@]}" -eq 0 ] && [ -z "$guard_lead" ] && case "$guard_seg" in [A-Za-z]:) true ;; *) false ;; esac; then
+guard_n() { printf '%s' "${#guard_segs[@]}"; }
+for guard_seg in ${guard_parts[@]+"${guard_parts[@]}"}; do
+  if [ "$(guard_n)" -eq 0 ] && [ -z "$guard_lead" ] && case "$guard_seg" in [A-Za-z]:) true ;; *) false ;; esac; then
     guard_segs+=("$guard_seg"); continue                  # a drive, C:
   fi
-  guard_seg=${guard_seg%%:*}                               # an NTFS stream suffix
-  while case "$guard_seg" in *[.\ ]) [ "$guard_seg" != "." ] && [ "$guard_seg" != ".." ] ;; *) false ;; esac; do
+  # "." and ".." are judged on the segment as written, before any trimming: Windows turns
+  # "..." or ".. " into something else, and a segment that only BECOMES "." or ".." (or
+  # nothing) after trimming is refused rather than guessed at.
+  case "$guard_seg" in
+    ""|.) continue ;;
+    ..) if [ "$(guard_n)" -gt 0 ] && [ "${guard_segs[$(( $(guard_n) - 1 ))]}" != ".." ]; then
+          unset "guard_segs[$(( $(guard_n) - 1 ))]"; guard_segs=(${guard_segs[@]+"${guard_segs[@]}"})
+        else guard_segs+=(".."); fi
+        continue ;;
+  esac
+  # An NTFS stream TYPE suffix is dropped: ::$DATA, ::$INDEX_ALLOCATION, :$I30:$INDEX_ALLOCATION.
+  # A named stream (a.md:x.sarif) keeps its colon, and is refused inside evidence/ below.
+  case "$guard_seg" in *:*'$'*) guard_seg=${guard_seg%%:*} ;; esac
+  guard_raw=$guard_seg
+  while case "$guard_seg" in *[.\ ]) true ;; *) false ;; esac; do
     guard_seg=${guard_seg%?}                               # trailing dots and spaces
   done
   case "$guard_seg" in
-    ""|.) ;;
-    ..) if [ "${#guard_segs[@]}" -gt 0 ] && [ "${guard_segs[${#guard_segs[@]}-1]}" != ".." ]; then
-          unset 'guard_segs[${#guard_segs[@]}-1]'; guard_segs=("${guard_segs[@]}")
-        else guard_segs+=(".."); fi ;;
-    *) guard_segs+=("$guard_seg") ;;
+    ""|.|..) guard_unread "$path" "the segment \"$guard_raw\" means something different on Windows" ;;
   esac
+  guard_segs+=("$guard_seg")
 done
-npath="$guard_lead$(IFS=/; printf '%s' "${guard_segs[*]}")"
+npath="$guard_lead$(IFS=/; printf '%s' "${guard_segs[*]-}")"
 shopt -s nocasematch
 
 case "$npath" in
   */evidence/*|evidence/*)
+    case "${npath#[A-Za-z]:}" in *:*) guard_unread "$path" "a named NTFS stream inside evidence/" ;; esac
     case "$npath" in
       # Narrative artifacts an agent legitimately authors during a gate.
       *.md) : ;;

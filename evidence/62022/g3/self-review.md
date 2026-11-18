@@ -34,7 +34,19 @@ sprint.
   `C:evidence\...`, `evidence::$INDEX_ALLOCATION/...`, `evidence:$I30:$INDEX_ALLOCATION/...`, a trailing
   dot, a trailing space, a relative path from a cwd inside `evidence/`, and the same with a Windows cwd
   `C:\repo\Evidence`. And `evidence/../src/a.py` was falsely blocked.
-- **Green after:** selftest 348 passed / 0 failed. hook-write-fail-closed all passed. Bypass corpus
+- **Red first, round 2** (review of 9902cd6/42af695; the exact inputs are in the binnacle comment): 8 more
+  cases against 9902cd6 gave 350 passed and 6 failed. These were ALLOWED: `evidence/.../../142/a.sarif`,
+  the `.. ` and `..:x` forms (a segment that only became `..` after trimming popped `evidence`), a
+  `...` segment under evidence, a named stream `a.md:x.sarif`, and a path with a line feed. The
+  review's 21 inputs, run against this head: 0 wrong.
+- **The round-2 change:**
+  - `.` and `..` are judged on the raw segment, before any trimming, and a segment that only
+    becomes empty, `.` or `..` after trimming is refused.
+  - A line feed or carriage return in the path or the cwd is refused.
+  - Only a stream TYPE suffix (one with `$`) is stripped, and a named stream inside evidence/ is
+    refused.
+  - Empty-array expansions are guarded for bash older than 4.4 under `set -u`.
+- **Green after:** selftest 356 passed / 0 failed (round 1: 348). hook-write-fail-closed all passed. Bypass corpus
   224 entries, 804 runs, 0 failed.
 - `./keel check` green in a capped python:3.12-slim container. shellcheck v0.10.0 `-S warning`
   clean. Pinned gitleaks v8.18.4: no leaks.

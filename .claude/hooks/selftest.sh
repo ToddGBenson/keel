@@ -571,6 +571,15 @@ check "relative, cwd inside Evidence\\ (Windows)" block "$(cwpayload '142\g4\a.s
 check "out of evidence via .., from its cwd"  allow "$(cwpayload '../src/a.py' 'x = 1' '/repo/evidence')"            guard-write.sh
 check "evidence/../src, resolved"             allow "$(wpayload 'evidence/../src/a.py' 'x = 1')"                  guard-write.sh
 check "into evidence via .."                  block "$(wpayload 'src/../evidence/142/a.sarif' 'x')"                guard-write.sh
+# Review round 2: a segment that only becomes ".." after trimming, a line break, a named stream.
+check "a ... segment cannot pop evidence"      block "$(wpayload 'evidence/.../../142/a.sarif' 'x')"               guard-write.sh
+check "a '.. ' segment cannot pop evidence"    block "$(wpayload 'evidence/.. /../142/a.sarif' 'x')"               guard-write.sh
+check "a '..:x' segment cannot pop evidence"   block "$(wpayload 'evidence/..:x/../142/a.sarif' 'x')"              guard-write.sh
+check "a ... segment under evidence"          block "$(wpayload 'evidence/.../a.sarif' 'x')"                      guard-write.sh
+check "a named stream on an evidence .md"      block "$(wpayload 'evidence/142/a.md:x.sarif' 'x')"                guard-write.sh
+check "a line feed in the path"               block "$(printf '{"tool_input":{"file_path":"x\\n/../evidence/142/a.sarif","content":"x"}}')" guard-write.sh
+check "a line feed in the cwd"                block "$(printf '{"cwd":"/repo/evidence/x\\n/..","tool_input":{"file_path":"../142/a.sarif","content":"x"}}')" guard-write.sh
+check "an ordinary relative path, no cwd"      allow "$(wpayload 'src/a.py' 'x = 1')"                             guard-write.sh
 
 echo ""
 echo "──────────────────────────────────────────────────────────────"
