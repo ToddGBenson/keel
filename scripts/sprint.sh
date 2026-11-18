@@ -323,9 +323,10 @@ Written by the agent in \`docs/product/\`. Note the limit honestly: an agent rev
 autonomous output is the *weakest* form of the compensating control, because the same
 reasoning produced both. Read the "Not verified" section first.
 
-**Before marking this ready for review**, run \`/self-review\` and commit the record at
-\`evidence/<issue>/g3/self-review.md\`. Governance skips drafts, so nothing demands it yet —
-and it is demanded the moment you take the draft flag off (#44, #47).
+**Before marking this ready for review**, the building agent runs \`/self-review\` and commits
+the record at \`evidence/<issue>/g3/self-review.md\`; the operator does not run it. keel's PR
+Governance workflow is retired (\`workflow_dispatch\` only), so no check demands the record: the
+reviewers do, and they will not approve a ready PR without it (#44, #47, TheHub #61360).
 
 ## Rollback
 \`git revert\`, or close this PR unmerged — nothing has shipped.
@@ -512,7 +513,7 @@ PROMPT
   # must not present as ready to merge.
   # shellcheck disable=SC2016  # backticks are Markdown code spans in the PR body, not command substitution
   if gh pr create --draft --title "feat: $title" --base main --head "$branch" \
-    --body "$(printf 'Closes #%s\n\nImplemented by the unattended sprint runner from a G1-approved story.\n\n## Non-prod (P3)\n%s\n\n## Tests (P5)\nUnit, functional and security suites were re-run by the runner after the agent reported done. All passed, or this PR would not exist.\n\n## Your gate (P4)\nApprove what is RUNNING in `%s`, not this diff. The diff is how it got there; the environment is what you are accepting.\n\n## AI authorship (AIC-6)\n- [x] **Parts AI-authored:** all of it\n- [x] **Agent / model:** claude-opus-5 via the unattended runner\n\nGive this MORE scrutiny than a hand-written PR: no human watched it being written.\n\n## This is a DRAFT\nRun `/self-review` and commit `evidence/%s/g3/self-review.md` before marking it ready. Governance skips drafts and demands that record the moment you do (#44, #47).\n' \
+    --body "$(printf 'Closes #%s\n\nImplemented by the unattended sprint runner from a G1-approved story.\n\n## Non-prod (P3)\n%s\n\n## Tests (P5)\nUnit, functional and security suites were re-run by the runner after the agent reported done. All passed, or this PR would not exist.\n\n## Your gate (P4)\nApprove what is RUNNING in `%s`, not this diff. The diff is how it got there; the environment is what you are accepting.\n\n## AI authorship (AIC-6)\n- [x] **Parts AI-authored:** all of it\n- [x] **Agent / model:** claude-opus-5 via the unattended runner\n\nGive this MORE scrutiny than a hand-written PR: no human watched it being written.\n\n## This is a DRAFT\nThe building agent runs `/self-review` and commits `evidence/%s/g3/self-review.md` before marking it ready; the operator does not run it. No check demands the record (PR Governance is retired), so the reviewers do (#44, #47, TheHub #61360).\n' \
       "$num" "$deployed" "$(pol nonprod_name)" "$num")" >/dev/null 2>&1; then
     ok "PR opened for #$num"
   else

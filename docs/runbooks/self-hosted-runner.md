@@ -11,8 +11,8 @@ spending limit is reached, every job refuses to start with:
 > The job was not started because recent account payments have failed or your spending limit
 > needs to be increased.
 
-Self-hosted runners do not consume included minutes, so the PR governance gate keeps working.
-That is the only reason to use one. If your hosted runners work, **do not do this** — you are
+Self-hosted runners do not consume included minutes, so the PR governance gate keeps working
+(in a fork that has restored it; see below). That is the only reason to use one. If your hosted runners work, **do not do this** — you are
 taking on host security and a class of failure that is genuinely hard to diagnose, for no
 benefit.
 
@@ -26,6 +26,12 @@ keel's delivery pipeline is Concourse. It builds, tests, scans and records evide
 has **no pull-request concept at all**. The runner exists for the one thing Concourse cannot
 do: read the pull request — issue linkage, AI-authorship declaration, the DoD checklist, and
 the self-review artifact that is POAM-008's compensating control.
+
+**Status in keel: retired.** keel's `pr-governance.yml` has run on `workflow_dispatch` only since
+2026-10-20 (TheHub #60849), so nothing in keel reads the pull request or blocks a merge on the
+self-review record today. The reviewers read the record, and the building agent writes it (see
+`.claude/commands/self-review.md`). The description above is what a fork that restores the
+workflow gets, not what keel runs.
 
 **A green PR Governance check does not mean the code is good.** It means the process around
 the change is intact. Tests and scans run in Concourse, after merge.
