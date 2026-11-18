@@ -103,6 +103,33 @@ first word (via builtin, command, if, for, `env -C`, `{ ...; }`); PowerShell scr
 aliases; xargs; a push run by a script. The two #199 tokenizers (this one and #198's) are to be
 reconciled into one by whichever merges second.
 
+## Review round 3 (Fable 5.2 on 2a0c2bc / afcc867, BLOCK on T1 only; scope stop)
+
+**T1, a fail-open by #61939's definition.** The word judge started `tr` twice per command and
+ran on any line containing "git", so a long heredoc passed the hook's 60 s limit, which allows the
+command. Concourse / keel build 290 timed out in guard-selftest for the same reason. The fix:
+- no process per word: the two lower-casings are `shopt -s nocasematch` around the two case
+  statements that need them (bash 3.1+; macOS's 3.2 has it), not `tr`, and not `${x,,}`;
+- the judge runs only when `git` can be a command word (a regex gate on the line);
+- the awk tokenizer prints only the segments whose command word, read past assignments and the
+  same wrappers as push_judge, is git, a shell, eval or a directory change, or that set GIT_DIR or
+  GIT_WORK_TREE. A dropped segment is one push_judge would have returned from without reading,
+  so no verdict changes.
+
+Timing on this host (the CPU is clamped at 400 MHz), for an allowed `git commit -F - <<'EOF'`:
+
+| heredoc | main | round 2 (2a0c2bc) | round 3 |
+|---|---|---|---|
+| 50 lines of prose naming git mid-line | 1.1 s | 8.7 s | 1.9 s |
+| 300 lines of prose naming git mid-line | 1.4 s | 53.9 s | 3.5 s |
+| 50 lines starting with `git` | 1.1 s | 5.1 s | 1.7 s |
+| 300 lines starting with `git` | 1.2 s | 26.4 s | 3.5 s |
+
+**Further documented gaps (Fable's round-3 classes; not fixed, by the scope stop; server-side
+protection, the `keel-main` ruleset since 2026-11-18, carries them):** a push after `timeout`,
+`nice` with an option, or `env -i`; after `then`, `do` or `!`; inside `$(...)`; PowerShell
+`$r = git push`; `g\it push`; `feat:$'main'`; and `export GIT_DIR=`.
+
 ## Not verified
 
 - Git Bash on Windows was not run.

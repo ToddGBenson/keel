@@ -944,7 +944,25 @@ fi
 # Not read: a git alias, xargs, a push run by a script, and push.default other than
 # simple/current/upstream (a plain push is taken as the current branch).
 read -r -d '' push_tok_awk <<'AWK'
-function flush() { if (have) { print tok; tok = ""; have = 0 } }
+# T1 (review round 3): a segment is printed only when one of its words can make it matter to
+# the judge (git, a shell, eval, a directory change, GIT_DIR / GIT_WORK_TREE), so a long heredoc
+# of prose costs this one awk pass and no shell work per line.
+# The test mirrors push_judge's own reading of the words before the command (assignments and
+# the same wrappers), so a dropped segment is one push_judge would have returned from unread.
+function emit(x, lx) {
+  seg = seg x "\n"
+  if (decided) return
+  lx = tolower(x)
+  if (lx ~ /^(git_dir=|git_work_tree=|\$env:git_dir|\$env:git_work_tree)/) { keep = 1; return }
+  if (lx ~ /^[a-z_].*=/ || lx ~ /^\$env:/) return
+  if (lx ~ /^(env|command|builtin|exec|nice|nohup|time|sudo|doas)$/) return
+  decided = 1
+  if (lx ~ /^(cd|pushd|popd|chdir|set-location|sl|push-location|pop-location|sh|bash|dash|zsh|ash|eval)$/ || lx ~ /\/(sh|bash|dash|zsh)$/) keep = 1
+  sub(/^.*\//, "", lx); sub(/\.exe$/, "", lx)
+  if (lx == "git") keep = 1
+}
+function flush() { if (have) { emit(tok); tok = ""; have = 0 } }
+function sep() { flush(); if (keep) printf "%s", seg; print "\001"; seg = ""; keep = 0; decided = 0 }
 { s = (NR > 1) ? s "\n" $0 : $0 }
 END {
   n = length(s); q = ""
@@ -959,34 +977,46 @@ END {
       have = 1; continue
     }
     if (c == " " || c == "\t") { flush(); continue }
-    if (c == "\n" || c == ";" || c == "|" || c == "&" || c == "(" || c == ")" || c == "`") { flush(); print "\001"; continue }
-    if (c == "<" || c == ">") { if (tok ~ /^[0-9]+$/) { tok = ""; have = 0 } else flush(); while (i < n && index("<>", substr(s, i + 1, 1))) i++; print ">"; continue }
+    if (c == "\n" || c == ";" || c == "|" || c == "&" || c == "(" || c == ")" || c == "`") { sep(); continue }
+    if (c == "<" || c == ">") { if (tok ~ /^[0-9]+$/) { tok = ""; have = 0 } else flush(); while (i < n && index("<>", substr(s, i + 1, 1))) i++; emit(">"); continue }
     tok = tok c; have = 1
   }
-  flush()
+  sep()
 }
 AWK
 push_moves=0   # 1 once a word that changes the directory, the git dir or the branch is seen
 push_lit() { case "$1" in *'$'*|*'`'*|'~'*) return 1 ;; esac; return 0; }   # a word read as written
 push_judge() { # $@: the words of one invocation
-  local w=("$@") n=$# i=0 a lw dir="" ndir=0 sub="" pos=0 cur=0 cfg_bad="" first="" dry=0
+  local w=("$@") n=$# i=0 a dir="" ndir=0 sub="" pos=0 cur=0 cfg_bad="" first="" dry=0
   # Words before the command: VAR=value assignments (GIT_DIR and GIT_WORK_TREE move the push),
   # PowerShell $env: assignments, and a few wrappers. A word that changes the directory, as
   # the command, moves every push after it (in any case: PowerShell's CD is cd).
+  # T1 (review round 3): matched in any case with nocasematch (bash 3.1+), not by starting tr
+  # twice per command; the option is set for these two case statements only.
+  local kind=""
+  shopt -s nocasematch
   while [ "$i" -lt "$n" ]; do
-    a=${w[i]}; lw=$(printf '%s' "$a" | tr 'A-Z' 'a-z')
-    case "$lw" in
+    a=${w[i]}
+    case "$a" in
       git_dir=*|git_work_tree=*|'$env:git_dir'*|'$env:git_work_tree'*) push_moves=1; i=$((i + 1)); continue ;;
       [a-z_]*=*|'$env:'*) i=$((i + 1)); continue ;;
       env|command|builtin|exec|nice|nohup|time|sudo|doas) i=$((i + 1)); continue ;;
     esac
     break
   done
+  if [ "$i" -lt "$n" ]; then
+    first=${w[i]}
+    case "$first" in
+      cd|pushd|popd|chdir|set-location|sl|push-location|pop-location) kind="cd" ;;
+      sh|bash|dash|zsh|ash|*/sh|*/bash|*/dash|*/zsh) kind="sh" ;;
+      eval) kind="eval" ;;
+    esac
+  fi
+  shopt -u nocasematch
   [ "$i" -ge "$n" ] && return 0
-  first=${w[i]}; lw=$(printf '%s' "$first" | tr 'A-Z' 'a-z')
-  case "$lw" in
-    cd|pushd|popd|chdir|set-location|sl|push-location|pop-location) push_moves=1; return 0 ;;
-    sh|bash|dash|zsh|ash|*/sh|*/bash|*/dash|*/zsh)
+  case "$kind" in
+    cd) push_moves=1; return 0 ;;
+    sh)
       # A shell -c body is a command of its own: judge it the same way (review round 2).
       local k=$((i + 1))
       while [ "$k" -lt "$n" ]; do
@@ -1102,9 +1132,14 @@ push_guard() { # $1: one view of the command
 cmd="$raw_cmd"; guard
 if [ "$word_cmd" != "$raw_cmd" ]; then cmd="$word_cmd"; guard; fi
 if [ "$ps_cmd" != "$raw_cmd" ] && [ "$ps_cmd" != "$word_cmd" ]; then cmd="$ps_cmd"; guard; fi
-case "$raw_cmd" in
-  *[Gg][Ii][Tt]*) push_moves=0; push_guard "$raw_cmd"
-                  if [ "$ps_cmd" != "$raw_cmd" ]; then push_moves=0; push_guard "$ps_cmd"; fi ;;
-esac
+# T1 (review round 3): the judge runs only when git can be a command word: "git" at the start,
+# or after a separator, a space, a quote, a path or an opening bracket, followed by an end, a
+# space, a quote or .exe. A heredoc that merely mentions git in prose still pays the
+# tokenizer once, never a process per word.
+push_gate='(^|[][[:space:];&|(){}`"'"'"'/\\=!])[Gg][Ii][Tt]([.][Ee][Xx][Ee])?([[:space:];&|()`"'"'"']|$)'
+if [[ $raw_cmd =~ $push_gate ]] || { [ "$ps_cmd" != "$raw_cmd" ] && [[ $ps_cmd =~ $push_gate ]]; }; then
+  push_moves=0; push_guard "$raw_cmd"
+  if [ "$ps_cmd" != "$raw_cmd" ]; then push_moves=0; push_guard "$ps_cmd"; fi
+fi
 
 exit 0
