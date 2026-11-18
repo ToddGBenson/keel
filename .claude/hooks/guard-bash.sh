@@ -115,9 +115,11 @@ payload="$(cat)"
 # Decode a JSON string body (the sed fallback below hands over the raw escapes).
 # \uXXXX is left as it is.
 read -r -d '' json_unescape_awk <<'AWK'
-{ s = (NR > 1) ? s "\n" $0 : $0 }
+function guard_join(lo, hi,  m) { if (lo == hi) return guard_line[lo]; m = int((lo + hi) / 2); return guard_join(lo, m) "\n" guard_join(m + 1, hi) }
+{ guard_line[NR] = $0 }
 END {
-  n = length(s); out = ""
+  s = (NR > 0) ? guard_join(1, NR) : ""
+  n = length(s)
   for (i = 1; i <= n; i++) {
     c = substr(s, i, 1)
     if (c == "\\" && i < n) {
@@ -125,9 +127,8 @@ END {
       if (d == "n") c = "\n"; else if (d == "t") c = "\t"; else if (d == "r") c = "\r"
       else if (d == "u") c = "\\u"; else if (d == "b" || d == "f") c = " "; else c = d
     }
-    out = out c
+    printf "%s", c
   }
-  printf "%s", out
 }
 AWK
 
@@ -167,7 +168,9 @@ cmd=${cmd//$'\\\n'/ }
 # it (`gh alias set m 'pr merge'` too). A --shell body that already starts with gh
 # becomes "gh gh ...", which the rules read the same way.
 norm=()
-for pair in 'gh:[Gg][Hh]' 'git:[Gg][Ii][Tt]' 'curl:[Cc][Uu][Rr][Ll]'; do
+# TheHub #61385 review: docker too (docker.exe, /usr/bin/docker, docker-compose.exe).
+for pair in 'gh:[Gg][Hh]' 'git:[Gg][Ii][Tt]' 'curl:[Cc][Uu][Rr][Ll]' 'docker:[Dd][Oo][Cc][Kk][Ee][Rr]' \
+            'docker-compose:[Dd][Oo][Cc][Kk][Ee][Rr]-[Cc][Oo][Mm][Pp][Oo][Ss][Ee]'; do
   name=${pair%%:*}; pat=${pair#*:}
   norm+=(-e 's#"([^"]*[/\\])?'"$pat"'(\.[Ee][Xx][Ee])?"#'"$name"'#g'
          -e "s#'([^']*[/\\\\])?$pat(\\.[Ee][Xx][Ee])?'#$name#g"
@@ -192,41 +195,51 @@ cmd="$(printf '%s' "$cmd" | normalize)"
 # built from this one (dequote_awk, below), and either can block. A deny rule is
 # allowed to be judged on both readings.
 read -r -d '' mask_awk <<'AWK'
-{ s = (NR > 1) ? s "\n" $0 : $0 }
+function guard_join(lo, hi,  m) { if (lo == hi) return guard_line[lo]; m = int((lo + hi) / 2); return guard_join(lo, m) "\n" guard_join(m + 1, hi) }
+# The position of the first newline at or after i, or n + 1 when there is none. i only
+# moves forward, so a cursor over the newline positions makes every call O(1) amortized.
+# index(substr(s, i), "\n") copied the rest of the command at every comment line and
+# here-document line: quadratic (TheHub #61939).
+function guard_nextnl(i) { while (guard_nl[guard_nc] < i) guard_nc++; return guard_nl[guard_nc] }
+{ guard_line[NR] = $0 }
 END {
-  n = length(s); q = ""; out = ""; nh = 0; ws = 1; dp = 0; i = 1
+  s = (NR > 0) ? guard_join(1, NR) : ""
+  guard_p = 0; guard_nc = 1
+  for (k = 1; k <= NR; k++) { guard_p += length(guard_line[k]) + 1; guard_nl[k] = guard_p }
+  guard_nl[NR + 1] = length(s) + 1
+  n = length(s); q = ""; nh = 0; ws = 1; dp = 0; i = 1
   while (i <= n) {
     c = substr(s, i, 1)
     if (q == "" || q == "\"") {
       if (c == "$" && substr(s, i + 1, 1) == "(") {
         sv[++dp] = q; ft[dp] = "("; pc[dp] = 1; q = ""
-        out = out "$("; i += 2; ws = 1; continue
+        printf "%s", "$("; i += 2; ws = 1; continue
       }
       if (c == "`") {
         if (q == "" && dp > 0 && ft[dp] == "`") q = sv[dp--]
         else { sv[++dp] = q; ft[dp] = "`"; q = "" }
-        out = out c; i++; ws = 1; continue
+        printf "%s", c; i++; ws = 1; continue
       }
     }
     if (q == "") {
       if (c == "\\") {
         d = substr(s, i + 1, 1)
-        out = out ((d == "\n" || d == "|" || d == ";" || d == "&") ? "  " : c d)
+        printf "%s", ((d == "\n" || d == "|" || d == ";" || d == "&") ? "  " : c d)
         i += 2; ws = 0; continue
       }
       if (c == "#" && ws) {
-        j = index(substr(s, i), "\n"); if (j == 0) j = n - i + 2
+        j = guard_nextnl(i) - i + 1
         t = substr(s, i, j - 1); gsub(/[|;&]/, " ", t)
-        out = out t; i += j - 1; continue
+        printf "%s", t; i += j - 1; continue
       }
       if (dp > 0 && ft[dp] == "(" && c == "(") pc[dp]++
       if (dp > 0 && ft[dp] == "(" && c == ")" && --pc[dp] == 0) {
-        q = sv[dp--]; out = out c; i++; ws = 0; continue
+        q = sv[dp--]; printf "%s", c; i++; ws = 0; continue
       }
       if (c == "'") q = (i > 1 && substr(s, i - 1, 1) == "$") ? "$" : "'"
       else if (c == "\"") q = "\""
       else if (c == "<" && substr(s, i, 3) ~ /^<<[^<]/) {
-        r = substr(s, i + 2); hdash = (substr(r, 1, 1) == "-")
+        r = substr(s, i + 2, guard_nextnl(i) - i - 2); hdash = (substr(r, 1, 1) == "-")
         if (hdash) r = substr(r, 2)
         sub(/^[ \t]*/, "", r)
         if (match(r, /^["'\\]?[A-Za-z0-9_.-]+["']?/)) {
@@ -235,13 +248,12 @@ END {
         }
       }
       else if (c == "\n" && nh > 0) {
-        out = out c; i++
+        printf "%s", c; i++
         for (k = 1; k <= nh && i <= n; k++) {
           while (i <= n) {
-            j = index(substr(s, i), "\n")
-            line = (j > 0) ? substr(s, i, j - 1) : substr(s, i)
-            out = out line; i += length(line)
-            if (j > 0) { out = out "\n"; i++ }
+            j = guard_nextnl(i); line = substr(s, i, j - i); j = (j <= n)
+            printf "%s", line; i += length(line)
+            if (j > 0) { printf "%s", "\n"; i++ }
             t = line; if (hd[k]) sub(/^\t+/, "", t)
             if (t == hw[k]) break
           }
@@ -249,18 +261,17 @@ END {
         nh = 0; ws = 1; continue
       }
       ws = (c == " " || c == "\t" || c == "\n" || c == ";" || c == "&" || c == "|" || c == "(")
-      out = out c; i++; continue
+      printf "%s", c; i++; continue
     }
     if (c == "\\" && q != "'") {
       d = substr(s, i + 1, 1)
-      out = out c ((d == "\n" || d == "|" || d == ";" || d == "&") ? " " : d)
+      printf "%s", c ((d == "\n" || d == "|" || d == ";" || d == "&") ? " " : d)
       i += 2; continue
     }
     if ((q == "\"" && c == "\"") || (q != "\"" && c == "'")) q = ""
     else if (c == "|" || c == ";" || c == "&" || c == "\n") c = " "
-    out = out c; i++
+    printf "%s", c; i++
   }
-  printf "%s", out
 }
 AWK
 masked_cmd="$(printf '%s' "$cmd" | LC_ALL=C awk "$mask_awk" 2>/dev/null)" || masked_cmd="$cmd"
@@ -277,20 +288,21 @@ masked_cmd="$(printf '%s' "$cmd" | LC_ALL=C awk "$mask_awk" 2>/dev/null)" || mas
 # It keeps everything the masked view caught (a quote was only ever a boundary, and a
 # space is one too), so the rules run on the command as written and on this view.
 read -r -d '' dequote_awk <<'AWK'
-{ s = (NR > 1) ? s "\n" $0 : $0 }
+function guard_join(lo, hi,  m) { if (lo == hi) return guard_line[lo]; m = int((lo + hi) / 2); return guard_join(lo, m) "\n" guard_join(m + 1, hi) }
+{ guard_line[NR] = $0 }
 END {
-  n = length(s); q = ""; out = ""
+  s = (NR > 0) ? guard_join(1, NR) : ""
+  n = length(s); q = ""
   for (i = 1; i <= n; i++) {
     c = substr(s, i, 1)
-    if (q == "'") { if (c == "'") q = ""; else out = out c; continue }
-    if (c == "\\" && i < n) { out = out substr(s, ++i, 1); continue }
-    if (q == "$") { if (c == "'") q = ""; else out = out c; continue }
+    if (q == "'") { if (c == "'") q = ""; else printf "%s", c; continue }
+    if (c == "\\" && i < n) { printf "%s", substr(s, ++i, 1); continue }
+    if (q == "$") { if (c == "'") q = ""; else printf "%s", c; continue }
     if (q == "" && c == "$" && substr(s, i + 1, 1) == "'") { q = "$"; i++; continue }
     if (q == "" && c == "'") { q = "'"; continue }
     if (c == "\"") { q = (q == "\"") ? "" : "\""; continue }
-    out = out c
+    printf "%s", c
   }
-  printf "%s", out
 }
 AWK
 word_cmd="$(printf '%s' "$masked_cmd" | LC_ALL=C awk "$dequote_awk" 2>/dev/null | normalize)" || word_cmd="$masked_cmd"
@@ -321,39 +333,41 @@ raw_cmd="$cmd"
 # The view only ever adds a reading: a rule that blocks on any view blocks the call,
 # whichever tool sent it.
 read -r -d '' ps_awk <<'AWK'
-{ s = (NR > 1) ? s "\n" $0 : $0 }
+function guard_join(lo, hi,  m) { if (lo == hi) return guard_line[lo]; m = int((lo + hi) / 2); return guard_join(lo, m) "\n" guard_join(m + 1, hi) }
+{ guard_line[NR] = $0 }
 END {
-  n = length(s); q = ""; out = ""; dp = 0; i = 1
+  s = (NR > 0) ? guard_join(1, NR) : ""
+  n = length(s); q = ""; dp = 0; i = 1
   while (i <= n) {
     c = substr(s, i, 1)
     if (q != "'" && c == "`") {
       d = substr(s, i + 1, 1)
-      if (d == "\r" && substr(s, i + 2, 1) == "\n") { out = out " "; i += 3; continue }
-      if (q == "\"" && (d == "t" || d == "n" || d == "r" || d == "f" || d == "v")) { out = out " "; i += 2; continue }
+      if (d == "\r" && substr(s, i + 2, 1) == "\n") { printf "%s", " "; i += 3; continue }
+      if (q == "\"" && (d == "t" || d == "n" || d == "r" || d == "f" || d == "v")) { printf "%s", " "; i += 2; continue }
       if (q == "\"" && d == "u" && substr(s, i + 2, 1) == "{") {
         j = i + 3; v = 0
         while (j <= n && (h = index("0123456789abcdef", tolower(substr(s, j, 1)))) > 0) { v = v * 16 + h - 1; j++ }
         if (j > i + 3 && substr(s, j, 1) == "}") {
-          out = out ((v > 32 && v < 127) ? sprintf("%c", v) : " "); i = j + 1; continue
+          printf "%s", ((v > 32 && v < 127) ? sprintf("%c", v) : " "); i = j + 1; continue
         }
       }
-      out = out ((d == "\n" || d == "|" || d == ";" || d == "&") ? " " : d)
+      printf "%s", ((d == "\n" || d == "|" || d == ";" || d == "&") ? " " : d)
       i += 2; continue
     }
     if ((q == "" || q == "\"") && c == "$" && substr(s, i + 1, 1) == "(") {
-      sv[++dp] = q; pc[dp] = 1; q = ""; out = out "$("; i += 2; continue
+      sv[++dp] = q; pc[dp] = 1; q = ""; printf "%s", "$("; i += 2; continue
     }
     if (q == "") {
       if (dp > 0 && c == "(") pc[dp]++
-      if (dp > 0 && c == ")" && --pc[dp] == 0) { q = sv[dp--]; out = out c; i++; continue }
+      if (dp > 0 && c == ")" && --pc[dp] == 0) { q = sv[dp--]; printf "%s", c; i++; continue }
       if (c == "'" || c == "\"") { q = c; i++; continue }
       if (c == "-" && substr(s, i, 3) == "--%" && (i == 1 || index(" \t\n", substr(s, i - 1, 1)) > 0) \
-          && (i + 3 > n || index(" \t\r\n", substr(s, i + 3, 1)) > 0)) { out = out " "; i += 3; continue }
+          && (i + 3 > n || index(" \t\r\n", substr(s, i + 3, 1)) > 0)) { printf "%s", " "; i += 3; continue }
       if (c == "{" || c == "}" || c == ",") c = " "
-      out = out c; i++; continue
+      printf "%s", c; i++; continue
     }
     if (c == q) {
-      if (substr(s, i + 1, 1) == q) { out = out q; i += 2; continue }
+      if (substr(s, i + 1, 1) == q) { printf "%s", q; i += 2; continue }
       j = i + 1
       while (substr(s, j, 1) == " " || substr(s, j, 1) == "\t") j++
       if (substr(s, j, 1) == "+") {
@@ -365,9 +379,8 @@ END {
       q = ""; i++; continue
     }
     if (c == "|" || c == ";" || c == "&" || c == "\n") c = " "
-    out = out c; i++
+    printf "%s", c; i++
   }
-  printf "%s", out
 }
 AWK
 ps_sed=(-e 's#(^|[[:space:](])([Ss][Tt][Aa][Rr][Tt]-[Pp][Rr][Oo][Cc][Ee][Ss][Ss]|[Ss][Aa][Pp][Ss]|[Ss][Tt][Aa][Rr][Tt])([[:space:]]+-[Ff][A-Za-z]*)?[[:space:]]+#\1#g'
@@ -872,6 +885,33 @@ case "$cmd" in
   *"kubectl"*"prod"*|*"--context"*"prod"*|*"--profile"*"prod"*|*"terraform apply"*)
     block "production or infrastructure mutation. The pipeline deploys, never an agent." "AIC-3, CM-5, AC-6" ;;
 esac
+
+# ── Test suites never run inside production's containers (TheHub #61385) ───────
+# `docker exec` runs INSIDE the production container, under none of the --cpus/--memory
+# caps a test container gets. Uncapped test runs on the operator's host took TheHub
+# production down on 2026-10-23 (TheHub #61001). A suite in thehub-backend, thehub-postgres
+# or mykronos-backend competes with production for CPU and memory; `nice` lowers its CPU
+# priority but not its memory. Tests run in a capped container through the shared lock.
+# Read-only exec (cat /proc/..., a status query) is untouched. The runner must be in the
+# same exec segment, so `docker exec ... cat x; pytest` (pytest on the host) is not caught.
+#
+# Review of keel #190: TheHub's compose file names the services backend and postgres
+# (container_name thehub-backend and thehub-postgres), so `docker compose exec backend`
+# and `docker-compose exec postgres` reach the same containers. Docker's global options
+# may stand before the subcommand (docker --context x exec, docker compose -f f.yml exec).
+# backend-staging and postgres-staging are other services and stay allowed.
+# Not read: a runner fed on stdin or a heredoc (docker exec -i ... sh < run-tests.sh), a
+# runner under another name (pytest-3, a script or Makefile target), python -m unittest,
+# and a container reached by id or renamed (docs/11-ai-agent-controls.md lists them).
+prod_ctr='(thehub-backend|thehub-postgres|mykronos-backend)'
+prod_svc='(backend|postgres)'
+test_runner='(pytest|py[.]test|tox|nox|python[0-9.]*([[:space:]]+-[A-Za-z]+)*[[:space:]]+-m[[:space:]]*pytest)'
+runner_after='[[:space:])`"'"'"']([^|;&]*[[:space:]/'"'"'"])?'"$test_runner$E"
+docker_exec="$B"'docker([[:space:]]+[^|;&]*)?[[:space:]](container[[:space:]]+)?exec[[:space:]]+([^|;&]*[[:space:]])?'
+compose_exec="$B"'(docker([[:space:]]+[^|;&]*)?[[:space:]]compose|docker-compose)[[:space:]]+([^|;&]*[[:space:]])?exec[[:space:]]+([^|;&]*[[:space:]])?'
+if g "$docker_exec$prod_ctr$runner_after" || g "$compose_exec$prod_svc$runner_after"; then
+  block "running a test suite inside a production container with docker exec. It runs under no --cpus/--memory cap (the 2026-10-23 outage, TheHub #61001). Run it in a capped test container through the shared lock instead: bash scripts/docker-test-lock.sh run <owner> -- bash scripts/test-offline.sh ... (--cpus 2 --memory 2g)." "AIC-3, SC-6, CP-2"
+fi
 }
 
 cmd="$raw_cmd"; guard

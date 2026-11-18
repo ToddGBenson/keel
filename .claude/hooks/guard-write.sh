@@ -10,6 +10,86 @@
 
 set -uo pipefail
 
+# TheHub #61844: FAIL CLOSED, as guard-bash.sh does since TheHub #61794. This hook
+# had the same three defects (test/hook-write-fail-closed.test.py holds each):
+#
+# 1. `printf ... | grep -q` under pipefail: grep -q exits at its first match, the writer
+#    dies of SIGPIPE, the pipeline returns 141, and the `if` read a MATCH as "no match".
+#    A credential followed by ~400 KB of content was ALLOWED, with jq and without.
+#    The grep wrapper drops -q and discards its output, so grep drains its input, and
+#    141 from a writer counts as success.
+# 2. A helper (grep, cat, jq, python) that errored or was killed left a capture empty or
+#    a test false, and the hook reached `exit 0`. Helpers run through wrappers that record
+#    a real error in a fault file; the EXIT trap turns an allow into a block when it holds one.
+# 3. Claude Code blocks only on exit 2. The EXIT trap makes every other code but 0 a block,
+#    and the fault file starts with a sentinel line, so emptying or removing it is a fault.
+#
+# The wrappers and the trap are guard-bash.sh's, copied so each hook stands alone.
+guard_sentinel="guard-write.sh fault file $$"
+guard_faults="$(command mktemp 2>/dev/null)" \
+  && printf '%s\n' "$guard_sentinel" > "$guard_faults" 2>/dev/null || {
+  echo "BLOCKED by .claude/hooks/guard-write.sh — internal error: cannot create its fault file, so it cannot tell whether its own checks ran. Retry the call." >&2
+  exit 2
+}
+export guard_faults
+# shellcheck disable=SC2317  # the wrappers are called indirectly, by name, from every rule below
+guard_fault() { printf '%s exited %s\n' "$1" "$2" >> "$guard_faults" 2>/dev/null; }
+guard_run() { # $1: tool, $2: highest exit status that is not an error; the rest: its args
+  local t=$1 ok=$2 rc; shift 2
+  command "$t" "$@"; rc=$?
+  [ "$rc" -eq 141 ] && return 0
+  [ "$rc" -gt "$ok" ] && guard_fault "$t" "$rc"
+  return "$rc"
+}
+grep() { # -q (and --quiet/--silent) dropped, output discarded: grep reads all its input
+  local a args=() quiet=0 opts=1
+  for a in "$@"; do
+    if [ "$opts" -eq 1 ]; then
+      case "$a" in
+        --) opts=0 ;;
+        --quiet|--silent) quiet=1; continue ;;
+        --*) ;;
+        -*q*) quiet=1; a="${a//q/}"; [ "$a" = "-" ] && continue ;;
+        -*) ;;
+        *) opts=0 ;;
+      esac
+    fi
+    args+=("$a")
+  done
+  if [ "$quiet" -eq 1 ]; then guard_run grep 1 "${args[@]}" >/dev/null; else guard_run grep 1 "${args[@]}"; fi
+}
+# shellcheck disable=SC2120  # called with no arguments here (payload="$(cat)"); kept general like guard-bash.sh's
+cat()     { guard_run cat 0 "$@"; }
+jq()      { guard_run jq 0 "$@"; }
+python3() { guard_run python3 0 "$@"; }
+python()  { guard_run python 0 "$@"; }
+# shellcheck disable=SC2317  # run by the EXIT trap
+guard_exit() { # builtins only: a broken helper must not be able to hide its own fault
+  local rc=$? why="" lines=()
+  [ -f "$guard_faults" ] && mapfile -t lines < "$guard_faults" 2>/dev/null
+  if [ "$rc" -ne 2 ]; then
+    if [ "${#lines[@]}" -eq 0 ] || [ "${lines[0]}" != "$guard_sentinel" ]; then
+      why="its fault file was emptied or removed while it ran"
+    elif [ "${#lines[@]}" -gt 1 ]; then
+      why="a helper it reads the write with failed (${lines[*]:1:3})"
+    elif [ "$rc" -ne 0 ]; then
+      why="it stopped with exit $rc before reaching a verdict"
+    fi
+  fi
+  command rm -f "$guard_faults" 2>/dev/null
+  if [ -n "$why" ]; then
+    {
+      echo "BLOCKED by .claude/hooks/guard-write.sh — internal error: $why, so it cannot tell whether the write is allowed."
+      echo ""
+      echo "This is the guard failing closed (TheHub #61844), not a rule. Retry the call; if it"
+      echo "keeps happening, the host is short of a tool or of resources."
+    } >&2
+    exit 2
+  fi
+  exit "$rc"
+}
+trap guard_exit EXIT
+
 payload="$(cat)"
 
 # ── Payload extraction ───────────────────────────────────────────────────────
@@ -19,11 +99,14 @@ payload="$(cat)"
 # exactly the operation you most need to perform. Only NEW content is ever scanned now.
 # Python is used as the fallback because the previous sed extraction was also unreliable
 # on multi-line content.
-if command -v jq >/dev/null 2>&1; then
+# `type -P`, not `command -v`: jq() and python3() are wrapper functions now, and
+# `command -v` would report them even where no binary exists (TheHub #61794).
+if type -P jq >/dev/null 2>&1; then
   path="$(printf '%s' "$payload" | jq -r '.tool_input.file_path // empty')"
   content="$(printf '%s' "$payload" | jq -r '(.tool_input.content // .tool_input.new_string // "")')"
-elif command -v python >/dev/null 2>&1 || command -v python3 >/dev/null 2>&1; then
-  PY="$(command -v python3 || command -v python)"
+elif type -P python3 >/dev/null 2>&1 || type -P python >/dev/null 2>&1; then
+  # The wrapper's name, not a path, so a failing interpreter is recorded as a fault.
+  PY=python3; type -P python3 >/dev/null 2>&1 || PY=python
   path="$(printf '%s' "$payload" | "$PY" -c 'import sys,json;d=json.load(sys.stdin);print(d.get("tool_input",{}).get("file_path",""))' 2>/dev/null)"
   content="$(printf '%s' "$payload" | "$PY" -c 'import sys,json;d=json.load(sys.stdin);t=d.get("tool_input",{});print(t.get("content") or t.get("new_string") or "")' 2>/dev/null)"
 else
