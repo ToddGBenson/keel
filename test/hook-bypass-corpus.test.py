@@ -78,6 +78,8 @@ HOOKS = ROOT / ".claude" / "hooks"
 # The only jq filters the hooks use. Anything else is refused by the shim.
 JQ_FILTERS = {
     ".tool_input.command // empty": lambda ti: ti.get("command"),
+    # [TheHub #62031] the payload's cwd, read at the top level, not under tool_input.
+    ".cwd // empty": None,
     ".tool_input.file_path // .tool_input.notebook_path // empty":
         lambda ti: ti.get("file_path") or ti.get("notebook_path"),
     '[.tool_input.content, .tool_input.new_string, .tool_input.new_source, (.tool_input.edits // [] | .[]? | .new_string?)] | map(select(type == "string")) | join("\\n")':
@@ -93,7 +95,7 @@ BASH_TOOLS = ("Bash", "PowerShell")
 SETTINGS = ROOT / ".claude" / "settings.json"
 # Tools the hooks invoke. The no-jq shim directory links exactly these.
 HOOK_TOOLS = ("bash", "sh", "cat", "grep", "sed", "tr", "head", "mktemp", "rm", "awk",
-              "python3", "python", "env", "sleep")
+              "python3", "python", "env", "sleep", "git")
 
 
 def jq_shim(argv: list[str]) -> int:
@@ -105,7 +107,10 @@ def jq_shim(argv: list[str]) -> int:
               file=sys.stderr)
         return 3
     data = json.load(sys.stdin)
-    val = JQ_FILTERS[args[0]](data.get("tool_input") or {})
+    if args[0] == ".cwd // empty":
+        val = data.get("cwd") or None
+    else:
+        val = JQ_FILTERS[args[0]](data.get("tool_input") or {})
     if val is None or val is False:
         return 0
     out = val if isinstance(val, str) else json.dumps(val)

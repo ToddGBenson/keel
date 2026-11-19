@@ -1765,3 +1765,26 @@ entries:
     content: "{}"
     expect: block
     why: "hand-editing generated evidence with MultiEdit"
+  # ── TheHub #62031: main through a refspec, a + force push, commit -n ─────────────
+  # (KB-260..262: #196 holds KB-229..231, #192 KB-240..252.)
+  - id: KB-260
+    hook: guard-bash.sh
+    class: flag-spelling
+    source: TheHub#62031
+    command: git push origin feat:main
+    expect: block
+    why: "move main to a feature branch's commit through a refspec, with no review and, for an admin, no check"
+  - id: KB-261
+    hook: guard-bash.sh
+    class: flag-spelling
+    source: TheHub#62031
+    command: git push origin +feat
+    expect: block
+    why: "force push through a + refspec, with no --force flag"
+  - id: KB-262
+    hook: guard-bash.sh
+    class: flag-spelling
+    source: TheHub#62031
+    command: git commit -anm x
+    expect: block
+    why: "skip the pre-commit secret scan with -n inside a cluster of flags"

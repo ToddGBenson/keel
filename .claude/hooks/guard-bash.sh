@@ -172,6 +172,8 @@ cat()     { guard_run cat 0 "$@"; }
 # shellcheck disable=SC2317  # wrapped for when a rule calls it
 cut()     { guard_run cut 0 "$@"; }
 jq()      { guard_run jq 0 "$@"; }
+# shellcheck disable=SC2317  # wrapped for when a rule calls it (TheHub #62031)
+git()     { guard_run git 0 "$@"; }
 # shellcheck disable=SC2317  # wrapped for when a rule calls it
 python3() { guard_run python3 0 "$@"; }
 # shellcheck disable=SC2317  # wrapped for when a rule calls it
@@ -240,12 +242,14 @@ AWK
 # would report it even where no jq binary exists.
 if type -P jq >/dev/null 2>&1; then
   cmd="$(printf '%s' "$payload" | jq -r '.tool_input.command // empty')"
+  payload_cwd="$(printf '%s' "$payload" | jq -r '.cwd // empty')"
 else
   # TheHub #61038 review: take the JSON string itself (not everything up to the
   # payload's last quote, which swallowed the "description" field) and decode it, so
   # this mode sees the command jq would. Undecoded, \" is not a quote and \n is not a
   # newline, and the quote-aware view below could not tell what is quoted.
   cmd="$(printf '%s' "$payload" | sed -nE 's/.*"command"[[:space:]]*:[[:space:]]*"(([^"\\]|\\.)*)".*/\1/p')"
+  payload_cwd="$(printf '%s' "$payload" | sed -nE 's/.*"cwd"[[:space:]]*:[[:space:]]*"(([^"\\]|\\.)*)".*/\1/p' | sed 's/\\\\/\\/g')"
   cmd_json="$cmd"
   cmd="$(printf '%s' "$cmd_json" | LC_ALL=C awk "$json_unescape_awk" 2>/dev/null)" || cmd="$cmd_json"
 fi
@@ -535,7 +539,8 @@ guard() {
 #
 # Now anchored: the flag must belong to a git commit/push invocation.
 if printf '%s' "$cmd" | grep -qE "$B"'git[[:space:]]+[^|;&]*(commit|push|merge)[^|;&]*[[:space:]]--no-verify\b' \
-   || printf '%s' "$cmd" | grep -qE "$B"'git[[:space:]]+(commit|push)[[:space:]]+[^|;&]*[[:space:]]-[a-zA-Z]*n'"$E"; then
+   || printf '%s' "$cmd" | grep -qE "$B"'git[[:space:]]+(commit|push)[[:space:]]+[^|;&]*[[:space:]]-[a-zA-Z]*n([[:space:])`"'"'"';|&<>]|$)' \
+   || printf '%s' "$cmd" | grep -qiE "$B"'git[[:space:]]+([^|;&]*[[:space:]])?-c[[:space:]]*core[.]hookspath='; then
   block "hook bypass (--no-verify / -n on a git commit). Fix the cause the hook found." "AIC-3, IA-5"
 fi
 
@@ -576,8 +581,15 @@ g "$B"'git[[:space:]]+([^|;&]*[[:space:]])?reset([[:space:]]|$)[^|;&]*--hard\b' 
   && block "git reset --hard. Discards work irrecoverably; use git revert or a branch." "AIC-3"
 g "$B"'git[[:space:]]+(filter-branch|filter-repo)\b' \
   && block "history rewrite. Destroys the attributable, signed commit record." "AU-12, SI-7"
-g "$B"'git[[:space:]]+([^|;&]*[[:space:]])?push([[:space:]]+[^|;&]*)?[[:space:]](origin[[:space:]]+)?(HEAD:)?(main|master)'"$E" \
+# TheHub #62031: an argument here ends at a separator or a redirect too (; & | < >), so
+# `git push origin main;echo` is a push to main. The refspec, +, every-branch, ':',
+# -c push.* and send-pack rules are read as shell words in push_judge below (review round 2:
+# a regex over the line lost them behind a quoted global option such as -C "my dir").
+EP='([[:space:])`"'"'"';|&<>]|$)'
+g "$B"'git[[:space:]]+([^|;&]*[[:space:]])?push([[:space:]]+[^|;&]*)?[[:space:]](origin[[:space:]]+)?(HEAD:)?(main|master)'"$EP" \
   && block "direct push to main. All change goes through a reviewed PR." "AC-5, CM-5"
+g "$B"'git[[:space:]]+([^|;&]*[[:space:]])?commit[[:space:]]([^|;&]*[[:space:]])?-[aeiopqsvzn]*n[a-zA-Z]*'"$EP" \
+  && block "hook bypass (-n on a git commit, alone or in a cluster of flags). Fix the cause the hook found." "AIC-3, IA-5"
 
 # Self-approval and self-merge — the control that makes every gate meaningful
 g "$B"'gh[[:space:]]+pr[[:space:]]+review\b[^|;&]*--approve\b' \
@@ -1017,8 +1029,220 @@ if g "$docker_exec$prod_ctr$runner_after" || g "$compose_exec$prod_svc$runner_af
 fi
 }
 
+# ── A push of the current branch (TheHub #62031, best effort) ────────────────────
+# `git push`, `git push origin`, or a push of HEAD (or `@`, or `head`, which resolves to HEAD
+# on a case-insensitive file system) pushes the CURRENT branch. On a checkout that is on main
+# that is a push to main, the likeliest real one. Review round 1 narrowed this to what can be
+# read without guessing, since enforce_admins server-side is the real control:
+#   - only a literal `git push` invocation, read as shell words with quotes honoured, never
+#     `git stash push`, `git log --grep push` or quoted text;
+#   - git's own -C, -c and --git-dir/--work-tree are read; -c push.* or -c remote.*.push on a
+#     push is refused outright (they can map a push onto main);
+#   - if the command changes directory, sets GIT_DIR or GIT_WORK_TREE, or checks out or
+#     switches a branch anywhere, the branch the push will see cannot be read from here, so
+#     the push is refused with a clear message: run it as a command of its own;
+#   - otherwise the branch is read where the push runs, with git symbolic-ref through the
+#     fault-recording wrapper. Outside a repository (git exits 128) there is nothing to judge,
+#     and the push is allowed.
+# Not read: a git alias, xargs, a push run by a script, and push.default other than
+# simple/current/upstream (a plain push is taken as the current branch).
+read -r -d '' push_tok_awk <<'AWK'
+# T1 (review round 3): a segment is printed only when one of its words can make it matter to
+# the judge (git, a shell, eval, a directory change, GIT_DIR / GIT_WORK_TREE), so a long heredoc
+# of prose costs this one awk pass and no shell work per line.
+# The test mirrors push_judge's own reading of the words before the command (assignments and
+# the same wrappers), so a dropped segment is one push_judge would have returned from unread.
+function emit(x, lx) {
+  seg = seg x "\n"
+  if (decided) return
+  lx = tolower(x)
+  if (lx ~ /^(git_dir=|git_work_tree=|\$env:git_dir|\$env:git_work_tree)/) { keep = 1; return }
+  if (lx ~ /^[a-z_].*=/ || lx ~ /^\$env:/) return
+  if (lx ~ /^(env|command|builtin|exec|nice|nohup|time|sudo|doas)$/) return
+  decided = 1
+  if (lx ~ /^(cd|pushd|popd|chdir|set-location|sl|push-location|pop-location|sh|bash|dash|zsh|ash|eval)$/ || lx ~ /\/(sh|bash|dash|zsh)$/) keep = 1
+  sub(/^.*\//, "", lx); sub(/\.exe$/, "", lx)
+  if (lx == "git") keep = 1
+}
+function flush() { if (have) { emit(tok); tok = ""; have = 0 } }
+function sep() { flush(); if (keep) printf "%s", seg; print "\001"; seg = ""; keep = 0; decided = 0 }
+{ s = (NR > 1) ? s "\n" $0 : $0 }
+END {
+  n = length(s); q = ""
+  for (i = 1; i <= n; i++) {
+    c = substr(s, i, 1)
+    if (q != "") { if (c == q) q = ""; else if (c == "\\" && q == "\"" && i < n) tok = tok substr(s, ++i, 1); else tok = tok c; continue }
+    if (c == "'" || c == "\"") { q = c; have = 1; continue }
+    if (c == "\\" && i < n) { tok = tok substr(s, ++i, 1); have = 1; continue }
+    if (c == "$" && substr(s, i + 1, 1) == "(") {           # $(...) stays inside its word (round 2)
+      d = 0
+      for (; i <= n; i++) { c = substr(s, i, 1); tok = tok c; if (c == "(") d++; else if (c == ")" && --d == 0) break }
+      have = 1; continue
+    }
+    if (c == " " || c == "\t") { flush(); continue }
+    if (c == "\n" || c == ";" || c == "|" || c == "&" || c == "(" || c == ")" || c == "`") { sep(); continue }
+    if (c == "<" || c == ">") { if (tok ~ /^[0-9]+$/) { tok = ""; have = 0 } else flush(); while (i < n && index("<>", substr(s, i + 1, 1))) i++; emit(">"); continue }
+    tok = tok c; have = 1
+  }
+  sep()
+}
+AWK
+push_moves=0   # 1 once a word that changes the directory, the git dir or the branch is seen
+push_lit() { case "$1" in *'$'*|*'`'*|'~'*) return 1 ;; esac; return 0; }   # a word read as written
+push_judge() { # $@: the words of one invocation
+  local w=("$@") n=$# i=0 a dir="" ndir=0 sub="" pos=0 cur=0 cfg_bad="" first="" dry=0
+  # Words before the command: VAR=value assignments (GIT_DIR and GIT_WORK_TREE move the push),
+  # PowerShell $env: assignments, and a few wrappers. A word that changes the directory, as
+  # the command, moves every push after it (in any case: PowerShell's CD is cd).
+  # T1 (review round 3): matched in any case with nocasematch (bash 3.1+), not by starting tr
+  # twice per command; the option is set for these two case statements only.
+  local kind=""
+  shopt -s nocasematch
+  while [ "$i" -lt "$n" ]; do
+    a=${w[i]}
+    case "$a" in
+      git_dir=*|git_work_tree=*|'$env:git_dir'*|'$env:git_work_tree'*) push_moves=1; i=$((i + 1)); continue ;;
+      [a-z_]*=*|'$env:'*) i=$((i + 1)); continue ;;
+      env|command|builtin|exec|nice|nohup|time|sudo|doas) i=$((i + 1)); continue ;;
+    esac
+    break
+  done
+  if [ "$i" -lt "$n" ]; then
+    first=${w[i]}
+    case "$first" in
+      cd|pushd|popd|chdir|set-location|sl|push-location|pop-location) kind="cd" ;;
+      sh|bash|dash|zsh|ash|*/sh|*/bash|*/dash|*/zsh) kind="sh" ;;
+      eval) kind="eval" ;;
+    esac
+  fi
+  shopt -u nocasematch
+  [ "$i" -ge "$n" ] && return 0
+  case "$kind" in
+    cd) push_moves=1; return 0 ;;
+    sh)
+      # A shell -c body is a command of its own: judge it the same way (review round 2).
+      local k=$((i + 1))
+      while [ "$k" -lt "$n" ]; do
+        case "${w[k]}" in -*c*) [ $((k + 1)) -lt "$n" ] && push_guard "${w[k+1]}"; return 0 ;; -*) ;; *) return 0 ;; esac
+        k=$((k + 1))
+      done
+      return 0 ;;
+    eval) push_guard "${w[*]:i+1}"; return 0 ;;
+  esac
+  a=${first##*/}; a=${a%.exe}; a=${a%.EXE}
+  [ "$a" = "git" ] || return 0
+  i=$((i + 1))
+  # git's global options. One this hook does not know, before a push, is refused (round 2):
+  # skipping it would let the push go unread.
+  local unknown=""
+  while [ "$i" -lt "$n" ]; do
+    a=${w[i]}
+    case "$a" in
+      -C) ndir=$((ndir + 1)); dir=${w[i+1]:-}; push_lit "$dir" || dir='$'; i=$((i + 2)) ;;
+      -c) case "${w[i+1]:-}" in [Pp][Uu][Ss][Hh].*|[Rr][Ee][Mm][Oo][Tt][Ee].*.[Pp][Uu][Ss][Hh]=*|[Rr][Ee][Mm][Oo][Tt][Ee].*.[Mm][Ii][Rr][Rr][Oo][Rr]=*) cfg_bad=${w[i+1]} ;; esac; i=$((i + 2)) ;;
+      -c*) case "${a#-c}" in [Pp][Uu][Ss][Hh].*|[Rr][Ee][Mm][Oo][Tt][Ee].*.[Pp][Uu][Ss][Hh]=*) cfg_bad=${a#-c} ;; esac; i=$((i + 1)) ;;
+      --git-dir|--work-tree) push_moves=1; i=$((i + 2)) ;;
+      --git-dir=*|--work-tree=*) push_moves=1; i=$((i + 1)) ;;
+      --namespace|--config-env|--attr-source|--super-prefix|--list-cmds) i=$((i + 2)) ;;
+      --namespace=*|--config-env=*|--attr-source=*|--super-prefix=*|--exec-path=*|--exec-path|--list-cmds=*) i=$((i + 1)) ;;
+      -p|-P|--paginate|--no-pager|--bare|--no-replace-objects|--no-lazy-fetch|--no-optional-locks|--literal-pathspecs|--glob-pathspecs|--noglob-pathspecs|--icase-pathspecs|--no-advice) i=$((i + 1)) ;;
+      -*) unknown=$a; i=$((i + 1)) ;;
+      *) break ;;
+    esac
+  done
+  sub=${w[i]:-}
+  case "$sub" in
+    checkout|switch) push_moves=1; return 0 ;;
+    send-pack) block "git send-pack, the plumbing under git push, which can move main. Push a feature branch with git push." "AC-5, CM-5" ;;
+    push) ;;
+    *'$'*|*'`'*) block "a git command whose subcommand ($sub) is not written literally; it may be a push. Write the command out." "AC-5, CM-5" ;;
+    *) return 0 ;;
+  esac
+  [ -n "$unknown" ] && block "a git push after a global option this hook cannot read ($unknown). Push without it, or name the branch: git push origin <feature>." "AC-5, CM-5"
+  [ -n "$cfg_bad" ] && block "a git push with -c $cfg_bad, which can map the push onto main. Push a feature branch by name." "AC-5, CM-5"
+  i=$((i + 1))
+  local dyn=0 r dst name
+  while [ "$i" -lt "$n" ]; do
+    a=${w[i]}
+    case "$a" in
+      ">") i=$((i + 2)); continue ;;                       # a redirect and its target
+      -o|--push-option|--repo|--receive-pack|--exec) i=$((i + 2)); continue ;;
+      --push-option=*|--repo=*|--receive-pack=*|--exec=*|-o?*) ;;
+      --dry-run|-n) dry=1 ;;
+      --no-dry-run) dry=0 ;;                               # the last one wins
+      --no-*) ;;
+      --*)
+        name=${a#--}; name=${name%%=*}
+        if [ -n "$name" ]; then
+          local opt
+          for opt in all mirror branches; do         # git accepts any unique prefix of a long option
+            case "$opt" in "$name"*) block "a push of every branch or ref (--$opt, read from --$name), main included. Push one feature branch." "AC-5, CM-5" ;; esac
+          done
+        fi ;;
+      -*) ;;
+      *)
+        pos=$((pos + 1))
+        if [ "$pos" -gt 1 ]; then                          # the first is the repository
+          r=$a
+          case "$r" in
+            *'$'*|*'`'*) dyn=1 ;;
+            *)
+              case "$r" in *'*'*) block "a wildcard refspec ($r), which can include main. Push one feature branch by name." "AC-5, CM-5" ;; esac
+              case "$r" in '+'*) block "force push (a + refspec). Published history is immutable — it is the AU-12 audit trail." "AIC-3, AU-12, SI-7" ;; esac
+              [ "$r" = ":" ] && block "a push of every matching branch (a bare ':' refspec), main included. Push one feature branch." "AC-5, CM-5"
+              case "$r" in *:*) dst=${r#*:} ;; *) dst=$r ;; esac
+              dst=${dst#refs/}; dst=${dst#heads/}
+              case "$dst" in main|master) block "a push to main ($r). All change goes through a reviewed PR." "AC-5, CM-5" ;; esac
+              case "$r" in HEAD|@|head) cur=1 ;; esac ;;
+          esac
+        fi ;;
+    esac
+    i=$((i + 1))
+  done
+  [ "$dry" -eq 1 ] && return 0                             # a dry run moves nothing
+  [ "$pos" -le 1 ] && cur=1
+  [ "$dyn" -eq 1 ] && cur=1                                # $(...) or $VAR as a refspec: as the current branch
+  [ "$cur" -eq 1 ] || return 0
+  [ "$push_moves" -eq 1 ] && block "a push of the current branch after the command changes directory, the git directory or the branch: which branch it pushes cannot be read here. Run the push as a command of its own, from the checkout you mean, or name the branch: git push origin <feature>." "AC-5, CM-5"
+  { [ "$ndir" -gt 1 ] || [ "$dir" = '$' ]; } && block "a push of the current branch from a git -C this hook cannot read literally (a variable, \$(...), ~, or -C given twice). Name the branch: git push origin <feature>." "AC-5, CM-5"
+  local base="${payload_cwd:-$PWD}" branch rc
+  if [ -n "$dir" ]; then case "$dir" in /*|[A-Za-z]:[/\\]*) base=$dir ;; *) base="$base/$dir" ;; esac; fi
+  branch=$(command git -C "$base" symbolic-ref --short -q HEAD 2>/dev/null); rc=$?
+  case "$rc" in
+    0) ;;
+    1) return 0 ;;                                         # a detached HEAD is not a branch
+    128) [ -z "$dir" ] && return 0                          # the payload cwd is not a repository: nothing to judge
+         block "a push of the current branch from ${dir} (git -C), which git cannot read as a repository. Name the branch: git push origin <feature>." "AC-5, CM-5" ;;
+    *) block "a push of the current branch, which this hook cannot read (git exited ${rc}): it may be main. Name the branch: git push origin <feature>." "AC-5, CM-5" ;;
+  esac
+  case "$branch" in
+    main|master) block "a push of the current branch, which is $branch (in $base). All change goes through a reviewed PR: push a feature branch." "AC-5, CM-5" ;;
+  esac
+  return 0
+}
+push_guard() { # $1: one view of the command
+  local toks=() seg=() t
+  mapfile -t toks < <(printf '%s' "$1" | LC_ALL=C awk "$push_tok_awk")
+  toks+=($'\001')
+  for t in "${toks[@]}"; do
+    if [ "$t" = $'\001' ]; then
+      [ "${#seg[@]}" -gt 0 ] && push_judge "${seg[@]}"
+      seg=(); continue
+    fi
+    seg+=("$t")
+  done
+}
 cmd="$raw_cmd"; guard
 if [ "$word_cmd" != "$raw_cmd" ]; then cmd="$word_cmd"; guard; fi
 if [ "$ps_cmd" != "$raw_cmd" ] && [ "$ps_cmd" != "$word_cmd" ]; then cmd="$ps_cmd"; guard; fi
+# T1 (review round 3): the judge runs only when git can be a command word: "git" at the start,
+# or after a separator, a space, a quote, a path or an opening bracket, followed by an end, a
+# space, a quote or .exe. A heredoc that merely mentions git in prose still pays the
+# tokenizer once, never a process per word.
+push_gate='(^|[][[:space:];&|(){}`"'"'"'/\\=!])[Gg][Ii][Tt]([.][Ee][Xx][Ee])?([[:space:];&|()`"'"'"']|$)'
+if [[ $raw_cmd =~ $push_gate ]] || { [ "$ps_cmd" != "$raw_cmd" ] && [[ $ps_cmd =~ $push_gate ]]; }; then
+  push_moves=0; push_guard "$raw_cmd"
+  if [ "$ps_cmd" != "$raw_cmd" ]; then push_moves=0; push_guard "$ps_cmd"; fi
+fi
 
 exit 0
