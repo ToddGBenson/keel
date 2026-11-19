@@ -59,6 +59,13 @@ BUDGET_S = 5   # the fixed hook takes ~0.7 s on the Linux runner; main took 7-16
 # [TheHub #61973, review of #184] A harmless padded command is ALLOWED, so it runs every rule
 # on every view: the slowest decided shape of this padding. It must be quick and allowed.
 HARMLESS_LARGE = {f"`git status`, padded to {len(HARMLESS + PAD) // 1024} KB": "git status" + PAD}
+# Review of keel #205 / binnacle #101: with no jq, #61978 refuses a payload over 256 KB before any
+# rule runs, so the rows above are decided by that cap in that mode. The same commands padded to
+# about 144 KB, under the cap, keep the rules and the budget exercised with no jq (as on Concourse).
+NOJQ_CAP = 262144
+PAD_UNDER = PAD[: len(PAD) * 36 // 100]
+LARGE.update({f"{name}, padded to {len(cmd + PAD_UNDER) // 1024} KB": cmd + PAD_UNDER for name, cmd in MUST_BLOCK.items()})
+HARMLESS_LARGE[f"`git status`, padded to {len(HARMLESS + PAD_UNDER) // 1024} KB"] = "git status" + PAD_UNDER
 SHIMS = {
     "exits 2": "#!/bin/sh\nexit 2\n",
     "is killed": "#!/bin/sh\nkill -9 $$\n",
@@ -147,7 +154,8 @@ def main():
             for name, cmd in list(LARGE.items()) + list(HARMLESS_LARGE.items()):
                 # [hook train 2026-11-18] With no jq, TheHub #61978 refuses a payload over 256 KB
                 # as too large to judge, so the harmless padded command is blocked there.
-                want = 0 if name in HARMLESS_LARGE and with_jq else 2
+                capped = not with_jq and len(cmd.encode()) > NOJQ_CAP   # refused by #61978's cap, unread
+                want = 0 if name in HARMLESS_LARGE and not capped else 2
                 for t in ("Bash", "PowerShell"):
                     mode = "jq" if with_jq else "no-jq"
                     # [TheHub #61973, review of #184] The better of two runs, so one starved
@@ -160,8 +168,8 @@ def main():
                         if took < BUDGET_S:
                             break
                     verdict = "allowed" if want == 0 else "blocked"
-                    # Review of keel #205: with no jq the harmless row is refused by #61978's cap, and says so.
-                    why_ok = with_jq or name not in HARMLESS_LARGE or "over 256 KB" in err
+                    # Review of keel #205: a row the cap decides must say so.
+                    why_ok = not capped or "over 256 KB" in err
                     check(f"{mode} {t}: {name} is {verdict}", rc == want and why_ok, f"rc={rc} {err[:200]}")
                     check(f"{mode} {t}: {name} is decided in {took:.1f} s (budget {BUDGET_S} s, best of two)",
                           took < BUDGET_S, "TOO SLOW: a hook past its timeout lets the call proceed")

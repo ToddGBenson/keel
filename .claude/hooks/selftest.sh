@@ -613,11 +613,16 @@ for gx in git.exe GIT Git.Exe /usr/bin/git; do
   check "$gx push --mirror"                   block "$(payload "$gx push --mirror origin")"                   guard-bash.sh
   check "$gx push a bare : refspec"           block "$(payload "$gx push origin :")"                          guard-bash.sh
   check "$gx send-pack"                       block "$(payload "$gx send-pack origin feat:main")"             guard-bash.sh
+  check "$gx push feat:main (a refspec)"      block "$(payload "$gx push origin feat:main")"                  guard-bash.sh
+  check "$gx push +feat (a force refspec)"    block "$(payload "$gx push origin +feat")"                      guard-bash.sh
+  check "$gx push feat:feat"                  allow "$(payload "$gx push origin feat:feat")"                  guard-bash.sh
   check "on main: $gx push a named feature"   allow "$(cwpay "$onmain" "$gx push -u origin feat/x")"          guard-bash.sh
   check "on main: $gx status"                 allow "$(cwpay "$onmain" "$gx status")"                         guard-bash.sh
 done
 check "quoted Windows path: push --all"       block "$(payload '"C:\Program Files\Git\cmd\git.exe" push --all origin')" guard-bash.sh
 check "quoted Windows path: send-pack"        block "$(payload '"C:\Program Files\Git\cmd\git.exe" send-pack origin feat:main')" guard-bash.sh
+check "quoted Windows path: feat:main"        block "$(payload '"C:\Program Files\Git\cmd\git.exe" push origin feat:main')" guard-bash.sh
+check "quoted Windows path: +feat"            block "$(payload '"C:\Program Files\Git\cmd\git.exe" push origin +feat')" guard-bash.sh
 check "quoted Windows path: push a feature"   allow "$(payload '"C:\Program Files\Git\cmd\git.exe" push origin feat')" guard-bash.sh
 for sx in bash.exe BASH Bash.Exe; do
   check "on main: $sx -c 'git push'"          block "$(cwpay "$onmain" "$sx -c 'git push origin HEAD'")"      guard-bash.sh

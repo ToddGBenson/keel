@@ -2117,3 +2117,74 @@ entries:
     command: "bash.exe <<EOF\ndocker run --rm python:3.12 pytest\nEOF"
     expect: block
     why: "an uncapped test container in a heredoc fed to bash.exe"
+  # binnacle #101 review: the refspec rules of the word judge, in the same spellings (KB-307..)
+  - id: KB-307
+    hook: guard-bash.sh
+    class: binary-spelling
+    source: keel#205
+    command: "git.exe push origin feat:main"
+    expect: block
+    why: "move main to a feature branch's commit through a refspec, with git named git.exe"
+  - id: KB-308
+    hook: guard-bash.sh
+    class: binary-spelling
+    source: keel#205
+    command: "git.exe push origin +feat"
+    expect: block
+    why: "force push through a + refspec, with git named git.exe"
+  - id: KB-309
+    hook: guard-bash.sh
+    class: binary-spelling
+    source: keel#205
+    command: "GIT push origin feat:main"
+    expect: block
+    why: "move main to a feature branch's commit through a refspec, with git named GIT"
+  - id: KB-310
+    hook: guard-bash.sh
+    class: binary-spelling
+    source: keel#205
+    command: "GIT push origin +feat"
+    expect: block
+    why: "force push through a + refspec, with git named GIT"
+  - id: KB-311
+    hook: guard-bash.sh
+    class: binary-spelling
+    source: keel#205
+    command: "Git.Exe push origin feat:main"
+    expect: block
+    why: "move main to a feature branch's commit through a refspec, with git named Git.Exe"
+  - id: KB-312
+    hook: guard-bash.sh
+    class: binary-spelling
+    source: keel#205
+    command: "Git.Exe push origin +feat"
+    expect: block
+    why: "force push through a + refspec, with git named Git.Exe"
+  - id: KB-313
+    hook: guard-bash.sh
+    class: binary-spelling
+    source: keel#205
+    command: "/usr/bin/git push origin feat:main"
+    expect: block
+    why: "move main to a feature branch's commit through a refspec, with git named /usr/bin/git"
+  - id: KB-314
+    hook: guard-bash.sh
+    class: binary-spelling
+    source: keel#205
+    command: "/usr/bin/git push origin +feat"
+    expect: block
+    why: "force push through a + refspec, with git named /usr/bin/git"
+  - id: KB-315
+    hook: guard-bash.sh
+    class: binary-spelling
+    source: keel#205
+    command: "\"C:\\Program Files\\Git\\cmd\\git.exe\" push origin feat:main"
+    expect: block
+    why: "move main to a feature branch's commit through a refspec, with git named its quoted install path"
+  - id: KB-316
+    hook: guard-bash.sh
+    class: binary-spelling
+    source: keel#205
+    command: "\"C:\\Program Files\\Git\\cmd\\git.exe\" push origin +feat"
+    expect: block
+    why: "force push through a + refspec, with git named its quoted install path"
