@@ -145,7 +145,9 @@ def main():
         for with_jq in ([True, False] if have_jq else [False]):
             d = clean if with_jq else tool_dir(tmp, with_jq=False)
             for name, cmd in list(LARGE.items()) + list(HARMLESS_LARGE.items()):
-                want = 0 if name in HARMLESS_LARGE else 2
+                # [hook train 2026-11-18] With no jq, TheHub #61978 refuses a payload over 256 KB
+                # as too large to judge, so the harmless padded command is blocked there.
+                want = 0 if name in HARMLESS_LARGE and with_jq else 2
                 for t in ("Bash", "PowerShell"):
                     mode = "jq" if with_jq else "no-jq"
                     # [TheHub #61973, review of #184] The better of two runs, so one starved

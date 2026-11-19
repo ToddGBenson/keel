@@ -159,13 +159,15 @@ def main():
                       rc == 2 and "internal error" in err, f"rc={rc} {err[:200]}")
 
         print("SIGPIPE: a helper killed by SIGPIPE is a fault")
+        # [hook train 2026-11-18] guard-bash.sh runs as the copy, not the live hook: the live
+        # hook pins PATH (TheHub #61843), so the shim directories below would never reach it.
         pipe = "#!/bin/sh\nkill -PIPE $$\n"
         for helper in ("sed", "awk", "jq", "cat"):
             d = tool_dir(tmp, {helper: pipe})
             for name, cmd in MUST_BLOCK.items():
-                rc, err, _ = run(BASH_HOOK, bash_payload(cmd), d)
+                rc, err, _ = run(bash_copy, bash_payload(cmd), d)
                 check(f"guard-bash.sh, {helper} killed by SIGPIPE: {name} is still blocked", rc == 2, f"rc={rc} ALLOWED")
-            rc, err, _ = run(BASH_HOOK, bash_payload(HARMLESS), d)
+            rc, err, _ = run(bash_copy, bash_payload(HARMLESS), d)
             check(f"guard-bash.sh, {helper} killed by SIGPIPE: `{HARMLESS}` is refused, and says why",
                   rc == 2 and "internal error" in err, f"rc={rc} {err[:200]}")
         for helper in ("jq", "cat"):
