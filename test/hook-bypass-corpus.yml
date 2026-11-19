@@ -1924,3 +1924,196 @@ entries:
     command: "COMPOSE_FILE=/srv/docker-compose docker compose exec backend pytest"
     expect: block
     why: "an assignment ending in an engine name was read as the engine"
+
+  # ── Hook train review (keel #205 / binnacle #101): a binary named another way on a word-judged rule
+  # normalize() (#61987) keeps a non-plain spelling and appends the bare name; the word judges
+  # (#62031 push_judge, #61987 ctr_judge / ctr_seg) read the program word as written. (KB-280..)
+  - id: KB-280
+    hook: guard-bash.sh
+    class: binary-spelling
+    source: keel#205
+    command: "git.exe push --all origin"
+    expect: block
+    why: "a push of every branch, main included, with git named git.exe"
+  - id: KB-281
+    hook: guard-bash.sh
+    class: binary-spelling
+    source: keel#205
+    command: "git.exe push --mirror origin"
+    expect: block
+    why: "a mirror push, which moves main, with git named git.exe"
+  - id: KB-282
+    hook: guard-bash.sh
+    class: binary-spelling
+    source: keel#205
+    command: "git.exe push origin :"
+    expect: block
+    why: "a matching push, main included, with git named git.exe"
+  - id: KB-283
+    hook: guard-bash.sh
+    class: binary-spelling
+    source: keel#205
+    command: "git.exe send-pack origin feat:main"
+    expect: block
+    why: "the plumbing push onto main, with git named git.exe"
+  - id: KB-284
+    hook: guard-bash.sh
+    class: binary-spelling
+    source: keel#205
+    command: "GIT push --all origin"
+    expect: block
+    why: "a push of every branch, main included, with git named GIT"
+  - id: KB-285
+    hook: guard-bash.sh
+    class: binary-spelling
+    source: keel#205
+    command: "GIT push --mirror origin"
+    expect: block
+    why: "a mirror push, which moves main, with git named GIT"
+  - id: KB-286
+    hook: guard-bash.sh
+    class: binary-spelling
+    source: keel#205
+    command: "GIT push origin :"
+    expect: block
+    why: "a matching push, main included, with git named GIT"
+  - id: KB-287
+    hook: guard-bash.sh
+    class: binary-spelling
+    source: keel#205
+    command: "GIT send-pack origin feat:main"
+    expect: block
+    why: "the plumbing push onto main, with git named GIT"
+  - id: KB-288
+    hook: guard-bash.sh
+    class: binary-spelling
+    source: keel#205
+    command: "Git.Exe push --all origin"
+    expect: block
+    why: "a push of every branch, main included, with git named Git.Exe"
+  - id: KB-289
+    hook: guard-bash.sh
+    class: binary-spelling
+    source: keel#205
+    command: "Git.Exe push --mirror origin"
+    expect: block
+    why: "a mirror push, which moves main, with git named Git.Exe"
+  - id: KB-290
+    hook: guard-bash.sh
+    class: binary-spelling
+    source: keel#205
+    command: "Git.Exe push origin :"
+    expect: block
+    why: "a matching push, main included, with git named Git.Exe"
+  - id: KB-291
+    hook: guard-bash.sh
+    class: binary-spelling
+    source: keel#205
+    command: "Git.Exe send-pack origin feat:main"
+    expect: block
+    why: "the plumbing push onto main, with git named Git.Exe"
+  - id: KB-292
+    hook: guard-bash.sh
+    class: binary-spelling
+    source: keel#205
+    command: "/usr/bin/git push --all origin"
+    expect: block
+    why: "a push of every branch, main included, with git named /usr/bin/git"
+  - id: KB-293
+    hook: guard-bash.sh
+    class: binary-spelling
+    source: keel#205
+    command: "/usr/bin/git push --mirror origin"
+    expect: block
+    why: "a mirror push, which moves main, with git named /usr/bin/git"
+  - id: KB-294
+    hook: guard-bash.sh
+    class: binary-spelling
+    source: keel#205
+    command: "/usr/bin/git push origin :"
+    expect: block
+    why: "a matching push, main included, with git named /usr/bin/git"
+  - id: KB-295
+    hook: guard-bash.sh
+    class: binary-spelling
+    source: keel#205
+    command: "/usr/bin/git send-pack origin feat:main"
+    expect: block
+    why: "the plumbing push onto main, with git named /usr/bin/git"
+  - id: KB-296
+    hook: guard-bash.sh
+    class: binary-spelling
+    source: keel#205
+    command: "\"C:\\Program Files\\Git\\cmd\\git.exe\" push --all origin"
+    expect: block
+    why: "a push of every branch, main included, with git named by its quoted install path"
+  - id: KB-297
+    hook: guard-bash.sh
+    class: binary-spelling
+    source: keel#205
+    command: "\"C:\\Program Files\\Git\\cmd\\git.exe\" send-pack origin feat:main"
+    expect: block
+    why: "the plumbing push onto main, with git named by its quoted install path"
+  - id: KB-298
+    hook: guard-bash.sh
+    class: binary-spelling
+    source: keel#205
+    command: "DOCKER run --rm python:3.12 pytest"
+    expect: block
+    why: "an uncapped test container, with the engine named DOCKER"
+  - id: KB-299
+    hook: guard-bash.sh
+    class: binary-spelling
+    source: keel#205
+    command: "Docker.Exe run --rm python:3.12 pytest"
+    expect: block
+    why: "an uncapped test container, with the engine named Docker.Exe"
+  - id: KB-300
+    hook: guard-bash.sh
+    class: binary-spelling
+    source: keel#205
+    command: "podman.exe run --rm python:3.12 pytest"
+    expect: block
+    why: "an uncapped test container, with the engine named podman.exe"
+  - id: KB-301
+    hook: guard-bash.sh
+    class: binary-spelling
+    source: keel#205
+    command: "PODMAN run --rm python:3.12 pytest"
+    expect: block
+    why: "an uncapped test container, with the engine named PODMAN"
+  - id: KB-302
+    hook: guard-bash.sh
+    class: binary-spelling
+    source: keel#205
+    command: "Podman.Exe run --rm python:3.12 pytest"
+    expect: block
+    why: "an uncapped test container, with the engine named Podman.Exe"
+  - id: KB-303
+    hook: guard-bash.sh
+    class: binary-spelling
+    source: keel#205
+    command: "nerdctl.exe run --rm python:3.12 pytest"
+    expect: block
+    why: "an uncapped test container, with the engine named nerdctl.exe"
+  - id: KB-304
+    hook: guard-bash.sh
+    class: binary-spelling
+    source: keel#205
+    command: "NERDCTL run --rm python:3.12 pytest"
+    expect: block
+    why: "an uncapped test container, with the engine named NERDCTL"
+  - id: KB-305
+    hook: guard-bash.sh
+    class: binary-spelling
+    source: keel#205
+    command: "BASH <<EOF\ndocker run --rm python:3.12 pytest\nEOF"
+    expect: block
+    why: "an uncapped test container in a heredoc fed to BASH"
+  - id: KB-306
+    hook: guard-bash.sh
+    class: binary-spelling
+    source: keel#205
+    command: "bash.exe <<EOF\ndocker run --rm python:3.12 pytest\nEOF"
+    expect: block
+    why: "an uncapped test container in a heredoc fed to bash.exe"

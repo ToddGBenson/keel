@@ -603,6 +603,27 @@ check "on main: echo use git push"         allow "$(cwpay "$onmain" 'echo use gi
 check "a notes message naming send-pack"   allow "$(payload 'git notes add -m "git send-pack"')"                  guard-bash.sh
 check "push -o ci.skip:main to a feature"  allow "$(payload 'git push origin feat -o ci.skip:main')"               guard-bash.sh
 check "on main: git push --dry-run"        allow "$(cwpay "$onmain" 'git push --dry-run')"                        guard-bash.sh
+# Hook train review (keel #205): git named another way. normalize() (#61987) keeps the word and
+# appends the bare name, and push_judge read that name as the subcommand. Every word-judged
+# push rule, in each non-plain spelling: the extension, another case, both, a path.
+for gx in git.exe GIT Git.Exe /usr/bin/git; do
+  check "on main: $gx push"                   block "$(cwpay "$onmain" "$gx push")"                           guard-bash.sh
+  check "on main: $gx push origin HEAD"       block "$(cwpay "$onmain" "$gx push origin HEAD")"               guard-bash.sh
+  check "$gx push --all"                      block "$(payload "$gx push --all origin")"                      guard-bash.sh
+  check "$gx push --mirror"                   block "$(payload "$gx push --mirror origin")"                   guard-bash.sh
+  check "$gx push a bare : refspec"           block "$(payload "$gx push origin :")"                          guard-bash.sh
+  check "$gx send-pack"                       block "$(payload "$gx send-pack origin feat:main")"             guard-bash.sh
+  check "on main: $gx push a named feature"   allow "$(cwpay "$onmain" "$gx push -u origin feat/x")"          guard-bash.sh
+  check "on main: $gx status"                 allow "$(cwpay "$onmain" "$gx status")"                         guard-bash.sh
+done
+check "quoted Windows path: push --all"       block "$(payload '"C:\Program Files\Git\cmd\git.exe" push --all origin')" guard-bash.sh
+check "quoted Windows path: send-pack"        block "$(payload '"C:\Program Files\Git\cmd\git.exe" send-pack origin feat:main')" guard-bash.sh
+check "quoted Windows path: push a feature"   allow "$(payload '"C:\Program Files\Git\cmd\git.exe" push origin feat')" guard-bash.sh
+for sx in bash.exe BASH Bash.Exe; do
+  check "on main: $sx -c 'git push'"          block "$(cwpay "$onmain" "$sx -c 'git push origin HEAD'")"      guard-bash.sh
+done
+check "PS: on main: git.exe push"           block "$(cwpay "$onmain" 'git.exe push' | sed 's/^{/{"tool_name":"PowerShell",/')" guard-bash.sh
+check "PS: on main: GIT push origin HEAD"   block "$(cwpay "$onmain" 'GIT push origin HEAD' | sed 's/^{/{"tool_name":"PowerShell",/')" guard-bash.sh
 rm -rf "$onmain" "$onfeat"
 echo ""
 echo "guard-bash.sh — a binary name is added, never substituted (TheHub #61987)"
@@ -663,6 +684,18 @@ check "docker --tlscacert x compose exec"   block "$(payload 'docker --tlscacert
 check "outer docker exec, inner compose"    block "$(payload 'docker exec ci-runner docker compose exec backend pytest')" guard-bash.sh
 check "X=/opt/podman docker compose exec"   block "$(payload 'X=/opt/podman docker compose exec backend pytest')"   guard-bash.sh
 check "run sh -c pip install pytest"        allow "$(payload "docker run --rm python:3.12 sh -c 'pip install pytest'")" guard-bash.sh
+# Hook train review (keel #205): every engine and the heredoc shell in each non-plain spelling.
+for ex in docker.exe DOCKER Docker.Exe podman.exe PODMAN Podman.Exe nerdctl.exe NERDCTL /usr/bin/Podman; do
+  check "$ex run pytest, uncapped"           block "$(payload "$ex run --rm python:3.12 pytest")"                    guard-bash.sh
+  check "$ex run pytest, capped"             allow "$(payload "$ex run --rm --cpus 2 --memory 2g python:3.12 pytest")" guard-bash.sh
+done
+check "quoted Windows path: docker run, uncapped" block "$(payload '"C:\Program Files\Docker\docker.exe" run --rm python:3.12 pytest')" guard-bash.sh
+for sx in bash.exe BASH Bash.Exe; do
+  check "$sx <<EOF, docker run uncapped"     block "$(payload "$sx <<EOF
+docker run --rm python:3.12 pytest
+EOF")" guard-bash.sh
+done
+check "PS: Podman.exe run, uncapped"        block "$(payload 'Podman.exe run --rm python:3.12 pytest' | sed 's/^{/{"tool_name":"PowerShell",/')" guard-bash.sh
 check "docker run -m=2g, capped"            allow "$(payload 'docker run --rm --cpus 2 -m=2g python:3.12 pytest')"  guard-bash.sh
 echo ""
 echo "guard-write.sh — must BLOCK (AU-9, AIC-5)"

@@ -1165,7 +1165,7 @@ ctr_mem_ok() { # $1: a --memory value. True when 0 < bytes <= 2g.
 ctr_judge() { # $@: the words of one invocation
   local w=("$@") n=$# i=0 eng="" sub="" a v
   while [ "$i" -lt "$n" ]; do
-    ctr_u "${w[i]}"; a=$_cu; a=${a##*/}; a=${a%.exe}; a=${a%.EXE}
+    ctr_u "${w[i]}"; a=${_cu##*[/\\]}; a=${a,,}; a=${a%.exe}   # any case, either slash (hook train review)
     case "$a" in docker|podman|nerdctl|docker-compose|podman-compose) eng=$a; break ;; esac
     i=$((i + 1))
   done
@@ -1291,9 +1291,10 @@ function emit(x, lx) {
   if (lx ~ /^[a-z_].*=/ || lx ~ /^\$env:/) return
   if (lx ~ /^(env|command|builtin|exec|nice|nohup|time|sudo|doas)$/) return
   decided = 1
-  if (lx ~ /^(cd|pushd|popd|chdir|set-location|sl|push-location|pop-location|sh|bash|dash|zsh|ash|eval)$/ || lx ~ /\/(sh|bash|dash|zsh)$/) keep = 1
-  sub(/^.*\//, "", lx); sub(/\.exe$/, "", lx)
-  if (lx == "git") keep = 1
+  # Hook train review: without its directory (either slash) or .exe, as push_judge reads it.
+  sub(/^.*[\/\\]/, "", lx); sub(/\.exe$/, "", lx)
+  if (lx ~ /^(cd|pushd|popd|chdir|set-location|sl|push-location|pop-location|sh|bash|dash|zsh|ash|eval)$/) keep = 1
+  if (lx ~ /git$/) keep = 1
 }
 function flush() { if (have) { emit(tok); tok = ""; have = 0 } }
 function sep() { flush(); if (keep) printf "%s", seg; print "\001"; seg = ""; keep = 0; decided = 0 }
@@ -1338,12 +1339,20 @@ push_judge() { # $@: the words of one invocation
     esac
     break
   done
+  # Hook train review (keel #205): the program word is read without its directory (either
+  # slash) and without .exe, in any case, as normalize() reads it. normalize() leaves a
+  # non-plain spelling (git.exe, GIT, a path) in place and appends the bare name after it,
+  # so that next word is the program again, not the subcommand (as in ctr_judge).
+  local isgit=0
   if [ "$i" -lt "$n" ]; then
     first=${w[i]}
-    case "$first" in
+    a=${first##*[/\\]}; [[ $a == *.exe ]] && a=${a%????}
+    case "$a" in
       cd|pushd|popd|chdir|set-location|sl|push-location|pop-location) kind="cd" ;;
-      sh|bash|dash|zsh|ash|*/sh|*/bash|*/dash|*/zsh) kind="sh" ;;
+      sh|bash|dash|zsh|ash) kind="sh" ;;
       eval) kind="eval" ;;
+      git) isgit=1 ;;
+      *git) [ "${w[i+1]:-}" = "git" ] && isgit=1 ;;   # a path whose separators the tokenizer dropped
     esac
   fi
   shopt -u nocasematch
@@ -1360,9 +1369,9 @@ push_judge() { # $@: the words of one invocation
       return 0 ;;
     eval) push_guard "${w[*]:i+1}"; return 0 ;;
   esac
-  a=${first##*/}; a=${a%.exe}; a=${a%.EXE}
-  [ "$a" = "git" ] || return 0
+  [ "$isgit" -eq 1 ] || return 0
   i=$((i + 1))
+  [ "${w[i]:-}" = "git" ] && i=$((i + 1))   # the bare name normalize() appended
   # git's global options. One this hook does not know, before a push, is refused (round 2):
   # skipping it would let the push go unread.
   local unknown=""
@@ -1517,14 +1526,14 @@ ctr_seg() { # $@: one segment. Round 3: judged from EVERY engine word (an outer 
   # (bash <<EOF ...); fed to anything else (git commit -F -, cat > file) it is text.
   local w=() k a first="" bodies=()
   for a in "$@"; do case "$a" in $'\002'*) bodies+=("${a#?}") ;; *) w+=("$a") ;; esac; done
-  for a in "${w[@]}"; do case "$a" in [A-Za-z_]*=*|env|sudo|command|exec|nice|nohup|timeout) ;; *) first=${a##*/}; break ;; esac; done
+  for a in "${w[@]}"; do case "$a" in [A-Za-z_]*=*|env|sudo|command|exec|nice|nohup|timeout) ;; *) ctr_u "$a"; first=${_cu##*[/\\]}; first=${first,,}; first=${first%.exe}; break ;; esac; done
   case "$first" in
     sh|bash|dash|zsh|ash|ksh) for a in "${bodies[@]}"; do ctr_guard "${a//$'\003'/$'\n'}"; done ;;
   esac
   set -- "${w[@]}"
   for ((k = 0; k < $#; k++)); do
     case "${w[k]}" in [A-Za-z_]*=*) continue ;; *[Dd][Oo][Cc][Kk][Ee][Rr]*|*[Pp][Oo][Dd][Mm][Aa][Nn]*|*[Nn][Ee][Rr][Dd][Cc][Tt][Ll]*) ;; *) continue ;; esac
-    ctr_u "${w[k]}"; a=$_cu; a=${a##*/}; a=${a%.exe}; a=${a%.EXE}
+    ctr_u "${w[k]}"; a=${_cu##*[/\\]}; a=${a,,}; a=${a%.exe}   # any case, either slash (hook train review)
     case "$a" in docker|podman|nerdctl|docker-compose|podman-compose) ctr_judge "${w[@]:k}" ;; esac
   done
 }

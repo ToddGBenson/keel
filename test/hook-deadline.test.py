@@ -168,8 +168,10 @@ def main():
                 rc, err, _ = run(bash_copy, bash_payload(cmd), d)
                 check(f"guard-bash.sh, {helper} killed by SIGPIPE: {name} is still blocked", rc == 2, f"rc={rc} ALLOWED")
             rc, err, _ = run(bash_copy, bash_payload(HARMLESS), d)
+            # Review of keel #205: the copy has a short deadline, whose message also says
+            # "internal error"; the refusal must be the fault, not the deadline.
             check(f"guard-bash.sh, {helper} killed by SIGPIPE: `{HARMLESS}` is refused, and says why",
-                  rc == 2 and "internal error" in err, f"rc={rc} {err[:200]}")
+                  rc == 2 and "internal error" in err and "deadline" not in err, f"rc={rc} {err[:200]}")
         for helper in ("jq", "cat"):
             d = tool_dir(tmp, {helper: pipe})
             rc, err, _ = run(WRITE_HOOK, write_payload("src/config.py", AKIA), d)

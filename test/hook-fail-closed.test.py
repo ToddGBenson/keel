@@ -160,7 +160,9 @@ def main():
                         if took < BUDGET_S:
                             break
                     verdict = "allowed" if want == 0 else "blocked"
-                    check(f"{mode} {t}: {name} is {verdict}", rc == want, f"rc={rc} {err[:200]}")
+                    # Review of keel #205: with no jq the harmless row is refused by #61978's cap, and says so.
+                    why_ok = with_jq or name not in HARMLESS_LARGE or "over 256 KB" in err
+                    check(f"{mode} {t}: {name} is {verdict}", rc == want and why_ok, f"rc={rc} {err[:200]}")
                     check(f"{mode} {t}: {name} is decided in {took:.1f} s (budget {BUDGET_S} s, best of two)",
                           took < BUDGET_S, "TOO SLOW: a hook past its timeout lets the call proceed")
 
