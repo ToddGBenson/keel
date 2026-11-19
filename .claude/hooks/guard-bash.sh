@@ -356,11 +356,21 @@ norm=()
 for pair in 'gh:[Gg][Hh]' 'git:[Gg][Ii][Tt]' 'curl:[Cc][Uu][Rr][Ll]' 'docker:[Dd][Oo][Cc][Kk][Ee][Rr]' \
             'docker-compose:[Dd][Oo][Cc][Kk][Ee][Rr]-[Cc][Oo][Mm][Pp][Oo][Ss][Ee]'; do
   name=${pair%%:*}; pat=${pair#*:}
-  norm+=(-e 's#"([^"]*[/\\])?'"$pat"'(\.[Ee][Xx][Ee])?"#'"$name"'#g'
-         -e "s#'([^']*[/\\\\])?$pat(\\.[Ee][Xx][Ee])?'#$name#g"
-         -e 's#(^|[|;&[:space:](`"'"'"'])\\?([^[:space:]|;&()`"'"'"'<>]*[/\\])?'"$pat"'(\.[Ee][Xx][Ee])?([[:space:])`"'"'"'|;&]|$)#\1'"$name"'\4#g')
+  # TheHub #61987: the bare name is ADDED after the word, never put in its place. Replacing
+  # it ate any argument whose last path segment is one of these names: an endpoint such as
+  # repos/O/R/contents/bin/gh became "gh", and the contents rule never saw /contents/.
+  # Rewriting only in command position instead would miss a binary path after any wrapper
+  # not on a fixed list (timeout 5 /usr/bin/gh ...). So the word stays and the name follows
+  # it, which every rule reads; a bare, lower-case name is left alone.
+  norm+=(-e 's#"([^"]*[/\\])?'"$pat"'(\.[Ee][Xx][Ee])?"#& '"$name"'#g'
+         -e "s#'([^']*[/\\\\])?$pat(\\.[Ee][Xx][Ee])?'#& $name#g"
+         -e 's#(^|[|;&[:space:](`"'"'"'])(\\?([^[:space:]|;&()`"'"'"'<>]*[/\\])?'"$pat"'(\.[Ee][Xx][Ee])?)([[:space:])`"'"'"'|;&]|$)#\1\2 '"$name"'\5#g'
+         -e 's#(^|[|;&[:space:](`"'"'"'])'"$name $name"'([[:space:])`"'"'"'|;&]|$)#\1'"$name"'\2#g')
 done
-norm+=(-e 's#(gh[[:space:]]+alias[[:space:]]+set([[:space:]]+-[^[:space:]]+)*[[:space:]]+[^[:space:]-][^[:space:]]*[[:space:]]+)(["'"'"']?)#\1\3gh #g')
+# Review of #198 (B2): the alias name may itself be a binary's name (gh alias set Git ...),
+# and the loop above appended the bare name after it; skip that word, so the BODY is what
+# gets "gh " in front of it.
+norm+=(-e 's#(gh[[:space:]]+alias[[:space:]]+set([[:space:]]+-[^[:space:]]+)*[[:space:]]+[^[:space:]-][^[:space:]]*[[:space:]]+((gh|git|curl|docker|docker-compose)[[:space:]]+)?)(["'"'"']?)#\1\5gh #g')
 normalize() { sed -E "${norm[@]}"; }
 cmd="$(printf '%s' "$cmd" | normalize)"
 
@@ -569,7 +579,7 @@ END {
 AWK
 ps_sed=(-e 's#(^|[[:space:](])([Ss][Tt][Aa][Rr][Tt]-[Pp][Rr][Oo][Cc][Ee][Ss][Ss]|[Ss][Aa][Pp][Ss]|[Ss][Tt][Aa][Rr][Tt])([[:space:]]+-[Ff][A-Za-z]*)?[[:space:]]+#\1#g'
         -e 's#[[:space:]]-[Aa][Rr][Gg][A-Za-z]*([[:space:]]|$)# #g'
-        -e 's#\(([Gg][Ee][Tt]-[Cc][Oo][Mm][Mm][Aa][Nn][Dd]|[Gg][Cc][Mm])([[:space:]]+-[A-Za-z]+)*[[:space:]]+([^()[:space:]]+)[[:space:]]*\)(\.[A-Za-z]+)?# \3 #g')
+        -e 's#\(([Gg][Ee][Tt]-[Cc][Oo][Mm][Mm][Aa][Nn][Dd]|[Gg][Cc][Mm])([[:space:]]+-[A-Za-z]+)*[[:space:]]+([^()[:space:]]+)([[:space:]]+(gh|git|curl|docker|docker-compose))*[[:space:]]*\)(\.[A-Za-z]+)?# \3 \5 #g')
 ps_cmd="$(printf '%s' "$raw_cmd" | LC_ALL=C awk "$ps_awk" 2>/dev/null | sed -E "${ps_sed[@]}" | normalize)" || ps_cmd="$raw_cmd"
 
 block() {
@@ -1099,9 +1109,153 @@ prod_ctr='(thehub-backend|thehub-postgres|mykronos-backend)'
 prod_svc='(backend|postgres)'
 test_runner='(pytest|py[.]test|tox|nox|python[0-9.]*([[:space:]]+-[A-Za-z]+)*[[:space:]]+-m[[:space:]]*pytest)'
 runner_after='[[:space:])`"'"'"']([^|;&]*[[:space:]/'"'"'"])?'"$test_runner$E"
-docker_exec="$B"'docker([[:space:]]+[^|;&]*)?[[:space:]](container[[:space:]]+)?exec[[:space:]]+([^|;&]*[[:space:]])?'
+docker_exec="$B"'(docker|podman|nerdctl)([[:space:]]+[^|;&]*)?[[:space:]](container[[:space:]]+)?exec[[:space:]]+([^|;&]*[[:space:]])?'
+# Review of #198, round 3 (the PO's fix): main's #61385 patterns run unchanged, as a backstop
+# alongside the word judge below. A command blocks if either blocks, so nothing main blocks
+# can be allowed here, by construction.
+main_docker_exec="$B"'docker([[:space:]]+[^|;&]*)?[[:space:]](container[[:space:]]+)?exec[[:space:]]+([^|;&]*[[:space:]])?'
 compose_exec="$B"'(docker([[:space:]]+[^|;&]*)?[[:space:]]compose|docker-compose)[[:space:]]+([^|;&]*[[:space:]])?exec[[:space:]]+([^|;&]*[[:space:]])?'
-if g "$docker_exec$prod_ctr$runner_after" || g "$compose_exec$prod_svc$runner_after"; then
+if g "$main_docker_exec$prod_ctr$runner_after" || g "$compose_exec$prod_svc$runner_after"; then
+  block "running a test suite inside a production container with docker exec. It runs under no --cpus/--memory cap (the 2026-10-23 outage, TheHub #61001). Run it in a capped test container through the shared lock instead: bash scripts/docker-test-lock.sh run <owner> -- bash scripts/test-offline.sh ... (--cpus 2 --memory 2g)." "AIC-3, SC-6, CP-2"
+fi
+#
+# Review of keel #198 (TheHub #61987, round 1): compose run/exec and docker run are judged
+# word by word, not by a regex over the line. The review found the runner read only after
+# the service (--entrypoint pytest backend), a service held in a variable, podman and
+# nerdctl, caps of 0 (no limit) or above the route's 2 CPUs / 2g, cap flags after the image
+# (those are the command's own arguments), a bare word "compose" anywhere skipping the rule,
+# and false blocks on --memory "2g", pip install pytest and -w /opt/tox. So, per invocation:
+# the engine and its global options, then the subcommand; for `run`, the options up to the
+# image (caps are read only there), then the command; for `compose run|exec`, the options up
+# to the service (--entrypoint kept), then the service and the command. The runner must BE
+# the command: pytest, py.test, tox, nox, python -m pytest, or a shell -c body that runs one.
+# Not read: `docker run -d ... sleep; docker exec <it> pytest`, and `docker create` then
+# `docker start` (docs/11-ai-agent-controls.md lists them).
+ctr_route="Run it in a capped test container through the shared lock: bash scripts/docker-test-lock.sh run <owner> -- bash scripts/test-offline.sh ... (--cpus 2 --memory 2g). Uncapped test runs took TheHub production down on 2026-10-23 (TheHub #61001)."
+ctr_unq() { local v=$1; v=${v//\"/}; v=${v//\'/}; printf '%s' "$v"; }
+# Review of #198, round 4 (timing): the same, in-process, into $_cu. A subshell per word made a
+# 300-line heredoc fork thousands of times.
+ctr_u() { _cu=${1//\"/}; _cu=${_cu//\'/}; }
+ctr_is_runner() { # $1: the command line (entrypoint and arguments), quotes removed
+  local c ws
+  read -r -a ws <<< "$1"                                    # one space between words, none at the ends
+  c=" ${ws[*]-} "
+  printf '%s' "$c" | grep -qE '^ ([A-Za-z_][A-Za-z0-9_]*=[^ ]* )*(nice( -n ?[-0-9]+)? )?([^ ]*/)?(pytest|py[.]test|tox|nox) ' && return 0
+  printf '%s' "$c" | grep -qE '^ ([A-Za-z_][A-Za-z0-9_]*=[^ ]* )*(nice( -n ?[-0-9]+)? )?([^ ]*/)?python[0-9.]*( -[A-Za-z]+)* -m ?pytest ' && return 0
+  # Review of #198, round 2: a runner anywhere in the command, not only as its first word
+  # (timeout 30 pytest, env X=1 pytest, uv run pytest, python -X dev -m pytest, sh -c 'pytest'),
+  # as main's rule effectively read it. A package being installed (pip install pytest) is not
+  # a run.
+  # Round 3: a package being installed (pip install pytest) is not a run, but only when no
+  # runner is left once every `install` and the words after it, up to a separator, are removed
+  # (pip install pytest && pytest is a run).
+  local R='[ /;&|(]((py[.]?test|tox|nox)|-m ?(pytest|unittest)|npm (run )?test)([ ;&|)]|$)'
+  printf '%s' "$c" | grep -qE "$R" || return 1
+  printf '%s' "$c" | sed -E 's/(^|[ ;&|(])install( [^ ;&|()]+)*/\1/g' | grep -qE "$R"
+}
+ctr_cpu_ok() { # $1 --cpus value; $2 --cpu-quota; $3 --cpu-period. True when 0 < CPUs <= 2.
+  guard_run awk 1 -v c="$1" -v q="$2" -v p="${3:-100000}" 'BEGIN { if (c != "") v = c + 0; else if (q != "") v = (q + 0) / (p + 0); else exit 1; exit !(v > 0 && v <= 2) }'
+}
+ctr_mem_ok() { # $1: a --memory value. True when 0 < bytes <= 2g.
+  [ -n "$1" ] || return 1
+  printf '%s' "$1" | guard_run awk 1 '{ v = $0; sub(/[bB]$/, "", v); if (v == "") exit 1; u = tolower(substr(v, length(v))); n = v + 0
+    if (u == "k") n *= 1024; else if (u == "m") n *= 1048576; else if (u == "g") n *= 1073741824
+    exit !(v ~ /^[0-9.]+[bkmgBKMG]?$/ && n > 0 && n <= 2147483648) }'
+}
+ctr_judge() { # $@: the words of one invocation
+  local w=("$@") n=$# i=0 eng="" sub="" a v
+  while [ "$i" -lt "$n" ]; do
+    ctr_u "${w[i]}"; a=$_cu; a=${a##*/}; a=${a%.exe}; a=${a%.EXE}
+    case "$a" in docker|podman|nerdctl|docker-compose|podman-compose) eng=$a; break ;; esac
+    i=$((i + 1))
+  done
+  [ -z "$eng" ] && return 0
+  i=$((i + 1))
+  # Review of #198, round 2: /usr/bin/docker or docker.exe is followed by the bare name
+  # normalize() appended; that word is the engine again, not the subcommand.
+  ctr_u "${w[i]:-}"; [ "$_cu" = "$eng" ] && i=$((i + 1))
+  # global options of the engine (and of compose)
+  while [ "$i" -lt "$n" ]; do
+    ctr_u "${w[i]}"; a=$_cu
+    case "$a" in
+      -H|--host|--context|-c|--config|--log-level|-l|-f|--file|--tlscacert|--tlscert|--tlskey|-p|--project-name|--profile|--env-file|--project-directory|--ansi|--progress|--namespace|-n|--address|--url|--connection|--root|--runroot) i=$((i + 2)) ;;
+      -*) i=$((i + 1)) ;;
+      *) break ;;
+    esac
+  done
+  ctr_u "${w[i]:-}"; sub=$_cu
+  case "$eng" in *-compose) sub="compose-$sub" ;; esac
+  if [ "$sub" = "compose" ]; then
+    i=$((i + 1))
+    while [ "$i" -lt "$n" ]; do
+      ctr_u "${w[i]}"; a=$_cu
+      case "$a" in -f|--file|-p|--project-name|--profile|--env-file|--project-directory|--ansi|--progress|--parallel) i=$((i + 2)) ;; -*) i=$((i + 1)) ;; *) break ;; esac
+    done
+    ctr_u "${w[i]:-}"; sub="compose-$_cu"
+  fi
+  [ "$sub" = "container" ] && { i=$((i + 1)); ctr_u "${w[i]:-}"; sub=$_cu; }
+  i=$((i + 1))
+  local entry="" svc="" rest="" cpus="" quota="" period="" mem=""
+  case "$sub" in
+    compose-run|compose-exec)
+      while [ "$i" -lt "$n" ]; do
+        ctr_u "${w[i]}"; a=$_cu
+        case "$a" in
+          --entrypoint) ctr_u "${w[i+1]:-}"; entry=$_cu; i=$((i + 2)) ;;
+          --entrypoint=*) entry=${a#--entrypoint=}; i=$((i + 1)) ;;
+          -e|--env|-l|--label|--name|-p|--publish|-u|--user|-v|--volume|-w|--workdir|--pull|--cap-add|--cap-drop|--env-file|--env-from-file|--index) i=$((i + 2)) ;;
+          -*) i=$((i + 1)) ;;
+          *) break ;;
+        esac
+      done
+      ctr_u "${w[i]:-}"; svc=$_cu; i=$((i + 1))
+      ctr_u "$entry ${w[*]:i}"; rest=$_cu
+      ctr_is_runner "$rest" || return 0
+      # Round 2 backstop: a production service named anywhere among the words after
+      # run|exec, with a runner, is refused even when an option this parser does not know
+      # took the service's place.
+      for a in "${w[@]:i-1}"; do ctr_u "$a"; [[ $_cu =~ ^${prod_svc}$ ]] && svc=$_cu; done
+      case "$svc" in *'$'*|*'`'*) block "a test suite in a compose service named by a variable ($svc); it may be a production service. Name the service. $ctr_route" "AIC-3, SC-6, CP-2" ;; esac
+      printf '%s' "$svc" | grep -qxE "$prod_svc" \
+        && block "running a test suite in a production compose service with $eng ${sub#compose-} ($svc: thehub-backend, thehub-postgres, mykronos-backend). It runs under none of a test container's caps. $ctr_route" "AIC-3, SC-6, CP-2"
+      return 0 ;;
+    run)
+      while [ "$i" -lt "$n" ]; do
+        ctr_u "${w[i]}"; a=$_cu
+        case "$a" in
+          --cpus=*) cpus=${a#*=} ;;
+          --cpus) ctr_u "${w[i+1]:-}"; cpus=$_cu; i=$((i + 1)) ;;
+          --cpu-quota=*) quota=${a#*=} ;;
+          --cpu-quota) ctr_u "${w[i+1]:-}"; quota=$_cu; i=$((i + 1)) ;;
+          --cpu-period=*) period=${a#*=} ;;
+          --cpu-period) ctr_u "${w[i+1]:-}"; period=$_cu; i=$((i + 1)) ;;
+          --memory=*) mem=${a#*=} ;;
+          --memory|-m) ctr_u "${w[i+1]:-}"; mem=$_cu; i=$((i + 1)) ;;
+          -m*) mem=${a#-m}; mem=${mem#=} ;;
+          --entrypoint=*) entry=${a#*=} ;;
+          --entrypoint) ctr_u "${w[i+1]:-}"; entry=$_cu; i=$((i + 1)) ;;
+          --*=*) ;;
+          --rm|--detach|--interactive|--tty|--init|--privileged|--read-only|--publish-all|--no-healthcheck|--oom-kill-disable|--quiet|--sig-proxy|--help|--disable-content-trust|--use-api-socket) ;;
+          --*) i=$((i + 1)) ;;                              # a long option and its value
+          -[ditPq]|-[ditPq][ditPq]|-[ditPq][ditPq][ditPq]) ;;  # flag clusters (-it, -dit)
+          -[ditPq]*[A-Za-z]) i=$((i + 1)) ;;                # a cluster ending in an option that takes a value (-itv /x:/y)
+          -?) i=$((i + 1)) ;;                               # a short option and its value
+          -*) ;;                                            # a short option with its value attached
+          *) break ;;
+        esac
+        i=$((i + 1))
+      done
+      i=$((i + 1))                                          # the image
+      ctr_u "$entry ${w[*]:i}"; rest=$_cu
+      ctr_is_runner "$rest" || return 0
+      case "$cpus$quota$period$mem" in *'$'*|*'`'*) block "a test suite in a docker run whose CPU or memory cap is a variable this hook cannot read. Give the caps as numbers. $ctr_route" "AIC-3, SC-6, CP-2" ;; esac
+      { ctr_cpu_ok "$cpus" "$quota" "$period" && ctr_mem_ok "$mem"; } \
+        || block "running a test suite in a $eng run without a CPU cap of at most 2 (--cpus, or --cpu-quota) and a memory cap of at most 2g (--memory) before the image. $ctr_route" "AIC-3, SC-6, CP-2"
+      return 0 ;;
+  esac
+  return 0
+}
+if g "$docker_exec$prod_ctr$runner_after"; then
   block "running a test suite inside a production container with docker exec. It runs under no --cpus/--memory cap (the 2026-10-23 outage, TheHub #61001). Run it in a capped test container through the shared lock instead: bash scripts/docker-test-lock.sh run <owner> -- bash scripts/test-offline.sh ... (--cpus 2 --memory 2g)." "AIC-3, SC-6, CP-2"
 fi
 }
@@ -1309,6 +1463,134 @@ push_guard() { # $1: one view of the command
     seg+=("$t")
   done
 }
+# Review of #198 (round 1): the container rules read shell words with quotes honoured, so
+# --entrypoint "python -m pytest" is one word and -e X="--cpus 2 -m 2g" is not a cap. Run on
+# the masked view (a separator inside quotes is already a space) and the PowerShell view.
+read -r -d '' ctr_tok_awk <<'AWK'
+function hd_open(   dash, dl, e) {   # after "<<": read the delimiter; the body starts at the next newline
+  i++; dash = 0; if (substr(s, i + 1, 1) == "-") { dash = 1; i++ }
+  while (substr(s, i + 1, 1) ~ /[ \t]/) i++
+  dl = ""
+  while (i < n) { e = substr(s, i + 1, 1); if (e ~ /[ \t\n;|&<>()]/) break; i++; if (e != "'" && e != "\"" && e != "\\") dl = dl e }
+  nhd++; hdelim[nhd] = dl; hdash[nhd] = dash
+}
+function hd_bodies(emit,   k, line, body, j, dl) {   # at a newline: consume the pending bodies
+  for (k = 1; k <= nhd; k++) {
+    body = ""
+    while (i < n) {
+      j = index(substr(s, i + 1), "\n"); if (j == 0) j = n - i + 1
+      line = substr(s, i + 1, j - 1); i += j
+      dl = line; if (hdash[k]) sub(/^\t+/, "", dl)
+      if (dl == hdelim[k]) break
+      body = body line "\003"
+    }
+    if (emit) print "\002" body
+  }
+  nhd = 0
+}
+function flush() { if (have) { print tok; tok = ""; have = 0 } }
+{ s = (NR > 1) ? s "\n" $0 : $0 }
+END {
+  n = length(s); q = ""
+  for (i = 1; i <= n; i++) {
+    c = substr(s, i, 1)
+    if (q != "") { if (c == q) q = ""; else if (c == "\\" && q == "\"" && i < n) tok = tok substr(s, ++i, 1); else tok = tok c; continue }
+    if (c == "'" || c == "\"") { q = c; have = 1; continue }
+    if (c == "\\" && i < n) { tok = tok substr(s, ++i, 1); have = 1; continue }
+    if (c == "$" && substr(s, i + 1, 1) == "(") {           # $(...) stays inside its word (round 2)
+      d = 0
+      for (; i <= n; i++) { c = substr(s, i, 1); tok = tok c; if (c == "(") d++; else if (c == ")" && --d == 0) break }
+      have = 1; continue
+    }
+    if (c == "<" && substr(s, i + 1, 1) == "<" && substr(s, i + 2, 1) != "<") { flush(); hd_open(); continue }   # round 4: a heredoc
+    if (c == " " || c == "\t") { flush(); continue }
+    if (c == "\n") { flush(); if (nhd) hd_bodies(1); print "\001"; continue }
+    if (c == ";" || c == "|" || c == "&" || c == "(" || c == ")" || c == "`") { flush(); print "\001"; continue }
+    tok = tok c; have = 1
+  }
+  flush()
+}
+AWK
+ctr_seg() { # $@: one segment. Round 3: judged from EVERY engine word (an outer docker exec
+  # <container> docker compose ... is two invocations), and a NAME=value word is never an engine.
+  # Round 4: a heredoc body (one \002 word) is a command only when a shell is fed it
+  # (bash <<EOF ...); fed to anything else (git commit -F -, cat > file) it is text.
+  local w=() k a first="" bodies=()
+  for a in "$@"; do case "$a" in $'\002'*) bodies+=("${a#?}") ;; *) w+=("$a") ;; esac; done
+  for a in "${w[@]}"; do case "$a" in [A-Za-z_]*=*|env|sudo|command|exec|nice|nohup|timeout) ;; *) first=${a##*/}; break ;; esac; done
+  case "$first" in
+    sh|bash|dash|zsh|ash|ksh) for a in "${bodies[@]}"; do ctr_guard "${a//$'\003'/$'\n'}"; done ;;
+  esac
+  set -- "${w[@]}"
+  for ((k = 0; k < $#; k++)); do
+    case "${w[k]}" in [A-Za-z_]*=*) continue ;; *[Dd][Oo][Cc][Kk][Ee][Rr]*|*[Pp][Oo][Dd][Mm][Aa][Nn]*|*[Nn][Ee][Rr][Dd][Cc][Tt][Ll]*) ;; *) continue ;; esac
+    ctr_u "${w[k]}"; a=$_cu; a=${a##*/}; a=${a%.exe}; a=${a%.EXE}
+    case "$a" in docker|podman|nerdctl|docker-compose|podman-compose) ctr_judge "${w[@]:k}" ;; esac
+  done
+}
+read -r -d '' HD_AWK <<'AWK' || true
+function hd_open(   dash, dl, e) {   # after "<<": read the delimiter; the body starts at the next newline
+  i++; dash = 0; if (substr(s, i + 1, 1) == "-") { dash = 1; i++ }
+  while (substr(s, i + 1, 1) ~ /[ \t]/) i++
+  dl = ""
+  while (i < n) { e = substr(s, i + 1, 1); if (e ~ /[ \t\n;|&<>()]/) break; i++; if (e != "'" && e != "\"" && e != "\\") dl = dl e }
+  nhd++; hdelim[nhd] = dl; hdash[nhd] = dash
+}
+function hd_bodies(emit,   k, line, body, j, dl) {   # at a newline: consume the pending bodies
+  for (k = 1; k <= nhd; k++) {
+    body = ""
+    while (i < n) {
+      j = index(substr(s, i + 1), "\n"); if (j == 0) j = n - i + 1
+      line = substr(s, i + 1, j - 1); i += j
+      dl = line; if (hdash[k]) sub(/^\t+/, "", dl)
+      if (dl == hdelim[k]) break
+      body = body line "\003"
+    }
+    if (emit) print "\002" body
+  }
+  nhd = 0
+}
+AWK
+ctr_subst_awk="$HD_AWK"'
+{ s = (NR > 1) ? s "\n" $0 : $0 }
+END {
+  n = length(s)
+  for (i = 1; i <= n; i++) {
+    c = substr(s, i, 1)
+    if (c == "<" && substr(s, i + 1, 1) == "<" && substr(s, i + 2, 1) != "<") { hd_open(); continue }
+    if (c == "\n") { if (nhd) hd_bodies(0); continue }
+    if (c == "$" && substr(s, i + 1, 1) == "(") {
+      d = 0; b = ""
+      for (j = i + 1; j <= n; j++) { e = substr(s, j, 1); if (e == "(") d++; else if (e == ")" && --d == 0) break; if (j > i + 1) b = b e }
+      gsub(/\n/, " ", b); print b; i = j   # past the body: a nested one is found by the recursion, once (round 4)
+    } else if (c == "`") {
+      j = index(substr(s, i + 1), "`"); if (j == 0) j = n - i + 1
+      b = substr(s, i + 1, j - 1); gsub(/\n/, " ", b); print b; i += j
+    }
+  }
+}'
+ctr_depth=0
+ctr_guard() { # $1: one view of the command
+  local toks=() seg=() t bodies=() b
+  mapfile -t toks < <(printf '%s' "$1" | LC_ALL=C awk "$ctr_tok_awk")
+  toks+=($'\001')
+  for t in "${toks[@]}"; do
+    if [ "$t" = $'\001' ]; then
+      [ "${#seg[@]}" -gt 0 ] && ctr_seg "${seg[@]}"
+      seg=(); continue
+    fi
+    seg+=("$t")
+  done
+  # Round 3: the body of every $(...) and backtick, quoted or not, is a command of its own.
+  case "$1" in *'$('*|*'`'*) ;; *) return 0 ;; esac
+  ctr_depth=$((ctr_depth + 1))
+  [ "$ctr_depth" -gt 6 ] && block "a command with substitutions nested more than 6 deep, which this hook does not unfold. Write it flatter; an ordinary command does not nest that far." "AIC-3, SC-6, CP-2"
+  if [ "$ctr_depth" -le 6 ]; then
+    mapfile -t bodies < <(printf '%s' "$1" | LC_ALL=C awk "$ctr_subst_awk")
+    for b in "${bodies[@]}"; do [ -n "$b" ] && ctr_guard "$b"; done
+  fi
+  ctr_depth=$((ctr_depth - 1))
+}
 cmd="$raw_cmd"; guard
 if [ "$word_cmd" != "$raw_cmd" ]; then cmd="$word_cmd"; guard; fi
 if [ "$ps_cmd" != "$raw_cmd" ] && [ "$ps_cmd" != "$word_cmd" ]; then cmd="$ps_cmd"; guard; fi
@@ -1320,6 +1602,13 @@ push_gate='(^|[][[:space:];&|(){}`"'"'"'/\\=!])[Gg][Ii][Tt]([.][Ee][Xx][Ee])?([[
 if [[ $raw_cmd =~ $push_gate ]] || { [ "$ps_cmd" != "$raw_cmd" ] && [[ $ps_cmd =~ $push_gate ]]; }; then
   push_moves=0; push_guard "$raw_cmd"
   if [ "$ps_cmd" != "$raw_cmd" ]; then push_moves=0; push_guard "$ps_cmd"; fi
+fi
+# Round 4 (timing): the word judge runs only when a view names a container engine at all,
+# tested in-process. It used to run whenever the PowerShell view differed, which is most commands.
+ctr_eng_re='[Dd][Oo][Cc][Kk][Ee][Rr]|[Pp][Oo][Dd][Mm][Aa][Nn]|[Nn][Ee][Rr][Dd][Cc][Tt][Ll]'
+if [[ $raw_cmd =~ $ctr_eng_re ]] || [[ $ps_cmd =~ $ctr_eng_re ]]; then
+  ctr_guard "$raw_cmd"   # round 3: the quote-aware tokenizer reads the raw text; the masked view turns a quoted && into spaces
+  [ "$ps_cmd" != "$raw_cmd" ] && ctr_guard "$ps_cmd"
 fi
 
 exit 0

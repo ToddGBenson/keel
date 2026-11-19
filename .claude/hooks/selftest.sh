@@ -605,6 +605,66 @@ check "push -o ci.skip:main to a feature"  allow "$(payload 'git push origin fea
 check "on main: git push --dry-run"        allow "$(cwpay "$onmain" 'git push --dry-run')"                        guard-bash.sh
 rm -rf "$onmain" "$onfeat"
 echo ""
+echo "guard-bash.sh — a binary name is added, never substituted (TheHub #61987)"
+# normalize() rewrote any word whose last path segment is gh, git, curl or docker to the bare
+# name, so an endpoint ending in /gh lost its path and the contents rule never saw it.
+check "contents commit, endpoint ends /gh"   block "$(payload 'gh api -X PUT repos/O/R/contents/bin/gh -f message=x -f content=eA==')" guard-bash.sh
+check "contents commit, quoted .../git"      block "$(payload "gh api -X PUT 'repos/O/R/contents/tools/git' -f message=x -f content=eA==")" guard-bash.sh
+check "curl contents commit, URL ends /curl" block "$(payload "curl -X PUT -H 'Authorization: token t' https://api.github.com/repos/O/R/contents/vendor/curl -d '{\"message\":\"x\",\"content\":\"eA==\"}'")" guard-bash.sh
+check "a wrapper outside any list"           block "$(payload 'timeout 5 /usr/bin/gh pr merge 12')"                         guard-bash.sh
+check "gh.exe by Windows path"               block "$(payload '"C:\Program Files\GitHub CLI\gh.exe" pr merge 12')"          guard-bash.sh
+check "contents read, endpoint ends /gh"     allow "$(payload 'gh api repos/O/R/contents/bin/gh')"                           guard-bash.sh
+echo ""
+echo "guard-bash.sh — compose run and an uncapped docker run (TheHub #61987)"
+check "compose run backend pytest"           block "$(payload 'docker compose run --rm backend pytest')"                    guard-bash.sh
+check "docker-compose run postgres tox"      block "$(payload 'docker-compose run postgres tox')"                           guard-bash.sh
+check "docker run pytest, no caps"           block "$(payload 'docker run --rm python:3.12 pytest')"                        guard-bash.sh
+check "docker run pytest, cpus only"         block "$(payload 'docker run --rm --cpus 2 python:3.12 python -m pytest')"     guard-bash.sh
+check "docker run pytest, capped"            allow "$(payload 'docker run --rm --cpus 2 --memory 2g python:3.12 pytest')"   guard-bash.sh
+check "docker run pytest, capped, -m/="      allow "$(payload 'docker run --rm --cpus=2 -m 2g python:3.12 pytest')"         guard-bash.sh
+check "compose run backend-staging pytest"   allow "$(payload 'docker compose run backend-staging pytest')"                 guard-bash.sh
+check "docker run, no runner"                allow "$(payload 'docker run --rm alpine cat /etc/os-release')"                guard-bash.sh
+# Review of #198, round 1 (classes; the exact inputs are in the binnacle review).
+check "PS: (Get-Command gh.exe).Source"      block "$(pspayload '& (Get-Command gh.exe).Source pr merge 1')"              guard-bash.sh
+check "PS: (gcm GH).Source"                  block "$(pspayload '& (gcm GH).Source pr merge 1')"                          guard-bash.sh
+check "PS: (Get-Command -Name git.exe)"      block "$(pspayload '& (Get-Command -Name git.exe).Source push --force origin feat')" guard-bash.sh
+check "gh alias set Git 'pr merge'"          block "$(payload "gh alias set Git 'pr merge'")"                             guard-bash.sh
+check "compose run --entrypoint pytest"      block "$(payload 'docker compose run --entrypoint pytest backend')"         guard-bash.sh
+check "compose run, service in a variable"   block "$(payload 'docker compose run $SVC pytest')"                         guard-bash.sh
+check "podman compose run backend"           block "$(payload 'podman compose run backend pytest')"                      guard-bash.sh
+check "docker run, caps of 0"                block "$(payload 'docker run --rm --cpus 0 -m 0 python:3.12 pytest')"       guard-bash.sh
+check "docker run, caps above the route"     block "$(payload 'docker run --rm --cpus 64 -m 512g python:3.12 pytest')"   guard-bash.sh
+check "docker run, caps after the image"     block "$(payload 'docker run --rm python:3.12 pytest --cpus 2 --memory 2g')" guard-bash.sh
+check "docker run, the word compose"         block "$(payload 'docker run --rm python:3.12 pytest -k compose tests')"    guard-bash.sh
+check "docker run, caps inside -e"           block "$(payload 'docker run --rm -e X="--cpus 2 -m 2g" python:3.12 pytest')" guard-bash.sh
+check "docker run, caps from variables"      block "$(payload 'docker run --rm --cpus $C --memory $M python:3.12 pytest')" guard-bash.sh
+check "podman run, uncapped"                 block "$(payload 'podman run --rm python:3.12 pytest')"                     guard-bash.sh
+check "docker run, --memory \"2g\" quoted"    allow "$(payload 'docker run --rm --cpus 2 --memory "2g" python:3.12 pytest')" guard-bash.sh
+check "docker run, --cpu-quota cap"          allow "$(payload 'docker run --rm --cpu-quota 200000 -m 2g python:3.12 pytest')" guard-bash.sh
+check "docker run pip install pytest"        allow "$(payload 'docker run --rm python:3.12 pip install pytest')"         guard-bash.sh
+check "docker run -w /opt/tox"               allow "$(payload 'docker run --rm -w /opt/tox alpine ls')"                  guard-bash.sh
+# Review of #198, round 2: the engine by path, a runner after a wrapper or inside sh -c, $(...).
+check "/usr/bin/docker compose exec backend" block "$(payload '/usr/bin/docker compose exec backend pytest')"        guard-bash.sh
+check "compose exec backend sh -c 'pytest'" block "$(payload "docker compose exec backend sh -c 'pytest'")"         guard-bash.sh
+check "compose exec backend timeout pytest" block "$(payload 'docker compose exec backend timeout 600 pytest -q')"  guard-bash.sh
+check "compose exec backend uv run pytest"  block "$(payload 'docker compose exec backend uv run pytest')"          guard-bash.sh
+check "compose exec -w \$(pwd) backend"      block "$(payload 'docker compose exec -w $(pwd) backend pytest')"       guard-bash.sh
+check "docker.exe run, uncapped"            block "$(payload 'docker.exe run --rm python:3.12 pytest')"             guard-bash.sh
+check "docker run sh -c 'pytest', uncapped" block "$(payload "docker run --rm python:3.12 sh -c 'pytest -q'")"     guard-bash.sh
+check "docker run -v \$(pwd), uncapped"      block "$(payload 'docker run --rm -v $(pwd):/app -w /app python:3.12 pytest')" guard-bash.sh
+check "docker run -m 2gb, capped"           allow "$(payload 'docker run --rm --cpus 2 -m 2gb python:3.12 pytest')"  guard-bash.sh
+check "docker build -t pytest"              allow "$(payload 'docker build -t pytest .')"                           guard-bash.sh
+# Review of #198, round 3: main's rule as a backstop, $(...) bodies, every engine word, installs.
+check "x=\$(compose exec backend pytest)"   block "$(payload 'x=$(docker compose exec backend pytest)')"            guard-bash.sh
+check "x=\$(docker run pytest), uncapped"   block "$(payload 'x=$(docker run --rm python:3.12 pytest)')"            guard-bash.sh
+check "compose exec, pip install && pytest" block "$(payload "docker compose exec backend bash --login -c 'pip install pytest && pytest'")" guard-bash.sh
+check "run, pip install; pytest, uncapped"  block "$(payload "docker run --rm python:3.12 bash -euo pipefail -c 'pip install pytest; pytest'")" guard-bash.sh
+check "docker --tlscacert x compose exec"   block "$(payload 'docker --tlscacert /x/ca.pem compose exec backend pytest')" guard-bash.sh
+check "outer docker exec, inner compose"    block "$(payload 'docker exec ci-runner docker compose exec backend pytest')" guard-bash.sh
+check "X=/opt/podman docker compose exec"   block "$(payload 'X=/opt/podman docker compose exec backend pytest')"   guard-bash.sh
+check "run sh -c pip install pytest"        allow "$(payload "docker run --rm python:3.12 sh -c 'pip install pytest'")" guard-bash.sh
+check "docker run -m=2g, capped"            allow "$(payload 'docker run --rm --cpus 2 -m=2g python:3.12 pytest')"  guard-bash.sh
+echo ""
 echo "guard-write.sh — must BLOCK (AU-9, AIC-5)"
 check "hand-edit generated SARIF" block "$(wpayload 'evidence/142/g4/scan.sarif' 'x')"    guard-write.sh
 check "hand-edit generated XML"   block "$(wpayload 'evidence/142/g4/results.xml' 'x')"   guard-write.sh
