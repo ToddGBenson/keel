@@ -78,6 +78,8 @@ HOOKS = ROOT / ".claude" / "hooks"
 # The only jq filters the hooks use. Anything else is refused by the shim.
 JQ_FILTERS = {
     ".tool_input.command // empty": lambda ti: ti.get("command"),
+    # [TheHub #62031] the payload's cwd, read at the top level, not under tool_input.
+    ".cwd // empty": None,
     ".tool_input.file_path // .tool_input.notebook_path // empty":
         lambda ti: ti.get("file_path") or ti.get("notebook_path"),
     '[.tool_input.content, .tool_input.new_string, .tool_input.new_source, (.tool_input.edits // [] | .[]? | .new_string?)] | map(select(type == "string")) | join("\\n")':
@@ -93,7 +95,7 @@ BASH_TOOLS = ("Bash", "PowerShell")
 SETTINGS = ROOT / ".claude" / "settings.json"
 # Tools the hooks invoke. The no-jq shim directory links exactly these.
 HOOK_TOOLS = ("bash", "sh", "cat", "grep", "sed", "tr", "head", "mktemp", "rm", "awk",
-              "python3", "python", "env")
+              "python3", "python", "env", "sleep", "git")
 
 
 def jq_shim(argv: list[str]) -> int:
@@ -105,7 +107,10 @@ def jq_shim(argv: list[str]) -> int:
               file=sys.stderr)
         return 3
     data = json.load(sys.stdin)
-    val = JQ_FILTERS[args[0]](data.get("tool_input") or {})
+    if args[0] == ".cwd // empty":
+        val = data.get("cwd") or None
+    else:
+        val = JQ_FILTERS[args[0]](data.get("tool_input") or {})
     if val is None or val is False:
         return 0
     out = val if isinstance(val, str) else json.dumps(val)
@@ -144,6 +149,8 @@ def load_corpus() -> tuple[list[dict], list[str]]:
                 errors.append(f"{where}: open_in must be a non-empty subset of {MODES}")
             if not e.get("gap"):
                 errors.append(f"{where}: an open entry needs gap: (why the hook misses it)")
+        if e.get("payload_encoding") not in (None, "unicode-escape", "truncated", "second-key", "newline-colon", "nul", "oversize", "escaped-key", "escaped-key-decoy"):
+            errors.append(f"{where}: payload_encoding must be unicode-escape, truncated, second-key, newline-colon, nul, oversize, escaped-key or escaped-key-decoy")
         if e.get("hook") == "guard-bash.sh":
             if e.get("tool", "Bash") not in BASH_TOOLS:
                 errors.append(f"{where}: tool must be one of {BASH_TOOLS}")
@@ -249,7 +256,32 @@ def payload(e: dict, tool: str) -> bytes:
         base["tool_input"] = ti
     # Claude Code is a Node process: JSON.stringify does not escape non-ASCII, so
     # neither do we -- a unicode entry must reach the sed fallback as the raw bytes.
-    return json.dumps(base, ensure_ascii=False).encode("utf-8")
+    text = json.dumps(base, ensure_ascii=False)
+    enc = e.get("payload_encoding")
+    if enc:
+        # [TheHub #61978] The same command in a payload the two parsers read differently.
+        cmd = base["tool_input"]["command"]
+        plain = json.dumps(cmd, ensure_ascii=False)
+        assert text.count(plain) == 1, "the command must appear once in its payload"
+        if enc == "unicode-escape":
+            units = cmd.encode("utf-16-be")
+            escaped = "".join(f"\\u{int.from_bytes(units[i:i + 2], 'big'):04x}" for i in range(0, len(units), 2))
+            text = text.replace(plain, f'"{escaped}"')
+        elif enc == "second-key":  # [review of #196] a later sibling "command" key that sed would read
+            text = text[:-1] + ', "z": {"command": "echo ok"}}'
+        elif enc == "newline-colon":  # JSON whitespace, a newline included, around the colon
+            text = text.replace('"command": ' + plain, '"command"\n:\n' + plain)
+        elif enc == "nul":  # \u0000 inside the value
+            text = text.replace(plain, plain[:-1] + '\\u0000"')
+        elif enc == "escaped-key":  # [review of #196, round 2] the key spelled with a \u escape
+            text = text.replace('"command": ' + plain, '"\\u0063ommand": ' + plain)
+        elif enc == "escaped-key-decoy":  # the same, after a plain "command" decoy
+            text = text.replace('"command": ' + plain, '"command": "ls", "\\u0063\\u006fmmand": ' + plain)
+        elif enc == "oversize":  # over the no-jq size cap
+            text = text[:-1] + ', "pad": "' + "a" * 300_000 + '"}'
+        else:  # truncated: the payload ends inside the command string
+            text = text[:text.index(plain) + len(plain) - 1]
+    return text.encode("utf-8")
 
 
 def make_env(mode: str, tmp: Path) -> dict | None:
@@ -273,16 +305,55 @@ def make_env(mode: str, tmp: Path) -> dict | None:
         return env
     link_dir = tmp / "no-jq"
     link_dir.mkdir(exist_ok=True)
-    try:
-        for t in HOOK_TOOLS:
-            p = shutil.which(t)
-            if p:
-                os.symlink(p, link_dir / t)
-    except OSError as exc:
-        print(f"  [skip] no-jq mode: cannot build a PATH without jq ({exc})")
-        return None
+    # [TheHub #61978] Skipping this mode when symlinks fail hid the whole sed-fallback
+    # parser from the run (Windows without Developer Mode cannot symlink). The tools are
+    # copied instead, and if that fails too the run FAILS: a mode not run is not a pass.
+    for t in HOOK_TOOLS:
+        p = shutil.which(t)
+        if not p:
+            continue
+        try:
+            os.symlink(p, link_dir / t)
+        except OSError:
+            try:
+                shutil.copy2(p, link_dir / Path(p).name)
+                # [TheHub #61978 review] A copied msys tool needs the DLLs beside it
+                # (msys-2.0.dll and friends); without them sed.exe exits 127 and every
+                # no-jq run passed vacuously.
+                for dll in Path(p).parent.glob("*.dll"):
+                    if not (link_dir / dll.name).exists():
+                        shutil.copy2(dll, link_dir / dll.name)
+            except OSError as exc:
+                print(f"  [FAIL] no-jq mode: cannot build a PATH without jq ({exc}) -- not run is not a pass")
+                return None
     env["PATH"] = str(link_dir)
+    # The PATH must actually work: a sed that cannot start makes every no-jq run vacuous.
+    sed = shutil.which("sed", path=env["PATH"])
+    probe = subprocess.run([sed or "sed", "-n", "s/a/b/p"], input=b"a\n", capture_output=True, env=env)
+    if probe.returncode != 0 or probe.stdout.strip() != b"b":
+        print(f"  [FAIL] no-jq mode: sed does not run from the jq-less PATH (exit {probe.returncode}) -- not run is not a pass")
+        return None
     return env
+
+
+def find_bash() -> str | None:
+    """The bash that runs the hooks. [TheHub #61978] On Windows, shutil.which("bash") can
+    find WSL's launcher (System32 or WindowsApps), which runs the hook in a Linux VM that
+    cannot see this checkout's Windows paths, not the Git Bash Claude Code uses."""
+    if os.name != "nt":
+        return shutil.which("bash")
+    for d in os.environ.get("PATH", "").split(os.pathsep):
+        cand = Path(d) / "bash.exe"
+        low = str(cand).lower()
+        if cand.is_file() and "\\system32\\" not in low and "\\windowsapps\\" not in low:
+            return str(cand)
+    git = shutil.which("git")
+    if git:
+        for rel in ("../bin/bash.exe", "../../bin/bash.exe", "../usr/bin/bash.exe"):
+            cand = (Path(git).parent / rel).resolve()
+            if cand.is_file():
+                return str(cand)
+    return None
 
 
 # [TheHub #61843] guard-bash.sh pins PATH to system directories, so a shim directory on
@@ -335,7 +406,7 @@ def main() -> int:
             print(f"  [FAIL] {err}")
         return 1
 
-    bash = shutil.which("bash")
+    bash = find_bash()
     if not bash:
         print("  [FAIL] bash not found -- the hooks cannot be exercised, which is not a pass")
         return 1
@@ -347,6 +418,7 @@ def main() -> int:
         for mode in MODES:
             env = make_env(mode, Path(td))
             if env is None:
+                failures.append(f"{mode}: not run")
                 continue
             jq_kind = ("real jq" if shutil.which("jq") else "jq shim") if mode == "jq" else "sed/python fallback"
             print(f"\n-- mode: {mode} ({jq_kind}) " + "-" * max(0, 50 - len(mode) - len(jq_kind)))

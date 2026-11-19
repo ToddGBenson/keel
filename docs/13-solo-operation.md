@@ -32,23 +32,32 @@ impossible for a single owner.
 CODEOWNERS still **routes and auto-requests** review — it is advisory rather than blocking.
 The file keeps doing its documentation and notification job.
 
-| Other controls | Team mode | Solo mode | Why |
-|---|---|---|---|
-| No admin bypass | ✔ | ✔ | **Unchanged.** Relaxing this would disable everything at once |
-| Required status checks | ✔ | ✔ **+ all of them** | The machine takes over what the reviewer did |
-| Signed commits | ✔ | ✔ | Attribution is unaffected by team size |
-| Linear history, no force-push, no deletion | ✔ | ✔ | Unchanged |
-| Conversations resolved | ✔ | ✔ | Unchanged |
-| **Self-review artifact** | optional | **required** | New. See below |
-| **Cooling-off before merge** | — | **required** | New. See below |
+| Other controls | Team mode | Solo mode (intended) | `main` today (2026-11-18) | Why |
+|---|---|---|---|---|
+| No admin bypass | ✔ | ✔ | ✔ `enforce_admins` on, and the `keel-main` ruleset has no bypass (since 2026-11-18) | Relaxing this would disable everything at once |
+| Required status checks | ✔ | ✔ **+ all of them** | **two**: `Concourse / keel`, `library-allowlist` (App-pinned, strict) | The machine takes over what the reviewer did |
+| Signed commits | ✔ | ✔ | **✗ not required by rule** since about 14:36Z on 2026-11-18 (it blocked every PR with unsigned branch commits); `main` is squash-only and GitHub signs each squash merge, which attests the merge, not the author | Attribution is unaffected by team size |
+| Linear history, no force-push, no deletion | ✔ | ✔ | ✔ | Unchanged |
+| Conversations resolved | ✔ | ✔ | ✔ | Unchanged |
+| **Self-review artifact** | optional | **required** | expected; **no check requires it** | New. See below |
+| **Cooling-off before merge** | — | **required** | expected; **no check requires it** | New. See below |
 
-The single most important line: **`enforce_admins` stays true.** The tempting shortcut is to
-let the admin bypass protection "just for solo work." That does not relax one control; it
-removes all of them simultaneously, including the ones that still worked.
+The third column is what `GET .../branches/main/protection` and `GET .../rulesets`
+(`keel-main`, `keel-release-tags`) returned on 2026-11-18 at 12:09Z (TheHub #62001). Where it differs from the second, the second is the target,
+not the state.
+
+The single most important line was meant to be: **`enforce_admins` stays true.** The tempting
+shortcut is to let the admin bypass protection "just for solo work." That does not relax one
+control; it removes all of them simultaneously, including the ones that still worked. It was
+false until 2026-11-18, when the operator turned it on and added the `keel-main` ruleset (no bypass: deletion, non-fast-forward, a pull request with squash only). The owner's identity, which
+is also the agents', is now held to the required checks and cannot push straight to `main`. Two
+gaps remain: as an admin it can change the protection itself, and the `keel-release-tags` ruleset on `v*` has an admin bypass, so the owner's credential, which the agents use, can still create or move a release tag (TheHub #61039).
 
 ## The three compensating controls
 
-A human reviewer provided three things. Each is replaced by something a machine can require.
+A human reviewer provided three things. Each is meant to be replaced by something a machine can
+require. As of 2026-11-18 none of the three is machine-required in keel: they are expectations that
+the building agent and the reviewers keep.
 
 ### 1. Independent analysis → `/self-review`
 

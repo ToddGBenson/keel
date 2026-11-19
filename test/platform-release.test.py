@@ -266,9 +266,121 @@ try:
     check("verify: ... refused before cosign, whatever the signature says", called is None, str(called))
     check("verify: ... naming the commit it refused", old_sha[:12] in log, log)
 
-    rc, log, called = verify(bundle.as_posix(), sh=RELEASE_SH)
-    check("verify: a repository that does not hold the floor commit -> refused, not skipped",
+    # ── TheHub #61432: the floor is per repository ─────────────────────────────
+    # The real script (keel's floor, which this fixture does not hold) with the upstream
+    # identity pointed at this fixture's signer: upstream keel is always held to its floor.
+    up = tmp / "platform-release.upstream.sh"
+    up_text, n_up = re.subn(r'^KEEL_UPSTREAM="[^"]*"$', 'KEEL_UPSTREAM="owner/keel"',
+                            RELEASE_SH.read_text(encoding="utf-8"), flags=re.M)
+    up.write_text(up_text, encoding="utf-8", newline="\n")
+    check("the script names its upstream in exactly one KEEL_UPSTREAM=\"...\" line", n_up == 1)
+    rc, log, called = verify(bundle.as_posix(), sh=up)
+    check("verify: UPSTREAM keel without its floor commit -> refused, not skipped",
           rc == 1 and "release floor" in log and called is None, log)
+
+    def verify_as(repo_name, sh=RELEASE_SH, tag="v1.2.0", git_dir=tree, trusted="main"):
+        if argv.exists():
+            argv.unlink()
+        cosign_stub(stubs, argv, 0)
+        args = [sh.as_posix(), "verify", "--manifest", out.as_posix(), "--bundle", bundle.as_posix(),
+                "--repo", repo_name, "--tag", tag, "--git", git_dir.as_posix(), "--trusted-ref", trusted]
+        rc, log = bash(args, cwd=tmp, stubs=stubs)
+        return rc, log, (argv.read_text(encoding="utf-8").splitlines() if argv.exists() else None)
+
+    # No implicit default: a repository's first commit may carry the pre-gate release.yml
+    # (binnacle's does), so a fork with no keel history and no configured floor is refused.
+    rc, log, called = verify_as("owner/fork")
+    check("verify: a FORK with no keel history and no .github/release-floor -> refused, naming the file",
+          rc == 1 and ".github/release-floor" in log and called is None, log)
+
+    # A configured floor, committed on the trusted ref, moves the fork's floor forward.
+    fork = tmp / "fork"
+    subprocess.run(["git", "clone", "-q", tree.as_posix(), fork.as_posix()], check=True)
+    fgit = git_cmd(fork)
+    subprocess.run([*fgit, "checkout", "-q", "-B", "main", "origin/main"], check=True)
+    for tg in ("v0.9.0", "v1.2.0"):
+        subprocess.run([*fgit, "fetch", "-q", "origin", f"refs/tags/{tg}:refs/tags/{tg}"], check=False)
+    (fork / ".github").mkdir(exist_ok=True)
+    (fork / ".github" / "release-floor").write_text(main_sha + "\n", encoding="utf-8")
+    subprocess.run([*fgit, "add", "-A"], check=True)
+    subprocess.run([*fgit, "commit", "-q", "-m", "release floor"], check=True)
+    rc, log, called = verify_as("owner/fork", tag="v0.9.0", git_dir=fork)
+    check("verify: a fork tag BELOW its configured .github/release-floor -> refused",
+          rc == 1 and "release floor" in log and called is None, log)
+    rc, log, called = verify_as("owner/fork", tag="v1.2.0", git_dir=fork)
+    check("verify: a FORK with no keel history and a configured floor: a tag at it -> passes",
+          rc == 0 and called is not None, log)
+    (fork / ".github" / "release-floor").write_text("0" * 40 + "\n", encoding="utf-8")
+    subprocess.run([*fgit, "commit", "-q", "-am", "a floor not in the repository"], check=True)
+    rc, log, called = verify_as("owner/fork", tag="v1.2.0", git_dir=fork)
+    check("verify: a configured floor that is not in the repository -> refused",
+          rc == 1 and "release-floor" in log and called is None, log)
+
+    # The floor may only move forward: a configured floor behind the default is refused.
+    keelish = tmp / "keelish"
+    subprocess.run(["git", "clone", "-q", tree.as_posix(), keelish.as_posix()], check=True)
+    kgit = git_cmd(keelish)
+    subprocess.run([*kgit, "checkout", "-q", "-B", "main", "origin/main"], check=True)
+    subprocess.run([*kgit, "fetch", "-q", "origin", "refs/tags/v0.9.0:refs/tags/v0.9.0"], check=False)
+    subprocess.run([*kgit, "fetch", "-q", "origin", "refs/tags/v1.2.0:refs/tags/v1.2.0"], check=False)
+    (keelish / ".github" / "release-floor").write_text(old_sha + "\n", encoding="utf-8")
+    subprocess.run([*kgit, "add", "-A"], check=True)
+    subprocess.run([*kgit, "commit", "-q", "-m", "try to lower the floor"], check=True)
+    rc, log, called = verify_as("owner/fork", sh=script, tag="v0.9.0", git_dir=keelish)
+    check("verify: a configured floor BEHIND the keel floor it would replace -> refused (forward only)",
+          rc == 1 and "only move forward" in log and called is None, log)
+
+    # The trusted ref is a branch, never a tag (review of #202): a tag spelled like a branch,
+    # on a commit off main that carries its own floor file, must not stand in for main.
+    tagref = tmp / "tagref"
+    subprocess.run(["git", "clone", "-q", tree.as_posix(), tagref.as_posix()], check=True)
+    rgit = git_cmd(tagref)
+    subprocess.run([*rgit, "checkout", "-q", "-B", "main", "origin/main"], check=True)
+    subprocess.run([*rgit, "fetch", "-q", "origin", "refs/tags/v1.2.0:refs/tags/v1.2.0"], check=False)
+    subprocess.run([*rgit, "checkout", "-q", "-b", "offmain"], check=True)
+    (tagref / ".github").mkdir(exist_ok=True)
+    (tagref / ".github" / "release-floor").write_text(main_sha + "\n", encoding="utf-8")
+    subprocess.run([*rgit, "add", "-A"], check=True)
+    subprocess.run([*rgit, "commit", "-q", "-m", "a floor off main"], check=True)
+    subprocess.run([*rgit, "tag", "release/main"], check=True)
+    subprocess.run([*rgit, "checkout", "-q", "main"], check=True)
+    subprocess.run([*rgit, "branch", "-q", "-D", "offmain"], check=True)
+    rc, log, called = verify_as("owner/fork", tag="v1.2.0", git_dir=tagref, trusted="release/main")
+    check("verify: a TAG spelled like a branch as the trusted ref -> refused (a tag cannot be the trusted ref)",
+          rc == 1 and "not a branch" in log and called is None, log)
+    rc, log, called = verify_as("owner/fork", tag="v1.2.0", git_dir=tagref, trusted="refs/tags/release/main")
+    check("verify: refs/tags/... as the trusted ref -> refused",
+          rc == 1 and "not a branch" in log and called is None, log)
+    rc, log, called = verify_as("Owner/KEEL", sh=up)
+    check("verify: the upstream name matched in any case (Owner/KEEL is owner/keel) -> held to keel's floor",
+          rc == 1 and "fetch the full history of" in log and called is None, log)
+
+    # A shallow clone is refused: missing history is not "no keel history".
+    shallow = tmp / "shallow"
+    subprocess.run(["git", "clone", "-q", "--depth", "1", "--branch", "main", f"file://{tree.as_posix()}",
+                    shallow.as_posix()], check=True)
+    subprocess.run([*git_cmd(shallow), "fetch", "-q", "--depth", "1", "origin", "refs/tags/v1.2.0:refs/tags/v1.2.0"], check=False)
+    rc, log, called = verify_as("owner/fork", tag="v1.2.0", git_dir=shallow, trusted="HEAD")
+    check("verify: a SHALLOW clone -> refused (fetch the full history)",
+          rc == 1 and "shallow" in log and called is None, log)
+
+    # A configured floor must be reachable from the trusted ref (not a commit on a side branch).
+    side = tmp / "side"
+    subprocess.run(["git", "clone", "-q", tree.as_posix(), side.as_posix()], check=True)
+    sgit = git_cmd(side)
+    subprocess.run([*sgit, "checkout", "-q", "-B", "main", "origin/main"], check=True)
+    subprocess.run([*sgit, "fetch", "-q", "origin", "refs/tags/v1.2.0:refs/tags/v1.2.0"], check=False)
+    subprocess.run([*sgit, "checkout", "-q", "-b", "side"], check=True)
+    subprocess.run([*sgit, "commit", "-q", "--allow-empty", "-m", "a side commit"], check=True)
+    side_sha = subprocess.run([*sgit, "rev-parse", "HEAD"], capture_output=True, text=True, check=True).stdout.strip()
+    subprocess.run([*sgit, "checkout", "-q", "main"], check=True)
+    (side / ".github").mkdir(exist_ok=True)
+    (side / ".github" / "release-floor").write_text(side_sha + "\n", encoding="utf-8")
+    subprocess.run([*sgit, "add", "-A"], check=True)
+    subprocess.run([*sgit, "commit", "-q", "-m", "a floor on a side branch"], check=True)
+    rc, log, called = verify_as("owner/fork", tag="v1.2.0", git_dir=side)
+    check("verify: a configured floor NOT reachable from the trusted ref -> refused",
+          rc == 1 and "not reachable from the trusted ref" in log and called is None, log)
 
     rc, log, called = verify(bundle.as_posix(), tag="v9.9.9")
     check("verify: a tag the repository does not have -> refused",

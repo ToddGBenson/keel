@@ -45,8 +45,10 @@ rather than trusted.
 
 ## Stage 2 — Pull request (`ci.yml`, `security.yml`, `ai-evaluation.yml`)
 
-Every check below is a **required status check** on `main`. Required means the merge button
-is disabled, not that a reviewer is expected to notice.
+The checks below are the **target** set of required status checks on `main`. Required means the
+merge button is disabled, not that a reviewer is expected to notice. Today (2026-11-18) only
+`Concourse / keel` and `library-allowlist` are required; see *What `main` actually enforces*
+below.
 
 | Check | Tool | Fails on | Control |
 |---|---|---|---|
@@ -86,6 +88,16 @@ Branch protection on `main` — configured, not documented-and-hoped:
 - Signed commits required (SI-7, CM-14)
 - Linear history; no force-push; **no administrator bypass**
 - Security-relevant paths require the security owner (see `.github/CODEOWNERS`)
+
+**What `main` actually enforces (2026-11-18, TheHub #62001):** two required checks, `Concourse / keel`
+and `library-allowlist`, both pinned to App 4551328, `strict: true`; stale approvals dismissed;
+conversations resolved; linear history; no force-push or deletion. **Not in force:**
+`independent-review` is not required; 0 approving reviews and no code-owner requirement (solo
+mode, POAM-008). **Since 2026-11-18:** `enforce_admins` on, and the `keel-main` ruleset (no
+bypass) refuses deletion and non-fast-forward pushes and requires a pull
+request (squash only); release tags have the `keel-release-tags` ruleset, which admins bypass,
+the agents' identity included (TheHub #61039). The list above is the target configuration. A green `Concourse / keel` can
+show without the suites having run (TheHub #62015). A release-tag control the agents cannot bypass waits on TheHub #61039.
 
 Administrator bypass disabled is what separates a real control from a documented intention.
 If an emergency needs it, that is the emergency change procedure with its own record — not

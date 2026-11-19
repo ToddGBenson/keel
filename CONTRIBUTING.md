@@ -26,8 +26,8 @@ Skip the rest until you need it. `docs/` is reference material, not a reading li
 ## The three rules that matter most
 
 **No self-approval.** Whoever produced an artifact does not approve it. This is what makes
-every downstream approval mean something, and it is enforced by branch protection rather than
-by good intentions.
+every downstream approval mean something, and in a team setup it is enforced by branch protection
+rather than by good intentions. In keel's solo setup today (2026-11-18) `main` requires no approving review (POAM-008; `docs/13-solo-operation.md`), so nothing server-side stops the agents' identity, which is the owner's (TheHub #61039), merging a PR whose required checks are green.
 
 **Evidence or it didn't happen.** "I ran the tests" is not evidence; a workflow run URL is. If
 you cannot link an artifact, the checklist item is unsatisfied — say so plainly.
