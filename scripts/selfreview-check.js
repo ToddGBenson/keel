@@ -176,8 +176,9 @@ function evaluate({ body, title, prNumber, exists, readFile, isSymlink }) {
     failures.push(
       'No approving review from another identity, and no self-review record for ' +
       'issue #' + issue + '. In solo mode the self-review ARTIFACT is the review ' +
-      'evidence (POAM-008, docs/13-solo-operation.md). Run `/self-review ' +
-      prNumber + '` and link `evidence/' + issue + '/g3/self-review.md`. ' +
+      'evidence (POAM-008, docs/13-solo-operation.md). The agent that builds the PR runs ' +
+      '`/self-review ' + prNumber + '`, writes the record, and links `evidence/' + issue +
+      '/g3/self-review.md` in the body; the operator does not run it. ' +
       (stray && stray[1] !== issue
         ? 'This PR references `evidence/' + stray[1] + '/...`, which belongs to a ' +
           'different issue — another change\'s review is not this change\'s review. '

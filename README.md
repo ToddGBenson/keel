@@ -167,8 +167,8 @@ agent be told" but **"what makes the unwanted action impossible."**
 ## The three rules that keep this honest
 
 1. **No self-approval.** The agent that wrote the code does not review it, test it, or
-   authorize its release. This is NIST AC-5 / CM-5, and it is enforced by CODEOWNERS and
-   branch protection, not by good intentions.
+   authorize its release. This is NIST AC-5 / CM-5, and in a team setup it is enforced by
+   CODEOWNERS and branch protection, not by good intentions. In keel's solo setup today (2026-11-18) `main` requires no approving review (POAM-008; `docs/13-solo-operation.md`), so nothing server-side stops the agents' identity, which is the owner's (TheHub #61039), merging a PR whose required checks are green.
 2. **Evidence or it didn't happen.** A gate checklist item is satisfied by a linked
    artifact — a workflow run, a SARIF file, an attestation, a signed approval. Prose
    claiming the work was done is not evidence.

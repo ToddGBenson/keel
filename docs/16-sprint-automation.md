@@ -40,7 +40,7 @@ limits that matter are **structural**:
 | Cannot decide what to build | Unattended input is G1-approved issues; no G1 evidence on the issue means the story is skipped |
 | Cannot reach production | It may run only the deploy command `automation-policy.yml` declares; `guard-bash.sh` blocks production regardless of what that file says |
 | Cannot ship untested work | Unit, functional and security suites are re-run **by the runner**; any failure means no PR |
-| Cannot merge or force-push | `guard-bash.sh` blocks it, and branch protection backs that up |
+| Cannot merge or force-push | `guard-bash.sh` blocks it; branch protection refuses a direct push and a force push to `main` for every identity since 2026-11-18 (`keel-main` ruleset, `enforce_admins` on), but requires no approval, so the agents' identity, which is the owner's (TheHub #61039), can merge a PR whose checks are green |
 | Cannot run forever | 45-minute job timeout; `concurrency` prevents overlapping runs |
 | Cannot proceed past a real decision | Writes `sprint/done/<slug>.BLOCKED.md` and comments on the issue instead |
 
