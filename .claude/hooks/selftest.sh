@@ -653,6 +653,51 @@ check "NotebookEdit: an ordinary cell"     allow "$(nbpayload 'notebooks/explore
 check "MultiEdit: ordinary edits"          allow "$(mepayload 'src/drafts.py' 'def save():' '    pass')"   guard-write.sh
 
 echo ""
+echo "guard-write.sh — an evidence path in any spelling (TheHub #62022)"
+# Windows paths take backslashes and ignore case; the rule matched forward-slash, lower-case only.
+check "evidence, backslashes"            block "$(wpayload 'evidence\\142\\g4\\scan.sarif' 'x')"            guard-write.sh
+check "evidence, a Windows drive path"   block "$(wpayload 'C:\\repo\\evidence\\142\\g4\\results.xml' 'x')" guard-write.sh
+check "Evidence, capitalised"            block "$(wpayload 'Evidence/142/g4/scan.sarif' 'x')"               guard-write.sh
+check "EVIDENCE, upper case"             block "$(wpayload 'C:/repo/EVIDENCE/142/g4/ci-run.json' 'x')"      guard-write.sh
+check "evidence, ./ and // segments"     block "$(wpayload './evidence/./142//g4/scan.sarif' 'x')"          guard-write.sh
+check "evidence\\ narrative (.md)"        allow "$(wpayload 'evidence\\142\\g4\\verify.md' 'Verified.')"     guard-write.sh
+check "Evidence narrative (.MD)"         allow "$(wpayload 'Evidence/142/g4/verify.MD' 'Verified.')"       guard-write.sh
+check "a file merely named evidence"     allow "$(wpayload 'docs/evidence-model.md' 'x')"                    guard-write.sh
+# Review of #197/#91: the spellings the first round still missed, and the payload's cwd.
+cwpayload() { # $1 = path, $2 = content, $3 = cwd
+  esc=$(printf '%s' "$2" | sed 's/\\/\\\\/g; s/"/\\"/g'); p=$(printf '%s' "$1" | sed 's/\\/\\\\/g'); c=$(printf '%s' "$3" | sed 's/\\/\\\\/g')
+  printf '{"cwd":"%s","tool_input":{"file_path":"%s","content":"%s"}}' "$c" "$p" "$esc"
+}
+check "evidence, drive-relative C:evidence\\"  block "$(cwpayload 'C:evidence\142\g4\a.sarif' 'x' 'C:\repo')"        guard-write.sh
+check "evidence, a ::\$INDEX_ALLOCATION stream" block "$(wpayload 'evidence::$INDEX_ALLOCATION/142/g4/a.sarif' 'x')" guard-write.sh
+check "evidence, a :\$I30 stream"             block "$(wpayload 'evidence:$I30:$INDEX_ALLOCATION/142/g4/a.sarif' 'x')" guard-write.sh
+check "evidence, a trailing dot"              block "$(wpayload 'evidence./142/g4/a.sarif' 'x')"                   guard-write.sh
+check "evidence, a trailing space"            block "$(wpayload 'evidence /142/g4/a.sarif' 'x')"                   guard-write.sh
+check "relative, cwd inside evidence/"        block "$(cwpayload '142/g4/a.sarif' 'x' '/repo/evidence')"            guard-write.sh
+check "relative, cwd inside Evidence\\ (Windows)" block "$(cwpayload '142\g4\a.sarif' 'x' 'C:\repo\Evidence')"     guard-write.sh
+check "out of evidence via .., from its cwd"  allow "$(cwpayload '../src/a.py' 'x = 1' '/repo/evidence')"            guard-write.sh
+check "evidence/../src, resolved"             allow "$(wpayload 'evidence/../src/a.py' 'x = 1')"                  guard-write.sh
+check "into evidence via .."                  block "$(wpayload 'src/../evidence/142/a.sarif' 'x')"                guard-write.sh
+# Review round 2: a segment that only becomes ".." after trimming, a line break, a named stream.
+check "a ... segment cannot pop evidence"      block "$(wpayload 'evidence/.../../142/a.sarif' 'x')"               guard-write.sh
+check "a '.. ' segment cannot pop evidence"    block "$(wpayload 'evidence/.. /../142/a.sarif' 'x')"               guard-write.sh
+check "a '..:x' segment cannot pop evidence"   block "$(wpayload 'evidence/..:x/../142/a.sarif' 'x')"              guard-write.sh
+check "a ... segment under evidence"          block "$(wpayload 'evidence/.../a.sarif' 'x')"                      guard-write.sh
+check "a named stream on an evidence .md"      block "$(wpayload 'evidence/142/a.md:x.sarif' 'x')"                guard-write.sh
+check "a line feed in the path"               block "$(printf '{"tool_input":{"file_path":"x\\n/../evidence/142/a.sarif","content":"x"}}')" guard-write.sh
+check "a line feed in the cwd"                block "$(printf '{"cwd":"/repo/evidence/x\\n/..","tool_input":{"file_path":"../142/a.sarif","content":"x"}}')" guard-write.sh
+check "an ordinary relative path, no cwd"      allow "$(wpayload 'src/a.py' 'x = 1')"                             guard-write.sh
+# Review round 3: a named stream that also carries a $, a trailing dot, a line feed in the cwd.
+check "a named stream with :\$DATA"           block "$(wpayload 'evidence/142/a.md:x.sarif:$DATA' 'x')"         guard-write.sh
+check "a named stream, a \$ in its name"       block "$(wpayload 'evidence/142/a.md:$x.sarif' 'x')"              guard-write.sh
+check "a.md::\$DATA under evidence"           block "$(wpayload 'evidence/142/a.md::$DATA' 'x')"                guard-write.sh
+check "evidence:foo, a stream on the dir"     block "$(wpayload 'evidence:foo/142/a.sarif' 'x')"                 guard-write.sh
+check "a trailing dot on the file name"       block "$(wpayload 'evidence/142/a.md.' 'x')"                       guard-write.sh
+check "a line feed in the cwd (truncating)"   block "$(printf '{"cwd":"/repo/evidence\\nx","tool_input":{"file_path":"142/a.sarif","content":"x"}}')" guard-write.sh
+check "a..b.md under evidence"                allow "$(wpayload 'evidence/142/a..b.md' 'x')"                     guard-write.sh
+check "a colon outside evidence"              allow "$(wpayload 'src/x:y.txt' 'x')"                              guard-write.sh
+
+echo ""
 echo "──────────────────────────────────────────────────────────────"
 printf '  %d passed, %d failed\n' "$pass" "$fail"
 if [ "$fail" -ne 0 ]; then

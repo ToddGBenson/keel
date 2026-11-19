@@ -115,11 +115,13 @@ payload="$(cat)"
 # text the call carries is scanned, joined by newlines; old_string never is.
 if type -P jq >/dev/null 2>&1; then
   path="$(printf '%s' "$payload" | jq -r '.tool_input.file_path // .tool_input.notebook_path // empty')"
+  pcwd="$(printf '%s' "$payload" | jq -r '.cwd // empty')"
   content="$(printf '%s' "$payload" | jq -r '[.tool_input.content, .tool_input.new_string, .tool_input.new_source, (.tool_input.edits // [] | .[]? | .new_string?)] | map(select(type == "string")) | join("\n")')"
 elif type -P python3 >/dev/null 2>&1 || type -P python >/dev/null 2>&1; then
   # The wrapper's name, not a path, so a failing interpreter is recorded as a fault.
   PY=python3; type -P python3 >/dev/null 2>&1 || PY=python
   path="$(printf '%s' "$payload" | "$PY" -c 'import sys,json;t=json.load(sys.stdin).get("tool_input",{});print(t.get("file_path") or t.get("notebook_path") or "")' 2>/dev/null)"
+  pcwd="$(printf '%s' "$payload" | "$PY" -c 'import sys,json;print(json.load(sys.stdin).get("cwd") or "")' 2>/dev/null)"
   content="$(printf '%s' "$payload" | "$PY" -c 'import sys,json;t=json.load(sys.stdin).get("tool_input",{});e=[x.get("new_string") for x in (t.get("edits") or []) if isinstance(x,dict)];print("\n".join(s for s in [t.get("content"),t.get("new_string"),t.get("new_source")]+e if isinstance(s,str)))' 2>/dev/null)"
 else
   # No reliable parser. Fail OPEN on content scanning rather than blocking all edits,
@@ -143,9 +145,92 @@ warn() { echo "WARNING  $1" >&2; }
 # A hand-edited scan report or test result is a fabrication regardless of intent, and it is
 # the failure mode that makes an entire compliance posture worthless. If evidence is wrong,
 # regenerate it and record why.
-case "$path" in
+# TheHub #62022: judge the path the way the file system will resolve it. On Windows a path
+# takes backslashes and its case is ignored, so evidence\142\x.sarif and Evidence/x.sarif
+# are the same file as evidence/x.sarif, and the rule (forward slashes, lower case) let them
+# through on every write tool. The review of #197 found more spellings of the same file:
+# a drive-relative C:evidence\..., an NTFS stream suffix on a segment (evidence::$INDEX_
+# ALLOCATION/...), and a trailing dot or space on a segment (evidence./...). A relative
+# path is also resolved against the payload's cwd: 142/x.sarif from inside evidence/ is
+# evidence. So the path is rebuilt segment by segment, with builtins only:
+#   backslashes as slashes; a relative path joined to the payload's cwd; a drive-relative
+#   "C:" prefix dropped; per segment, "." and ".." judged as written (".." resolved), an
+#   exact unnamed stream type (::$DATA) dropped, trailing dots and spaces trimmed. A segment
+#   that only trims to "", "." or "..", a line break, and inside evidence/ any ":" (a named
+#   stream) or a trailing dot or space on the file name, are refused (review rounds 2 and 3).
+# Case is ignored by the matches below (nocasematch), not by rewriting the path: no
+# external tool, so nothing planted on PATH can change the answer.
+guard_slash() { local s=${1//\\//}; printf '%s' "$s"; }
+guard_unread() { # the path cannot be judged: refuse it (review of #197, rounds 2 and 3)
+  local shown=${1//[$'\001'-$'\037'$'\177']/?}           # control characters are not echoed raw
+  echo "BLOCKED by .claude/hooks/guard-write.sh — the write's path ($shown) cannot be judged safely: $2. Name the file plainly." >&2
+  echo "" >&2
+  echo "Control: AU-9, CA-2. See docs/11-ai-agent-controls.md." >&2
+  exit 2
+}
+# A line feed or carriage return in the path or the cwd would split it below; no real file
+# name an agent writes has one.
+case "$path${pcwd:-}" in *$'\n'*|*$'\r'*) guard_unread "with a line break" "it contains a line feed or carriage return" ;; esac
+npath=$(guard_slash "$path")
+pcwd=$(guard_slash "${pcwd:-}")
+case "$npath" in
+  /*|[A-Za-z]:/*) ;;                                     # absolute
+  [A-Za-z]:*) npath=${npath:2}; [ -n "$pcwd" ] && npath="$pcwd/$npath" ;;  # drive-relative
+  *) [ -n "$pcwd" ] && npath="$pcwd/$npath" ;;           # relative to the cwd
+esac
+guard_segs=() guard_lead="" guard_colon=0 guard_lastdot=0 guard_cut=()
+case "$npath" in /*) guard_lead="/" ;; esac
+IFS='/' read -r -a guard_parts <<< "$npath"
+guard_n() { printf '%s' "${#guard_segs[@]}"; }
+for guard_seg in ${guard_parts[@]+"${guard_parts[@]}"}; do
+  if [ "$(guard_n)" -eq 0 ] && [ -z "$guard_lead" ] && case "$guard_seg" in [A-Za-z]:) true ;; *) false ;; esac; then
+    guard_segs+=("$guard_seg"); continue                  # a drive, C:
+  fi
+  # "." and ".." are judged on the segment as written, before any trimming: Windows turns
+  # "..." or ".. " into something else, and a segment that only BECOMES "." or ".." (or
+  # nothing) after trimming is refused rather than guessed at.
+  case "$guard_seg" in
+    ""|.) continue ;;
+    ..) if [ "$(guard_n)" -gt 0 ] && [ "${guard_segs[$(( $(guard_n) - 1 ))]}" != ".." ]; then
+          unset "guard_segs[$(( $(guard_n) - 1 ))]"; guard_segs=(${guard_segs[@]+"${guard_segs[@]}"})
+        else guard_segs+=(".."); fi
+        continue ;;
+  esac
+  # Round 3: any ":" in a segment (other than a drive, C:) is noted, and refused inside
+  # evidence/ below: a named stream (a.md:x.sarif, a.md:x.sarif:$DATA) is not the .md in
+  # front of it. Only an exact, unnamed stream TYPE (::$DATA, ::$INDEX_ALLOCATION,
+  # :$I30:$INDEX_ALLOCATION) is dropped here, so the directory it names is still recognised.
+  case "$guard_seg" in [A-Za-z]:) ;; *:*) guard_colon=1 ;; esac
+  case "$guard_seg" in
+    *'::$'[A-Za-z_]*) [ -z "${guard_seg#*::\$}" ] || case "${guard_seg#*::\$}" in *[!A-Za-z_]*) ;; *) guard_seg=${guard_seg%%::\$*} ;; esac ;;
+    *':$I30:$INDEX_ALLOCATION') guard_seg=${guard_seg%:\$I30:\$INDEX_ALLOCATION} ;;
+  esac
+  guard_raw=$guard_seg
+  guard_lastdot=0
+  case "$guard_seg" in *[.\ ]) guard_lastdot=1 ;; esac
+  while case "$guard_seg" in *[.\ ]) true ;; *) false ;; esac; do
+    guard_seg=${guard_seg%?}                               # trailing dots and spaces
+  done
+  case "$guard_seg" in
+    ""|.|..) guard_unread "$path" "the segment \"$guard_raw\" means something different on Windows" ;;
+  esac
+  guard_segs+=("$guard_seg")
+  guard_cut+=("${guard_seg%%:*}")                          # the same, cut at any ':' (for recognising evidence/)
+done
+npath="$guard_lead$(IFS=/; printf '%s' "${guard_segs[*]-}")"
+cpath="$guard_lead$(IFS=/; printf '%s' "${guard_cut[*]-}")"
+shopt -s nocasematch
+
+# Round 3: a segment with a ':' is judged both as written and cut at the ':' (evidence:foo is
+# evidence/ to the second reading); either reading under evidence/ with a ':' is refused.
+case "$cpath" in
+  */evidence/*|evidence/*) [ "$guard_colon" -eq 1 ] && guard_unread "$path" "a ':' in a path under evidence/ (an NTFS stream)" ;;
+esac
+case "$npath" in
   */evidence/*|evidence/*)
-    case "$path" in
+    [ "$guard_colon" -eq 1 ] && guard_unread "$path" "a ':' in a path under evidence/ (an NTFS stream)"
+    [ "$guard_lastdot" -eq 1 ] && guard_unread "$path" "a trailing dot or space on the file name under evidence/ (on Windows it names another file)"
+    case "$npath" in
       # Narrative artifacts an agent legitimately authors during a gate.
       *.md) : ;;
       *) block "hand-editing generated evidence ($path). Regenerate it instead." "AU-9, CA-2" ;;
@@ -179,7 +264,7 @@ if printf '%s' "$content" | grep -qE \
 fi
 
 # ── Notices on high-consequence paths ───────────────────────────────────────
-case "$path" in
+case "$npath" in
   */.github/workflows/*|*/ci/pipeline.yml|*/ci/tasks/*|*/ci/scripts/*)
     warn "Editing a workflow. The pipeline gates every other control here — this change requires security review (CM-5), and relaxing a check is a visible process change, not a quiet diff." ;;
   */.claude/agents/*|*/.claude/commands/*|*/.claude/skills/*)
@@ -191,5 +276,6 @@ case "$path" in
   */docs/compliance/*)
     warn "Editing compliance material. Control claims must be backed by evidence that actually supports them — never mark a control satisfied to unblock work (PD-7)." ;;
 esac
+shopt -u nocasematch
 
 exit 0
