@@ -37,7 +37,9 @@ guard_fault() { printf '%s exited %s\n' "$1" "$2" >> "$guard_faults" 2>/dev/null
 guard_run() { # $1: tool, $2: highest exit status that is not an error; the rest: its args
   local t=$1 ok=$2 rc; shift 2
   command "$t" "$@"; rc=$?
-  [ "$rc" -eq 141 ] && return 0
+  # TheHub #61973: 141 (SIGPIPE) is a fault too. The grep wrapper drains its input, so no
+  # wrapped helper is a writer whose reader stopped early, and an extractor killed by
+  # SIGPIPE left an empty capture that read as an allow.
   [ "$rc" -gt "$ok" ] && guard_fault "$t" "$rc"
   return "$rc"
 }
@@ -89,6 +91,12 @@ guard_exit() { # builtins only: a broken helper must not be able to hide its own
   exit "$rc"
 }
 trap guard_exit EXIT
+# TheHub #61973: a catchable signal ends the shell with 128+N, which Claude Code reads as
+# an allow. Each one is recorded as a fault and turned into a block by the EXIT trap.
+for guard_sig in HUP INT TERM PIPE ALRM USR1 USR2; do
+  # shellcheck disable=SC2064  # the signal name is fixed when the trap is set
+  trap "guard_fault signal $guard_sig; exit 1" "$guard_sig"
+done
 
 payload="$(cat)"
 

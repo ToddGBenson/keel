@@ -371,6 +371,14 @@ saying because it looks like a violation.
 because CI secret scanning is authoritative and server-side. `guard-bash.sh` fails closed on
 its command patterns, because those are enforcement.
 
+Both guards also fail closed on their own failures, because a hook that errors is not a hook
+that decided. Claude Code blocks only on exit 2 and lets the call proceed on any other code
+or when the hook runs past its timeout (60 s). So a helper that errors or is killed (including
+by SIGPIPE, TheHub #61973), any other exit code, a catchable signal to the hook, and, for
+`guard-bash.sh`, running past its own 40 s deadline, are each a block that says it was an
+internal error (TheHub #61794, #61844, #61973). `guard-bash.sh` refuses a command over 1 MiB
+without reading it. SIGKILL cannot be caught: a hook killed that way exits 137, which is an allow.
+
 Getting this backwards produces a control that is either useless or removed. Both end at the
 same place.
 
