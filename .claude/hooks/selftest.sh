@@ -529,6 +529,7 @@ check "read-only exec: pytest.ini"    allow "$(payload 'docker exec thehub-backe
 check "pytest in another container"   allow "$(payload 'docker exec thehub-test-61385 pytest')"                       guard-bash.sh
 check "capped test container"         allow "$(payload 'docker run --rm --cpus 2 --memory 2g python:3.12 pytest')"    guard-bash.sh
 check "exec, then pytest on the host" allow "$(payload 'docker exec thehub-backend cat /proc/meminfo; pytest -q')"    guard-bash.sh
+check "literal \\u0000 text in a command (61978 r2)" allow "$(payload "grep -P '\\u0000' f")" guard-bash.sh
 echo ""
 echo "guard-bash.sh — main through a refspec, a + force push, commit -n (TheHub #62031)"
 # With enforce_admins off and the agents pushing as the owner, a push that names main as its
