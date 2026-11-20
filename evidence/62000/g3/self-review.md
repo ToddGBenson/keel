@@ -1,7 +1,7 @@
 # Self-review — TheHub #62000 (the hooks are best-effort guidance until the allowlist rebuild)
 
 Mode: solo (POAM-008); agent self-review, pending the independent review before merge
-PR: #191   Author: Claude Sonnet 5.5 (AI-authored)   Date: 2026-11-18
+PR: #201   Author: Claude Sonnet 5.5 (AI-authored)   Date: 2026-11-18
 verdict: pass
 Opened: 2026-11-18 02:24:58 UTC (first commit; PR opened 02:25:12Z)   Reviewed: first self-review at the round-1 fix commit 02:32:21Z; this record last updated for round 2 at 02:43:13 UTC
 Cooling-off: none (same session). Measured: round-1 independent review posted 02:29:25Z, round-1 fix commit 02:32:21Z (about 3 minutes later), round-2 independent review posted 02:40:34Z, round-2 fix written at 02:43:13 UTC (about 18 minutes after the first commit). The independent review is the compensating read.
@@ -109,3 +109,19 @@ under TheHub #62001.
 ## Residual risk accepted
 
 - Single-identity review. No independent human read this diff. The reviewer reads it before merge.
+
+## Follow-up, 2026-11-18 (second PR for TheHub #62000)
+
+A second PR adds two things to *Read this first*, as the PO asked:
+- **The evidence:** this week's independent reviews of the hook changes (TheHub #61972, #62031,
+  #62022, #61987) each found commands the hooks allowed that they were meant to refuse, and each
+  next round found more. These are named by class only; the exact inputs stay out of this public
+  repository.
+- **The real controls, and their state:** `enforce_admins` on (an operator decision, pending),
+  rulesets with no bypass (TheHub #61006), a required check that is real evidence (TheHub
+  #62015), and an agent identity without admin rights (TheHub #61039). The live state was read
+  2026-11-18: `enforce_admins` false, 0 approving reviews, no rulesets.
+
+Checked: every review round cited is a BLOCK or SHIP WITH NITS comment on the named PRs
+(keel #192, #199, #197, #198 and their binnacle pairs). Text only: no hook, CI or settings change.
+validate-platform passes, and so does pinned gitleaks.

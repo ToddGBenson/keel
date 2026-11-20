@@ -54,7 +54,7 @@ evidence/
 | G0 | Idea record with problem, evidence, baseline, flags, RICE, decision | SA-3(1), RA-3 |
 | G1 | DoR checklist with per-item disposition; estimate; test approach | SA-3, SA-4(3) |
 | G2 | Design note, ADR (if warranted), threat model with dispositions, control allocation matrix, AIA (if AI-relevant) | SA-8, SA-11(2), SA-17 |
-| G3 | Review record naming what was verified independently, CI run, SARIF, SCA, secrets scan, signed commits, AI declaration | SA-11(1), AC-5, CM-5 |
+| G3 | Review record naming what was verified independently, CI run, SARIF, SCA, secrets scan, commit signature status, AI declaration | SA-11(1), AC-5, CM-5 |
 | G4 | Traceability matrix, test results, exploratory charter, NFR results, control verification with file:line, scan triage with dispositions, DAST, SBOM, eval report | SA-11, CA-2, RA-5 |
 | G5 | Change record, SBOM diff, signature and provenance verification, rollback rehearsal, **human approval record**, deployment record, 24h metric check | CM-3, CM-4, SR-4, CP-10 |
 
@@ -62,8 +62,10 @@ evidence/
 
 Evidence must be **tamper-evident, attributable, and retrievable**:
 
-- **Git-resident where possible** — commit history is tamper-evident and attributable via
-  signed commits.
+- **Git-resident where possible** — commit history is tamper-evident. It is not yet
+  attributable to its author by signature: signed commits are not required by rule (dropped
+  since about 14:36Z on 2026-11-18), and the signature on a squash merge is GitHub's, which attests the merge, not
+  the author.
 - **CI-generated where possible** — a workflow run record cannot be hand-authored after the
   fact, which is exactly its value over a written claim.
 - **Immutable storage** for artifacts, SBOMs, and attestations, addressed by digest.
@@ -77,9 +79,9 @@ Because agents produce most artifacts here, the evidence must answer a question 
 human-only process does not raise: *what produced this, and who is answerable for it?*
 
 Every gate evidence bundle records: **the agent** that produced the artifact · **the model
-version** · **the human** who approved · the linked issue. Together with signed commits
-carrying `AI-Assisted:` trailers and retained session transcripts, this satisfies AIC-10 and
-AU-12.
+version** · **the human** who approved · the linked issue. Together with commits carrying
+`AI-Assisted:` trailers and retained session transcripts, this satisfies AIC-10 and AU-12.
+(The trailers are text a committer writes, not a signature; see the G3 row.)
 
 An assessor's actual question is: *"Show me how this change came to be in production, and who
 is answerable for it."* The evidence model exists to make that answerable in minutes.

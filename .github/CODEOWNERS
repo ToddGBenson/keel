@@ -3,7 +3,8 @@
 # CODEOWNERS is what turns "the author doesn't approve" from a convention into a control.
 # Combined with branch protection ("Require review from Code Owners" + "Dismiss stale
 # approvals" + no administrator bypass), a PR cannot merge without an approval from an
-# identity other than the author.
+# identity other than the author. In keel's solo setup today (2026-11-18) neither is required:
+# 0 approvals and no code-owner review, so this file routes review requests only (POAM-008).
 #
 # Base repo: single owner. Forks get their org substituted by scripts/bootstrap.sh.
 # Order matters: the LAST matching pattern wins.
@@ -33,6 +34,7 @@
 /ci/                            @ToddGBenson
 /.github/CODEOWNERS             @ToddGBenson
 /.github/dependabot.yml         @ToddGBenson
+/.github/release-floor          @ToddGBenson
 
 # ---------------------------------------------------------------------------
 # Agent and command definitions are configuration items under change control.
