@@ -1467,8 +1467,13 @@ push_judge() { # $@: the words of one invocation
   return 0
 }
 push_guard() { # $1: one view of the command
-  local toks=() seg=() t
-  mapfile -t toks < <(printf '%s' "$1" | LC_ALL=C awk "$push_tok_awk")
+  local toks=() seg=() t src=$1
+  # The tokenizer ends a command at a \001 mark (heredoc bodies use \002 and \003). One written into
+  # the text, as a control character inside a quoted argument, would end the command there and leave
+  # the rest judged as a push with no refspec, which on main reads as a push of main. As ? it is a
+  # word this hook cannot read, as in tag_guard (TheHub #61972).
+  src=${src//[$'\001\002\003']/?}
+  mapfile -t toks < <(printf '%s' "$src" | LC_ALL=C awk "$push_tok_awk")
   toks+=($'\001')
   for t in "${toks[@]}"; do
     if [ "$t" = $'\001' ]; then
