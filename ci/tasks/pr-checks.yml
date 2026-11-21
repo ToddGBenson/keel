@@ -17,6 +17,8 @@ image_resource:
 inputs:
   - name: repo
   - name: pr
+  # The picker's state (.pr or .none), written by pr-pick outside the pull request's tree.
+  - name: pr-meta
 
 run:
   path: bash
