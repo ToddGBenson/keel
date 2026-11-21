@@ -52,6 +52,11 @@ def check(name, cond, detail=""):
         failures.append(name)
 
 
+def unwrapped(step):
+    """A step, or the step a `try:` wraps (TheHub #62097: the success reports are wrapped)."""
+    return step["try"] if isinstance(step, dict) and "try" in step else step
+
+
 def reporters(node):
     found = []
 
@@ -248,7 +253,8 @@ def pipeline_checks():
           start.get("params", {}).get("PHASE") == "start"
           and "CONCLUSION" not in start.get("params", {}))
 
-    last = jobs[LAST]["plan"][-1]
+    last_step = jobs[LAST]["plan"][-1]
+    last = unwrapped(last_step)
     check("verify-artifact reports success as its last step",
           last.get("task") == "check-run"
           and (last["params"].get("JOB"), last["params"].get("PHASE"),
@@ -270,7 +276,7 @@ def pipeline_checks():
     pr = jobs.get(PR_JOB) or {}
     for hook, conclusion in (("on_success", "success"), ("on_failure", "failure"),
                              ("on_error", "failure")):
-        h = pr.get(hook) or {}
+        h = unwrapped(pr.get(hook) or {})
         p = h.get("params") or {}
         check(f"{PR_JOB}.{hook} reports {conclusion} on the pull request head",
               h.get("task") == "check-run"
@@ -287,6 +293,23 @@ def pipeline_checks():
         for step in reporters(job):
             if (step.get("params") or {}).get("NO_COMMIT_OK") and name != PR_JOB:
                 check(f"only {PR_JOB} may report with no commit ({name} does)", False)
+
+    # [TheHub #62097] A report that cannot get through must not reach the job's own
+    # failure hook, which would post `failure` for a suite that passed. Concourse runs
+    # `on_failure` when the last plan step (or an `on_success` hook) fails, so the two
+    # success reports are wrapped in `try:`; the step still shows red in the build.
+    check("verify-artifact's success report is wrapped in try, so its failure is not the job's",
+          "try" in last_step and last_step["try"].get("task") == "check-run", last_step)
+    check(f"{PR_JOB}'s on_success report is wrapped in try", "try" in (pr.get("on_success") or {}),
+          pr.get("on_success"))
+    wrapped = [(j, h) for j, job in jobs.items() for h in ("on_failure", "on_error")
+               if "try" in (job.get(h) or {})]
+    check("no failure report is wrapped in try: a real failure's unreachable post stays red",
+          not wrapped, wrapped)
+    loose = [name for name, job in jobs.items()
+             for step in job.get("plan") or [] if step.get("task") == "check-run"
+             and (step.get("params") or {}).get("CONCLUSION") == "success"]
+    check("no success report is left unwrapped in a plan", not loose, loose)
 
     credential_steps_never_see_pr_code(doc)
     pr_code_cannot_reach_the_trusted_checkout()
@@ -312,17 +335,41 @@ def pipeline_checks():
     check("the script never calls GitHub", "api.github.com" not in script)
 
 
-CURL_STUB = """#!/bin/sh
-printf '%s\\n' "$@" > "$CAPTURE_ARGS"
+CURL_STUB = r"""#!/bin/sh
+n=$(cat "$CAPTURE_DIR/n" 2>/dev/null || echo 0)
+n=$((n + 1))
+echo "$n" > "$CAPTURE_DIR/n"
+printf '%s\n' "$@" > "$CAPTURE_ARGS"
 while [ $# -gt 0 ]; do
-  case "$1" in -d|--data) printf '%s' "$2" > "$CAPTURE" ;; esac
+  case "$1" in -d|--data) printf '%s' "$2" > "$CAPTURE"; printf '%s\n' "$2" >> "$CAPTURE_DIR/bodies" ;; esac
   shift
 done
-exit "${CURL_RC:-0}"
+# CURL_RCS is the exit code of each call in turn; CURL_RC answers every call after.
+rc="${CURL_RC:-0}"
+i=0
+for r in ${CURL_RCS:-}; do
+  i=$((i + 1))
+  [ "$i" -eq "$n" ] && rc="$r"
+done
+# What `-w '\n%{http_code}'` adds, for a refusal that carries a status.
+if [ "$rc" -ne 0 ] && [ -n "${CURL_CODE:-}" ]; then printf '\n%s' "$CURL_CODE"; fi
+exit "$rc"
+"""
+
+# Backoff must not make the test slow: record the delay, do not wait it out.
+SLEEP_STUB = r"""#!/bin/sh
+printf '%s\n' "$1" >> "$CAPTURE_DIR/sleeps"
+exit 0
 """
 
 
 def run(head, **params):
+    r, bodies, args, _ = run_full(head, **params)
+    return r, (bodies[-1] if bodies else None), args
+
+
+def run_full(head, **params):
+    """Run the script once. Returns (result, every body sent, last curl args, sleeps)."""
     sh = shutil.which("sh")
     if not sh:
         print("sh is required to execute ci/scripts/check-run.sh")
@@ -331,9 +378,10 @@ def run(head, **params):
     try:
         stubs = tmp / "stubs"
         stubs.mkdir()
-        curl = stubs / "curl"
-        curl.write_text(CURL_STUB, encoding="utf-8", newline="\n")
-        curl.chmod(curl.stat().st_mode | stat.S_IEXEC)
+        for name, text in (("curl", CURL_STUB), ("sleep", SLEEP_STUB)):
+            stub = stubs / name
+            stub.write_text(text, encoding="utf-8", newline="\n")
+            stub.chmod(stub.stat().st_mode | stat.S_IEXEC)
         (tmp / "repo").mkdir()
         if head is not None:
             (tmp / "repo" / ".git").mkdir()
@@ -344,6 +392,7 @@ def run(head, **params):
         env = {
             **os.environ,
             "PATH": f"{stubs}{os.pathsep}{os.environ.get('PATH', '')}",
+            "CAPTURE_DIR": str(tmp),
             "CAPTURE": str(tmp / "body.json"),
             "CAPTURE_ARGS": str(tmp / "args.txt"),
             "MYKRONOS_INGESTION_URL": "http://mykronos.test",
@@ -353,9 +402,12 @@ def run(head, **params):
         }
         r = subprocess.run([sh, str(SCRIPT)], env=env, cwd=tmp,
                            capture_output=True, text=True, timeout=30)
-        body = json.loads((tmp / "body.json").read_text()) if (tmp / "body.json").exists() else None
+        bodies = ([json.loads(line) for line in (tmp / "bodies").read_text().splitlines() if line]
+                  if (tmp / "bodies").exists() else [])
         args = (tmp / "args.txt").read_text().split("\n") if (tmp / "args.txt").exists() else []
-        return r, body, args
+        sleeps = ([int(x) for x in (tmp / "sleeps").read_text().split()]
+                  if (tmp / "sleeps").exists() else [])
+        return r, bodies, args, sleeps
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
@@ -407,9 +459,76 @@ def script_checks():
           r.returncode == 0 and body and body["commit_sha"] == SHA, r.stdout + r.stderr)
 
 
+def unreachable_reporter_checks():
+    """[TheHub #62097] binnacle #89 passed every unit suite, then check-run.sh got curl
+    exit 6 three times; the failure path then posted `failure` and a passing head was
+    recorded red. These run the script with curl stubbed to exit 6 (and the others)."""
+    print("-- an unreachable reporter (TheHub #62097) --")
+    TRANSIENT = (6, 7, 28, 35, 52, 56)
+    ok = dict(JOB="verify-artifact", PHASE="end", CONCLUSION="success")
+
+    # a. every try unreachable, after a passing suite.
+    r, bodies, _, sleeps = run_full(SHA, CURL_RC="6", **ok)
+    concl = [b["conclusion"] for b in bodies]
+    check("a passing suite's report retries 5 times on curl exit 6", concl[:5] == ["success"] * 5, concl)
+    check("the retries back off over about two minutes",
+          len(sleeps) == 4 and sleeps == sorted(sleeps) and len(set(sleeps)) == 4
+          and 90 <= sum(sleeps) <= 150, sleeps)
+    check("an unreachable reporter after a passing suite never posts failure",
+          "failure" not in concl, concl)
+    check("it exits non-zero so Concourse shows the error", r.returncode != 0, r.returncode)
+    check("and says the reporter was unreachable and the suite passed",
+          "reporter unreachable; suite passed" in r.stdout + r.stderr, r.stdout + r.stderr)
+
+    # b. nothing is posted after the fifth failed try, even if a sixth post would get
+    # through. A `cancelled` would complete the check, pr-pick.sh skips completed heads
+    # and the PR would stay blocked until a new push; left in progress, pr-pick
+    # re-judges the head on the next tick.
+    r, bodies, _, _ = run_full(SHA, CURL_RCS="6 6 6 6 6 0", **ok)
+    concl = [b["conclusion"] for b in bodies]
+    check("after five failed tries nothing more is posted, no cancelled",
+          concl == ["success"] * 5, concl)
+    check("so a passing head is never completed as cancelled", "cancelled" not in concl, concl)
+    check("and the step still exits non-zero", r.returncode != 0)
+
+    # c. transient exits are retried until one goes through.
+    r, bodies, _, sleeps = run_full(SHA, CURL_RCS="6 6 0", **ok)
+    check("a report that gets through on the third try exits 0 after 3 posts",
+          r.returncode == 0 and len(bodies) == 3 and len(sleeps) == 2, (r.returncode, len(bodies), sleeps))
+    for rc in TRANSIENT:
+        r, bodies, _, _ = run_full(SHA, CURL_RCS=f"{rc} 0", **ok)
+        check(f"curl exit {rc} is retried", r.returncode == 0 and len(bodies) == 2, (r.returncode, len(bodies)))
+
+    # d. a refusal is an answer, not an outage: no retry, nothing more posted.
+    r, bodies, _, sleeps = run_full(SHA, CURL_RC="22", CURL_CODE="422", **ok)
+    check("a 4xx refusal is not retried and posts nothing more",
+          r.returncode != 0 and len(bodies) == 1 and not sleeps, (len(bodies), sleeps))
+    r, bodies, _, _ = run_full(SHA, CURL_RCS="22 0", CURL_CODE="503", **ok)
+    check("a 503 is retried", r.returncode == 0 and len(bodies) == 2, len(bodies))
+    r, bodies, _, _ = run_full(SHA, CURL_RC="28", JOB="test", PHASE="end", CONCLUSION="success")
+    check("a timeout (28) on a success report is retried like the rest", len(bodies) >= 5, len(bodies))
+
+    # e. a suite that really failed still posts failure, and stays red if unreachable.
+    r, bodies, _, _ = run_full(SHA, CURL_RC="6", JOB="test", PHASE="end", CONCLUSION="failure")
+    concl = [b["conclusion"] for b in bodies]
+    check("a real failure's report is retried 5 times and only ever says failure",
+          concl == ["failure"] * 5, concl)
+    check("and when it never gets through the step exits non-zero, so the build stays red",
+          r.returncode != 0)
+    r, bodies, _, _ = run_full(SHA, CURL_RCS="6 0", JOB="test", PHASE="end", CONCLUSION="failure")
+    check("a real failure is posted as failure once a try gets through",
+          r.returncode == 0 and [b["conclusion"] for b in bodies] == ["failure", "failure"])
+
+    # f. a start that cannot get through fails the step, with no conclusion invented.
+    r, bodies, _, _ = run_full(SHA, CURL_RC="6", JOB="build", PHASE="start")
+    check("an unreachable start retries and exits non-zero without a conclusion",
+          r.returncode != 0 and len(bodies) == 5 and all(b["conclusion"] is None for b in bodies))
+
+
 def main():
     pipeline_checks()
     script_checks()
+    unreachable_reporter_checks()
     print()
     if failures:
         print(f"{len(failures)} failed")
