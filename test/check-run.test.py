@@ -238,6 +238,59 @@ def pipeline_checks():
                 check(f"only {PR_JOB} may report with no commit ({name} does)", False)
 
     credential_steps_never_see_pr_code(doc)
+    pr_code_cannot_reach_the_trusted_checkout()
+    threat_model_names_pr_code_on_workers()
+
+
+def task_file(name):
+    return yaml.safe_load((ROOT / "ci" / "tasks" / name).read_text(encoding="utf-8")) or {}
+
+
+def names(items):
+    return sorted(i["name"] for i in items or [])
+
+
+def pr_code_cannot_reach_the_trusted_checkout():
+    """[TheHub #62015 F3] Pull-request code runs in `pr-checks`. It must not be able to
+    change anything a later step trusts. Concourse gives a task its inputs as copy-on-write
+    volumes, so a change to `repo/` or `pr-sha/` inside the task is discarded when the task
+    ends; only a declared OUTPUT reaches a later step. So the control is the task's shape:
+    no outputs, no credential, and the credentialed steps read only what the picker wrote."""
+    run = task_file("pr-checks.yml")
+    pick = task_file("pr-pick.yml")
+    report = task_file("check-run.yml")
+    check("pr-checks (runs pull-request code) declares no outputs, so nothing it writes "
+          "reaches a later step", not run.get("outputs"), run.get("outputs"))
+    check("pr-checks takes exactly repo, pr and pr-meta: it never sees the sha the report reads",
+          names(run.get("inputs")) == ["pr", "pr-meta", "repo"], run.get("inputs"))
+    check("pr-checks declares no params, so it holds no credential", not run.get("params"), run.get("params"))
+    check("pr-pick (holds the credentials, runs no pull-request code) takes only repo",
+          names(pick.get("inputs")) == ["repo"], pick.get("inputs"))
+    check("pr-pick's outputs are the checkout, the picker's state and the sha, and nothing else",
+          names(pick.get("outputs")) == ["pr", "pr-meta", "pr-sha"], pick.get("outputs"))
+    check("the report (holds the token) takes repo and pr-sha, never the checkout or the state",
+          names(report.get("inputs")) == ["pr-sha", "repo"], report.get("inputs"))
+    pick_script = (ROOT / "ci" / "scripts" / "pr-pick.sh").read_text(encoding="utf-8")
+    checks_script = (ROOT / "ci" / "scripts" / "pr-checks.sh").read_text(encoding="utf-8")
+    check("the picker's state is written outside the checkout (TheHub #62015 F1)",
+          '"$OUT/.none"' not in pick_script and '"$OUT/.pr"' not in pick_script
+          and '"$META_OUT/.none"' in pick_script and '"$META_OUT/.pr"' in pick_script)
+    check("pr-checks.sh reads the picker's state from pr-meta, not from the checkout",
+          '"$PR_DIR/.none"' not in checks_script and '"$PR_DIR/.pr"' not in checks_script
+          and '"$META_DIR/.none"' in checks_script and '"$META_DIR/.pr"' in checks_script)
+
+
+def threat_model_names_pr_code_on_workers():
+    """[TheHub #62015 F4] .sdlc/threat-model.yaml carries a row for pull-request code on workers."""
+    tm = yaml.safe_load((ROOT / ".sdlc" / "threat-model.yaml").read_text(encoding="utf-8"))
+    eps = {e["id"]: e for e in tm.get("entry_points") or []}
+    ep = eps.get("pr-code-on-workers") or {}
+    check("the threat model has an entry point for pull-request code running on workers",
+          bool(ep) and ep.get("evidence_ref") == "ci/scripts/pr-checks.sh"
+          and (ROOT / ep["evidence_ref"]).is_file(), ep)
+    ctrl = [c for c in tm.get("controls") or [] if c.get("applies_to") == "pr-code-on-workers"]
+    check("and a control that says what keeps that code away from the token and the verdict",
+          any(c.get("evidence_ref") and (ROOT / c["evidence_ref"]).is_file() for c in ctrl), ctrl)
 
     every = reporters(doc["jobs"])
     expected = len(CHAIN) * 2 + 2 + 3
