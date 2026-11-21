@@ -127,7 +127,10 @@ check 'push --force first in $(...)' block "$(payload 'x=$(git push --force orig
 check 'push -f first in sh -c'      block "$(payload "sh -c 'git push -f origin feat'")"                   guard-bash.sh
 check 'plain push to feat'          allow "$(payload 'git push origin feat')"                              guard-bash.sh
 check 'push -u to feat'             allow "$(payload 'git push -u origin feat')"                           guard-bash.sh
-check 'push --follow-tags to feat'  allow "$(payload 'git push --follow-tags origin feat')"                guard-bash.sh
+# TheHub #61972: --follow-tags was allowed here (it is not a force flag, #120); it now pushes
+# release tags, so it is blocked by the tag rule. Not being force is still covered below.
+check 'push --follow-tags (a tag push)' block "$(payload 'git push --follow-tags origin feat')"            guard-bash.sh
+check 'push --no-follow-tags to feat' allow "$(payload 'git push --no-follow-tags origin feat')"           guard-bash.sh
 # shellcheck disable=SC2016  # literal $(...) / backticks: the unexpanded command text is the hook input under test
 check 'reset --hard in backticks'   block "$(payload 'x=`git reset --hard HEAD~1`')"                       guard-bash.sh
 # shellcheck disable=SC2016  # literal $(...) / backticks: the unexpanded command text is the hook input under test
@@ -702,6 +705,143 @@ EOF")" guard-bash.sh
 done
 check "PS: Podman.exe run, uncapped"        block "$(payload 'Podman.exe run --rm python:3.12 pytest' | sed 's/^{/{"tool_name":"PowerShell",/')" guard-bash.sh
 check "docker run -m=2g, capped"            allow "$(payload 'docker run --rm --cpus 2 -m=2g python:3.12 pytest')"  guard-bash.sh
+echo ""
+echo "guard-bash.sh — agents never push a release tag (TheHub #61972)"
+check "push a v* tag by name"         block "$(payload 'git push origin v1.2.3')"                         guard-bash.sh
+check "push tag <name>"               block "$(payload 'git push origin tag v1.2.3')"                     guard-bash.sh
+check "push refs/tags/v*"             block "$(payload 'git push origin refs/tags/v1.2.3')"               guard-bash.sh
+check "push HEAD:refs/tags/v*"        block "$(payload 'git push origin HEAD:refs/tags/v9')"              guard-bash.sh
+check "push +refs/tags/*:refs/tags/*" block "$(payload "git push origin '+refs/tags/*:refs/tags/*'")"     guard-bash.sh
+check "delete a v* tag"               block "$(payload 'git push origin :refs/tags/v1.2.3')"              guard-bash.sh
+check "push --tags"                   block "$(payload 'git push --tags origin')"                         guard-bash.sh
+check "push --follow-tags"            block "$(payload 'git push origin feat --follow-tags')"             guard-bash.sh
+check "push --mirror"                 block "$(payload 'git push --mirror origin')"                       guard-bash.sh
+check "push -c push.followTags=true"  block "$(payload 'git -c push.followTags=true push origin feat')"   guard-bash.sh
+check "config push.followtags"        block "$(payload 'git config --global push.followtags true')"       guard-bash.sh
+check "gh api POST git/refs, a tag"   block "$(payload 'gh api repos/O/R/git/refs -f ref=refs/tags/v9 -f sha=abc')" guard-bash.sh
+check "gh api git/refs, ref unseen"   block "$(payload 'gh api -X POST repos/O/R/git/refs --input ref.json')" guard-bash.sh
+check "gh api PATCH git/refs/tags/v*" block "$(payload 'gh api -X PATCH repos/O/R/git/refs/tags/v9 -f sha=abc')" guard-bash.sh
+check "gh api DELETE git/refs/tags/v*" block "$(payload 'gh api -X DELETE repos/O/R/git/refs/tags/v9')"  guard-bash.sh
+check "gh api POST git/tags"          block "$(payload 'gh api repos/O/R/git/tags -f tag=v9 -f object=abc -f type=commit -f message=x')" guard-bash.sh
+check "GraphQL createRef refs/tags"   block "$(payload "gh api graphql -f query='mutation { createRef(input: {repositoryId: \"X\", name: \"refs/tags/v9\", oid: \"abc\"}) { ref { id } } }'")" guard-bash.sh
+check "PS: push a v* tag"             block "$(pspayload 'git push origin v1.2.3')"                       guard-bash.sh
+check "PS: push --tags"               block "$(pspayload 'git push --tags')"                              guard-bash.sh
+check "plain branch push"             allow "$(payload 'git push -u origin feat/61972-tags')"             guard-bash.sh
+check "branch push, --no-follow-tags" allow "$(payload 'git push --no-follow-tags origin feat')"          guard-bash.sh
+check "list tags"                     allow "$(payload 'git tag -l')"                                     guard-bash.sh
+check "list v* tags"                  allow "$(payload "git tag -l 'v*'")"                                guard-bash.sh
+check "fetch tags"                    allow "$(payload 'git fetch --tags origin')"                        guard-bash.sh
+check "gh api GET git/refs/tags"      allow "$(payload 'gh api repos/O/R/git/refs/tags')"                 guard-bash.sh
+check "gh api POST git/refs, a branch" allow "$(payload 'gh api repos/O/R/git/refs -f ref=refs/heads/feat -f sha=abc')" guard-bash.sh
+check "PS: plain branch push"         allow "$(pspayload 'git push origin feat')"                         guard-bash.sh
+# Review of keel #192 (Fable 5.2, BLOCK): classes, not the exact inputs.
+check "push --tag (prefix of --tags)"  block "$(payload 'git push --tag origin')"                        guard-bash.sh
+check "push --follow-tag (prefix)"     block "$(payload 'git push origin feat --follow-tag')"            guard-bash.sh
+check "push --mirr (prefix)"           block "$(payload 'git push --mirr origin')"                       guard-bash.sh
+check "push --fol (shorter prefix)"    block "$(payload 'git push --fol origin feat')"                   guard-bash.sh
+check "gh api git/refs?query, a tag"   block "$(payload "gh api -X POST 'repos/O/R/git/refs?x=1' -f ref=refs/tags/v9 -f sha=a")" guard-bash.sh
+check "gh api git/refs/, trailing /"   block "$(payload 'gh api repos/O/R/git/refs/ -f ref=refs/tags/v9 -f sha=a')" guard-bash.sh
+check "gh api /repos//git/refs"        block "$(payload 'gh api /repos/O/R//git/refs -f ref=refs/tags/v9 -f sha=a')" guard-bash.sh
+check "gh api git/refs, ref=\$VAR"     block "$(payload 'gh api repos/O/R/git/refs -f ref=$REF -f sha=a')" guard-bash.sh
+check "gh api git/refs, refs/heads/\$X" block "$(payload 'gh api repos/O/R/git/refs -f ref=refs/heads/$X -f sha=a')" guard-bash.sh
+check "gh api git/refs, ref=\$(...)"   block "$(payload 'gh api repos/O/R/git/refs -f ref=$(cat r) -f sha=a')" guard-bash.sh
+check "gh api git/refs, -F ref=@file"  block "$(payload 'gh api repos/O/R/git/refs -F ref=@ref.txt -f sha=a')" guard-bash.sh
+# Review of keel #192, round 2 (rescoped): quoted text is text; the command word is judged.
+check "commit -m naming git push --tags" allow "$(payload 'git commit -m "docs: git push --tags is refused"')" guard-bash.sh
+check "pr create --body naming git tag v1" allow "$(payload 'gh pr create --title "guard: v* tags" --body "refuses git tag v1.2.3"')" guard-bash.sh
+check "echo / grep naming a tag push"  allow "$(payload "echo 'git push origin v1.2.3' && grep -rn 'git tag v' docs/")" guard-bash.sh
+check "commit -F heredoc naming a tag" allow "$(payload "git commit -F - <<'EOF'
+refuse git push origin v1.2.3
+EOF")" guard-bash.sh
+check "a # comment naming a tag push"  allow "$(payload '# git push origin v1.2.3')"                 guard-bash.sh
+check "PS: commit -m naming a tag"     allow "$(pspayload 'git commit -m "it''s git tag v1.2.3"')"   guard-bash.sh
+check "push 2>&1 before a tag"         block "$(payload 'git push origin 2>&1 v1.2.3')"              guard-bash.sh
+check "push the tags/ shorthand"       block "$(payload 'git push origin tags/v1.2.3')"              guard-bash.sh
+check "push a brace-expanded refspec"  block "$(payload 'git push origin refs/t{ags,}/v1.2.3')"      guard-bash.sh
+check "git \$p (not literal) a tag"    block "$(payload 'p=push; git $p origin v1.2.3')"             guard-bash.sh
+check "xargs git push"                 block "$(payload 'echo v1.2.3 | xargs git push origin')"      guard-bash.sh
+check "two levels of shell"            block "$(payload "bash -c 'sh -c \"git push origin v1.2.3\"'")" guard-bash.sh
+check "heredoc fed to bash"            block "$(payload "bash <<'EOF'
+git push origin v1.2.3
+EOF")" guard-bash.sh
+check "tag --sort with a name"         block "$(payload 'git tag --sort=refname v1.2.3')"            guard-bash.sh
+check "update-ref refs/tags"           block "$(payload 'git update-ref refs/tags/v1.2.3 HEAD')"     guard-bash.sh
+check "gh api -iX POST a tag ref"      block "$(payload 'gh api -iX POST repos/O/R/git/refs -f ref=refs/tags/v9 -f sha=a')" guard-bash.sh
+check "gh api by repository id"        block "$(payload 'gh api repositories/1/git/refs -f ref=refs/tags/v9 -f sha=a')" guard-bash.sh
+check "PS: splatted git @a"            block "$(pspayload "\$a=@('push','origin','v1.2.3'); git @a")" guard-bash.sh
+check "PS: Start-Process git tag push" block "$(pspayload "Start-Process git -ArgumentList 'push origin v1.2.3'")" guard-bash.sh
+check "tag --sort, listing"            allow "$(payload 'git tag --sort=-creatordate')"              guard-bash.sh
+# Review of binnacle #87, round 4 (timing): nested text is judged only when it could name a tag
+# write; one that does is still refused at every level.
+check "PS: pwsh -c push a v* tag"      block "$(pspayload "pwsh -NoProfile -c 'git push origin v1.2.3'")" guard-bash.sh
+check "PS: pwsh -c g\"i\"t push --tags" block "$(pspayload "pwsh -c 'g\"i\"t push --tags'")"        guard-bash.sh
+check "PS: cmd /c pwsh -c --follow-tags" block "$(pspayload 'cmd /c pwsh -c git push origin feat --follow-tags')" guard-bash.sh
+check "pwsh -Command, nested 3, a tag"  block "$(payload "bash -c \"pwsh -Command 'cmd /c git push origin v2'\"")" guard-bash.sh
+check "PS: pwsh -EncodedCommand nested" block "$(pspayload 'cmd /c pwsh -EncodedCommand ZwBpAHQA')"  guard-bash.sh
+check "PS: pwsh -c Write-Host hi"      allow "$(pspayload 'pwsh -NoProfile -c Write-Host hi')"        guard-bash.sh
+check "PS: pwsh -c git push a branch"  allow "$(pspayload 'pwsh -c git push -u origin feat')"         guard-bash.sh
+# Review of binnacle #87 / keel #192, round 5 (classes): a line continuation inside nested
+# text, which the shell joins, still names the command to the gate; and the tokenizers' own
+# control marks, written into an argument, neither end the command nor drop a word.
+nl=$'\n'
+check "nested: continuations split git push"  block "$(payload "bash -c 'gi\\${nl}t pu\\${nl}sh origin v0.0.0'")"   guard-bash.sh
+check "nested: continuations split git tag"   block "$(payload "sh -c 'gi\\${nl}t ta\\${nl}g v0.0.0'")"            guard-bash.sh
+check "eval: continuations split a push"      block "$(payload "eval 'gi\\${nl}t pu\\${nl}sh --ta\\${nl}gs'")"       guard-bash.sh
+check "heredoc to sh: continuations split"    block "$(payload "sh <<'EOF'${nl}gi\\${nl}t pu\\${nl}sh origin v0.0.0${nl}EOF")" guard-bash.sh
+check "nested gh api, continuations split"    block "$(payload "bash -c 'g\\${nl}h a\\${nl}pi -X POST repos/O/R/gi\\${nl}t/refs -f ref=refs/ta\\${nl}gs/v0.0.0 -f sha=a'")" guard-bash.sh
+check "PS: nested, continuations split"       block "$(pspayload "bash -c 'gi\\${nl}t pu\\${nl}sh origin v0.0.0'")" guard-bash.sh
+check "nested: ls with a continuation"        allow "$(payload "bash -c 'ls \\${nl}-la'")"                          guard-bash.sh
+check "nested: build && test, continued"      allow "$(payload "bash -c 'echo build \\${nl}&& echo test'")"         guard-bash.sh
+ctl() { local p; p=$(payload "$1"); printf '%s' "${p//CTL/\\u000$2}"; }        # CTL -> \u000N in the JSON
+pctl() { ctl "$1" "$2" | sed 's/^{/{"tool_name":"PowerShell",/'; }
+check "tag -m <mark 1> v*: mark ends nothing" block "$(ctl 'git tag -m "CTL" v0.0.0' 1)"                          guard-bash.sh
+check "push -o <mark 1> a v* tag"             block "$(ctl 'git push -o "CTL" origin v0.0.0' 1)"                  guard-bash.sh
+check "push -o <mark 2>x drops no word"       block "$(ctl 'git push -o "CTLx" origin v0.0.0' 2)"                 guard-bash.sh
+check "tag -m <mark 2>x v*"                   block "$(ctl 'git tag -m "CTLx" v0.0.0' 2)"                         guard-bash.sh
+check "PS: tag -m <mark 1> v*"                block "$(pctl 'git tag -m "CTL" v0.0.0' 1)"                         guard-bash.sh
+check "commit -m with a mark in it"           allow "$(ctl 'git commit -m "aCTLb"' 1)"                            guard-bash.sh
+check "push -o <mark 1> a branch"             allow "$(ctl 'git push -o "CTL" origin feat' 1)"                    guard-bash.sh
+# Review of keel #192, the final round: ordinary work main allows (round 3 false positives).
+check "PS: \$url = git config --get"    allow "$(pspayload '$url = git config --get remote.origin.url')" guard-bash.sh
+check "PS: \$tags = git tag -l"         allow "$(pspayload '$tags = git tag -l')"                     guard-bash.sh
+check "PS: \$r = git push -u origin HEAD" allow "$(pspayload '$r = git push -u origin HEAD 2>&1')"    guard-bash.sh
+check "PS: \$cfg = Get-Content config"  allow "$(pspayload '$cfg = Get-Content config')"              guard-bash.sh
+check "[ -f config ]"                  allow "$(payload '[ -f config ] && cat config')"              guard-bash.sh
+check "[ \"\$1\" = push ]"              allow "$(payload 'if [ "$1" = push ]; then echo x; fi')"      guard-bash.sh
+check "\"\$PYTHON\" -m pip config list" allow "$(payload '"$PYTHON" -m pip config list')"             guard-bash.sh
+check "PS: a here-string with an apostrophe" allow "$(pspayload "git commit -m @'
+fix: don't allow this
+
+git push origin v1.2.3 is refused
+'@")" guard-bash.sh
+check "PS: \$r = git push origin v1.2.3" block "$(pspayload '$r = git push origin v1.2.3')"            guard-bash.sh
+check "\$G push origin v1.2.3"          block "$(payload '$G push origin v1.2.3')"                    guard-bash.sh
+check "gh api git/refs, two refs"      block "$(payload 'gh api repos/O/R/git/refs -f ref=refs/heads/x -f ref=refs/tags/v9 -f sha=a')" guard-bash.sh
+check "push a refs/* glob"             block "$(payload "git push origin 'refs/*'")"                     guard-bash.sh
+check "push a refs/t* glob"            block "$(payload "git push origin 'refs/t*:refs/t*'")"            guard-bash.sh
+check "push -c remote.<n>.push"        block "$(payload 'git -c remote.origin.push=refs/tags/* push origin')" guard-bash.sh
+check "push -c remote.<n>.mirror"      block "$(payload 'git -c remote.origin.mirror=true push origin')" guard-bash.sh
+check "push --config-env followTags"   block "$(payload 'git --config-env=push.followTags=FT push origin feat')" guard-bash.sh
+check "push a tag held in a variable"  block "$(payload 'T=v1.0; git push origin $T')"                   guard-bash.sh
+check "PS: push a \$-string tag"       block "$(pspayload 'git push origin "v$ver"')"                    guard-bash.sh
+check "git send-pack"                  block "$(payload 'git send-pack origin refs/heads/main')"        guard-bash.sh
+check "push a bare vNext"              block "$(payload 'git push origin vNext')"                       guard-bash.sh
+check "create a v* tag"                block "$(payload 'git tag v1.2.3')"                               guard-bash.sh
+check "create an annotated v* tag"     block "$(payload 'git tag -a v1.2.3 -m "release notes"')"        guard-bash.sh
+check "create a v* tag, -m first"      block "$(payload 'git tag -m "notes here" v2')"                   guard-bash.sh
+check "create a tag from a variable"   block "$(payload 'git tag $T')"                                   guard-bash.sh
+check "v-word in a commit message"     allow "$(payload 'git commit -m "release v1.2.3 notes" && git push origin feat')" guard-bash.sh
+check "git config --get followTags"    allow "$(payload 'git config --get push.followTags')"            guard-bash.sh
+check "git config get followtags"      allow "$(payload 'git config get push.followtags')"              guard-bash.sh
+check "git stash push <file>"          allow "$(payload 'git stash push src/a.py')"                      guard-bash.sh
+check "git stash push -m v1"           allow "$(payload 'git stash push -m "v1 work"')"                  guard-bash.sh
+check "push a branch v2-migration"     allow "$(payload 'git push origin v2-migration')"                 guard-bash.sh
+check "push, redirect to v1.log"       allow "$(payload 'git push -u origin feat > v1.log 2>&1')"        guard-bash.sh
+check "git tag --list 'v*'"            allow "$(payload "git tag --list 'v*'")"                          guard-bash.sh
+check "git tag -d v1.0"                allow "$(payload 'git tag -d v1.0')"                              guard-bash.sh
+check "git tag (lists)"                allow "$(payload 'git tag')"                                      guard-bash.sh
+check "create a non-v tag"             allow "$(payload 'git tag rc-1')"                                 guard-bash.sh
+check "gh api GET git/refs/tags?page"  allow "$(payload "gh api 'repos/O/R/git/refs/tags?per_page=100'")" guard-bash.sh
 echo ""
 echo "guard-write.sh — must BLOCK (AU-9, AIC-5)"
 check "hand-edit generated SARIF" block "$(wpayload 'evidence/142/g4/scan.sarif' 'x')"    guard-write.sh
