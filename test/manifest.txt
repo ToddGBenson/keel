@@ -42,6 +42,7 @@ test/gitleaks-allowlist.test.py     test         gitleaks allowlist check caps i
 # previously fixed bypass through the real hooks, in both parser modes.
 test/hook-bypass-corpus.test.py     test,quick   guard hook bypass corpus (TheHub #60818)
 test/hook-fail-closed.test.py       test         guard-bash.sh refuses when one of its own helpers fails (TheHub #61794)
+test/hook-tag-timing.test.py        test         the release-tag guard costs about a one-line command per command (TheHub #61972)
 test/hook-heredoc-timing.test.py    test         guard-bash.sh judges a long heredoc about as fast as a one-line command (TheHub #61987)
 test/hook-write-fail-closed.test.py test         guard-write.sh refuses when a helper fails, and reads large content whole (TheHub #61844)
 test/hook-path-pinned.test.py       test         guard-bash.sh finds its helpers only in system directories (TheHub #61843)
