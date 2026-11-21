@@ -804,7 +804,7 @@ check "a trailing space kept, x/.. after it"   block "$(wpayload 'evidence/142/b
 check "a trailing dot popped by .."            allow "$(wpayload 'evidence/142/x./../b.md' 'x')"                 guard-write.sh
 # 3. The cut reading is popped by .. too, so a ':' in a segment that .. left behind is not evidence.
 check "evidence/.. then a colon file, resolved" allow "$(wpayload 'evidence/../src/a:b.txt' 'x')"                guard-write.sh
-check "out of evidence via .., a ':' in the cwd" allow "$(cwpayload '../../src/a.py' 'x = 1' '/home/u/my:proj/evidence/142')" guard-write.sh
+check "out of evidence via .., a ':' in the cwd" allow "$(cwpayload '../../src/a.py' 'x = 1' '/srv/u/my:proj/evidence/142')" guard-write.sh
 check "evidence:foo, then .. inside it"        block "$(wpayload 'evidence:foo/x/../142/a.sarif' 'x')"           guard-write.sh
 # 2. No refusal echoes a control character raw: the "hand-editing" message is cleaned too.
 for guard_raw_case in 'evidence/142/a\u001b[31m.sarif' 'evidence/142/b.md.\u0007'; do
