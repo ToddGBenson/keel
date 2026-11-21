@@ -780,6 +780,27 @@ check "pwsh -Command, nested 3, a tag"  block "$(payload "bash -c \"pwsh -Comman
 check "PS: pwsh -EncodedCommand nested" block "$(pspayload 'cmd /c pwsh -EncodedCommand ZwBpAHQA')"  guard-bash.sh
 check "PS: pwsh -c Write-Host hi"      allow "$(pspayload 'pwsh -NoProfile -c Write-Host hi')"        guard-bash.sh
 check "PS: pwsh -c git push a branch"  allow "$(pspayload 'pwsh -c git push -u origin feat')"         guard-bash.sh
+# Review of binnacle #87 / keel #192, round 5 (classes): a line continuation inside nested
+# text, which the shell joins, still names the command to the gate; and the tokenizers' own
+# control marks, written into an argument, neither end the command nor drop a word.
+nl=$'\n'
+check "nested: continuations split git push"  block "$(payload "bash -c 'gi\\${nl}t pu\\${nl}sh origin v0.0.0'")"   guard-bash.sh
+check "nested: continuations split git tag"   block "$(payload "sh -c 'gi\\${nl}t ta\\${nl}g v0.0.0'")"            guard-bash.sh
+check "eval: continuations split a push"      block "$(payload "eval 'gi\\${nl}t pu\\${nl}sh --ta\\${nl}gs'")"       guard-bash.sh
+check "heredoc to sh: continuations split"    block "$(payload "sh <<'EOF'${nl}gi\\${nl}t pu\\${nl}sh origin v0.0.0${nl}EOF")" guard-bash.sh
+check "nested gh api, continuations split"    block "$(payload "bash -c 'g\\${nl}h a\\${nl}pi -X POST repos/O/R/gi\\${nl}t/refs -f ref=refs/ta\\${nl}gs/v0.0.0 -f sha=a'")" guard-bash.sh
+check "PS: nested, continuations split"       block "$(pspayload "bash -c 'gi\\${nl}t pu\\${nl}sh origin v0.0.0'")" guard-bash.sh
+check "nested: ls with a continuation"        allow "$(payload "bash -c 'ls \\${nl}-la'")"                          guard-bash.sh
+check "nested: build && test, continued"      allow "$(payload "bash -c 'echo build \\${nl}&& echo test'")"         guard-bash.sh
+ctl() { local p; p=$(payload "$1"); printf '%s' "${p//CTL/\\u000$2}"; }        # CTL -> \u000N in the JSON
+pctl() { ctl "$1" "$2" | sed 's/^{/{"tool_name":"PowerShell",/'; }
+check "tag -m <mark 1> v*: mark ends nothing" block "$(ctl 'git tag -m "CTL" v0.0.0' 1)"                          guard-bash.sh
+check "push -o <mark 1> a v* tag"             block "$(ctl 'git push -o "CTL" origin v0.0.0' 1)"                  guard-bash.sh
+check "push -o <mark 2>x drops no word"       block "$(ctl 'git push -o "CTLx" origin v0.0.0' 2)"                 guard-bash.sh
+check "tag -m <mark 2>x v*"                   block "$(ctl 'git tag -m "CTLx" v0.0.0' 2)"                         guard-bash.sh
+check "PS: tag -m <mark 1> v*"                block "$(pctl 'git tag -m "CTL" v0.0.0' 1)"                         guard-bash.sh
+check "commit -m with a mark in it"           allow "$(ctl 'git commit -m "aCTLb"' 1)"                            guard-bash.sh
+check "push -o <mark 1> a branch"             allow "$(ctl 'git push -o "CTL" origin feat' 1)"                    guard-bash.sh
 # Review of keel #192, the final round: ordinary work main allows (round 3 false positives).
 check "PS: \$url = git config --get"    allow "$(pspayload '$url = git config --get remote.origin.url')" guard-bash.sh
 check "PS: \$tags = git tag -l"         allow "$(pspayload '$tags = git tag -l')"                     guard-bash.sh

@@ -1884,6 +1884,69 @@ entries:
     expect: block
     why: "a tag ref through gh api with the host spelled out"
 
+  # ── TheHub #61972 review, round 5 (classes): a line continuation that splits words in
+  # nested text, and the tokenizers' control marks written into an argument. Placeholder
+  # remote and tag; red at keel b27e186d / binnacle 8d8777b5, green with the fix. ──
+  - id: KB-317
+    hook: guard-bash.sh
+    class: release-tag
+    source: TheHub#61972
+    command: "bash -c 'gi\\\nt pu\\\nsh origin v0.0.0'"
+    expect: block
+    why: "a nested tag push whose words a line continuation splits; the shell joins them"
+  - id: KB-318
+    hook: guard-bash.sh
+    class: release-tag
+    source: TheHub#61972
+    tool: Bash
+    command: "eval 'gi\\\nt ta\\\ng v0.0.0'"
+    expect: block
+    why: "tag creation through eval, split by line continuations"
+  - id: KB-319
+    hook: guard-bash.sh
+    class: release-tag
+    source: TheHub#61972
+    tool: Bash
+    command: "sh <<'EOF'\ngi\\\nt pu\\\nsh --ta\\\ngs\nEOF"
+    expect: block
+    why: "a heredoc fed to a shell, its tag push split by line continuations"
+  - id: KB-320
+    hook: guard-bash.sh
+    class: release-tag
+    source: TheHub#61972
+    command: "bash -c 'gi\\\nt upda\\\nte-ref refs/ta\\\ngs/v0.0.0 HEAD'"
+    expect: block
+    why: "a nested tag ref write, split by line continuations"
+  - id: KB-321
+    hook: guard-bash.sh
+    class: release-tag
+    source: TheHub#61972
+    command: "git tag -m \"\x01\" v0.0.0"
+    expect: block
+    why: "a tokenizer command mark written into an argument does not end the command"
+  - id: KB-322
+    hook: guard-bash.sh
+    class: release-tag
+    source: TheHub#61972
+    command: "git push -o \"\x02x\" origin v0.0.0"
+    expect: block
+    why: "a tokenizer heredoc mark written into an argument does not drop the word"
+  - id: KB-323
+    hook: guard-bash.sh
+    class: release-tag
+    source: TheHub#61972
+    command: "bash -c 'git push -o \"\x01\" origin v0.0.0'"
+    expect: block
+    why: "a command mark in an argument, inside nested text"
+  - id: KB-324
+    hook: guard-bash.sh
+    class: release-tag
+    source: TheHub#61972
+    tool: PowerShell
+    command: "bash -c 'gi\\\nt ta\\\ng v0.0.0'"
+    expect: block
+    why: "the PowerShell tool sending a nested shell whose tag creation line continuations split"
+
   # ── TheHub #61391: guard-write.sh on every write tool ─────────────────────────
   # guard-write.sh was bound to Write|Edit and read only file_path and content /
   # new_string. A NotebookEdit carries notebook_path and new_source, and a MultiEdit

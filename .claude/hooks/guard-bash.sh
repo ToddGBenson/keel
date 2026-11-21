@@ -1958,6 +1958,7 @@ tag_ghapi() { # tag_ghapi <words after gh api>
 tag_ere='(^|[[:space:];|&(])-e(c|n[a-z]*)?([[:space:]]|$)'   # pwsh -e / -ec / -EncodedCommand
 tag_gate() { # $1: nested command text -> true when it must be judged
   local t=$1 r=0 deep=()
+  t=${t//$'\\\n'/}   # round 5: a backslash-newline joins the words around it, as the shell does
   t=${t//[\'\"\`\\^\$]/}
   shopt -s nocasematch
   case "$t" in
@@ -1971,6 +1972,9 @@ tag_gate() { # $1: nested command text -> true when it must be judged
 }
 tag_guard() { # $1: bash|ps, $2: the command text
   local toks=() seg=() t mode_was=$tag_mode src=$2
+  # Round 5: the tokenizers mark commands and heredoc bodies with \001-\003; one written into the
+  # text would end a command or drop a word. As ? it is a word this hook cannot read.
+  src=${src//[$'\001\002\003']/?}
   [ "$tag_depth" -gt 0 ] && ! tag_gate "$src" && return 0
   tag_depth=$((tag_depth + 1))
   if [ "$tag_depth" -gt 8 ]; then
