@@ -29,8 +29,13 @@
 # the ingestion token. Nothing here runs pull-request code: the head is fetched
 # and checked out, never executed. The task that runs it gets neither credential.
 #
-# No head to judge is a pass with an empty `pr/` (and `pr/.none`), so the later
+# No head to judge is a pass with an empty `pr/` (and `pr-meta/.none`), so the later
 # tasks and the end report do nothing.
+#
+# The picker's own state (`.none`, `.pr`) goes in `pr-meta/`, an output of its own, never
+# in `pr/`. `pr/` is the pull request's tree, and that tree is the author's: a `.none`
+# committed in it, written into the same directory, read as "nothing to judge", so
+# pr-checks passed without running a suite and the check posted green (TheHub #62015).
 set -euo pipefail
 
 : "${REPO_SLUG:?REPO_SLUG is required}"
@@ -43,11 +48,13 @@ OUT="${PR_OUT:-pr}"
 # The head's sha alone, for the end report. A separate output, so the report
 # never needs the pull request's checkout as an input (TheHub #61778 review).
 SHA_OUT="${PR_SHA_OUT:-pr-sha}"
+# The picker's state, beside the checkout and never inside it (TheHub #62015).
+META_OUT="${PR_META_OUT:-pr-meta}"
 GIT="${GIT:-git}"
 CURL="${CURL:-curl}"
 PY="${PY:-python3}"
 
-mkdir -p "$OUT" "$SHA_OUT"
+mkdir -p "$OUT" "$SHA_OUT" "$META_OUT"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
@@ -152,7 +159,7 @@ done < "$work/candidates"
 
 if [ -z "$picked" ]; then
   echo "No pull request head needs a verdict."
-  : > "$OUT/.none"
+  : > "$META_OUT/.none"
   exit 0
 fi
 
@@ -172,7 +179,7 @@ if [ "$got" != "$sha" ]; then
 fi
 "$GIT" -C "$OUT" -c advice.detachedHead=false checkout -q --detach "$sha"
 [ "$(tr -d ' \n' < "$OUT/.git/HEAD")" = "$sha" ]
-printf '%s %s %s\n' "$number" "$sha" "$branch" > "$OUT/.pr"
+printf '%s %s %s\n' "$number" "$sha" "$branch" > "$META_OUT/.pr"
 # check-run.sh reads the sha from here (HEAD_FILE), last, so it exists only
 # once the head is checked out and verified.
 printf '%s\n' "$sha" > "$SHA_OUT/HEAD"

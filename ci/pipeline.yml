@@ -1212,7 +1212,9 @@ jobs:
   # Which heads, once per head, and why a fork's head is never judged:
   # ci/scripts/pr-pick.sh. The pick holds the deploy key and the ingestion token
   # and runs no pull-request code; `pr-checks` runs the pull request's code and
-  # gets no params at all. Its script is main's copy, its code is the head's.
+  # gets no params at all. Its script is main's copy, its code is the head's. The picker's
+  # state (.pr / .none) is the `pr-meta` output, never a file in the head's own tree
+  # (TheHub #62015), and `pr-checks` declares no outputs.
   #
   # Requiring `Concourse / keel` on main is the operator's call, after this job
   # has gone green on a real pull request (TheHub #61737).
