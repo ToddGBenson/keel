@@ -546,6 +546,16 @@ token:
   pull-request code. `pr-checks` runs the pull request's code and gets **no params**.
   The end reports run main's `check-run.yml` and `check-run.sh` from `repo/` with the
   token, and read only the head's sha, from `pr-sha/HEAD` (`HEAD_FILE`).
+- **The picker's state is never in the pull request's tree (TheHub #62015).** `pr-pick`
+  writes `.pr` (or `.none`, "nothing to judge") to its own output, `pr-meta/`, and
+  `pr-checks` reads it from there and refuses unless `pr/` is checked out at the picked
+  sha. The first version wrote the markers into `pr/`, the author's tree: a `.none`
+  committed in a pull request made `pr-checks` pass without running a suite, and the
+  check posted green on that head. `pr-checks` declares no outputs and no params, so
+  Concourse discards anything pull-request code writes to `repo/`, `pr/`, `pr-meta/` or
+  `pr-sha/`; `test/check-run.test.py` holds that task shape, and `.sdlc/threat-model.yaml`
+  names pull-request code on the workers (`pr-code-on-workers`). A head that moves between
+  `ls-remote` and `fetch` fails the pick and records nothing (`test/pr-pick.test.py`).
 - **Never map pull-request code into a credentialed step.** A task's `run:` path names an
   input, so `input_mapping: { repo: pr }` on a report would run the **pull request's**
   `check-run.sh` with the token. The first version of this job did exactly that (TheHub
