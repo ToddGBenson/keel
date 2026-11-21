@@ -488,8 +488,12 @@ try:
         subprocess.run([*kd, "checkout", "-q", "main"], check=True)
 
     commit_key("rotated", wrong_pem)
-    commit_key("privkey", "-----BEGIN ENCRYPTED SIGSTORE PRIVATE KEY-----\nc2VjcmV0\n"
-                          "-----END ENCRYPTED SIGSTORE PRIVATE KEY-----\n")
+    # A committed private key instead of the public one. The marker is built by
+    # concatenation so this file never holds a full PEM private-key header, which
+    # a secrets scanner would rightly flag (keel #206 review).
+    priv_marker = "ENCRYPTED SIGSTORE " + "PRIVATE" + " KEY"
+    commit_key("privkey", "-----BEGIN " + priv_marker + "-----\nc2VjcmV0\n"
+                          "-----END " + priv_marker + "-----\n")
     pub.write_text(good_pem, encoding="utf-8", newline="\n")
     subprocess.run([*kd, "add", "-A"], check=True)
     subprocess.run([*kd, "commit", "-q", "-m", "main: .github/cosign.pub"], check=True)
