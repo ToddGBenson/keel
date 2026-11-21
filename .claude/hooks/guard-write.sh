@@ -178,13 +178,15 @@ case "$npath" in
   [A-Za-z]:*) npath=${npath:2}; [ -n "$pcwd" ] && npath="$pcwd/$npath" ;;  # drive-relative
   *) [ -n "$pcwd" ] && npath="$pcwd/$npath" ;;           # relative to the cwd
 esac
-guard_segs=() guard_lead="" guard_colon=0 guard_lastdot=0 guard_cut=()
+# guard_cut and guard_dots move in step with guard_segs: a ".." pops all three, so the cut
+# reading and the trailing-dot flag describe the segments that are KEPT (TheHub #62037).
+guard_segs=() guard_lead="" guard_colon=0 guard_lastdot=0 guard_cut=() guard_dots=()
 case "$npath" in /*) guard_lead="/" ;; esac
 IFS='/' read -r -a guard_parts <<< "$npath"
 guard_n() { printf '%s' "${#guard_segs[@]}"; }
 for guard_seg in ${guard_parts[@]+"${guard_parts[@]}"}; do
   if [ "$(guard_n)" -eq 0 ] && [ -z "$guard_lead" ] && case "$guard_seg" in [A-Za-z]:) true ;; *) false ;; esac; then
-    guard_segs+=("$guard_seg"); continue                  # a drive, C:
+    guard_segs+=("$guard_seg"); guard_cut+=("$guard_seg"); guard_dots+=(0); continue  # a drive, C:
   fi
   # "." and ".." are judged on the segment as written, before any trimming: Windows turns
   # "..." or ".. " into something else, and a segment that only BECOMES "." or ".." (or
@@ -192,8 +194,12 @@ for guard_seg in ${guard_parts[@]+"${guard_parts[@]}"}; do
   case "$guard_seg" in
     ""|.) continue ;;
     ..) if [ "$(guard_n)" -gt 0 ] && [ "${guard_segs[$(( $(guard_n) - 1 ))]}" != ".." ]; then
-          unset "guard_segs[$(( $(guard_n) - 1 ))]"; guard_segs=(${guard_segs[@]+"${guard_segs[@]}"})
-        else guard_segs+=(".."); fi
+          guard_i=$(( $(guard_n) - 1 ))
+          unset "guard_segs[$guard_i]" "guard_cut[$guard_i]" "guard_dots[$guard_i]"
+          guard_segs=(${guard_segs[@]+"${guard_segs[@]}"})
+          guard_cut=(${guard_cut[@]+"${guard_cut[@]}"})
+          guard_dots=(${guard_dots[@]+"${guard_dots[@]}"})
+        else guard_segs+=(".."); guard_cut+=(".."); guard_dots+=(0); fi
         continue ;;
   esac
   # Round 3: any ":" in a segment (other than a drive, C:) is noted, and refused inside
@@ -206,8 +212,8 @@ for guard_seg in ${guard_parts[@]+"${guard_parts[@]}"}; do
     *':$I30:$INDEX_ALLOCATION') guard_seg=${guard_seg%:\$I30:\$INDEX_ALLOCATION} ;;
   esac
   guard_raw=$guard_seg
-  guard_lastdot=0
-  case "$guard_seg" in *[.\ ]) guard_lastdot=1 ;; esac
+  guard_dot=0
+  case "$guard_seg" in *[.\ ]) guard_dot=1 ;; esac
   while case "$guard_seg" in *[.\ ]) true ;; *) false ;; esac; do
     guard_seg=${guard_seg%?}                               # trailing dots and spaces
   done
@@ -216,7 +222,11 @@ for guard_seg in ${guard_parts[@]+"${guard_parts[@]}"}; do
   esac
   guard_segs+=("$guard_seg")
   guard_cut+=("${guard_seg%%:*}")                          # the same, cut at any ':' (for recognising evidence/)
+  guard_dots+=("$guard_dot")
 done
+# The trailing-dot flag of the last segment KEPT, not the last one read: b.md./x/.. keeps
+# b.md. (Node on Windows writes a file literally named so).
+[ "$(guard_n)" -gt 0 ] && guard_lastdot=${guard_dots[$(( $(guard_n) - 1 ))]}
 npath="$guard_lead$(IFS=/; printf '%s' "${guard_segs[*]-}")"
 cpath="$guard_lead$(IFS=/; printf '%s' "${guard_cut[*]-}")"
 shopt -s nocasematch
@@ -233,7 +243,8 @@ case "$npath" in
     case "$npath" in
       # Narrative artifacts an agent legitimately authors during a gate.
       *.md) : ;;
-      *) block "hand-editing generated evidence ($path). Regenerate it instead." "AU-9, CA-2" ;;
+      *) guard_shown=${path//[$'\001'-$'\037'$'\177']/?}  # no raw control characters (#62037)
+         block "hand-editing generated evidence ($guard_shown). Regenerate it instead." "AU-9, CA-2" ;;
     esac
     ;;
 esac

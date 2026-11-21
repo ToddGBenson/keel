@@ -80,6 +80,9 @@ JQ_FILTERS = {
     ".tool_input.command // empty": lambda ti: ti.get("command"),
     # [TheHub #62031] the payload's cwd, read at the top level, not under tool_input.
     ".cwd // empty": None,
+    # [TheHub #61972] the payload's tool_name, read at the top level: the release-tag guard
+    # reads a PowerShell payload the PowerShell way.
+    ".tool_name // empty": None,
     ".tool_input.file_path // .tool_input.notebook_path // empty":
         lambda ti: ti.get("file_path") or ti.get("notebook_path"),
     '[.tool_input.content, .tool_input.new_string, .tool_input.new_source, (.tool_input.edits // [] | .[]? | .new_string?)] | map(select(type == "string")) | join("\\n")':
@@ -109,6 +112,8 @@ def jq_shim(argv: list[str]) -> int:
     data = json.load(sys.stdin)
     if args[0] == ".cwd // empty":
         val = data.get("cwd") or None
+    elif args[0] == ".tool_name // empty":
+        val = data.get("tool_name") or None
     else:
         val = JQ_FILTERS[args[0]](data.get("tool_input") or {})
     if val is None or val is False:

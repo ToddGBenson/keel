@@ -418,6 +418,26 @@ check run per commit. That is the pattern MyKronos D-136 built for TheHub, reuse
 here under TheHub #60580. It does not reopen the archived-resource-type question
 above: there is no new resource type, and no GitHub credential in the pipeline.
 
+**An unreachable reporter never turns a passing suite red (TheHub #62097).** On
+2026-11-18 binnacle #89 passed every unit suite, then `check-run.sh` got curl exit 6
+three times reaching MyKronos, and the job's `on_failure` hook posted `failure`: a
+passing head was recorded red and a train slot was lost. Now `check-run.sh` retries
+a report five times over about two minutes on curl's transient exits (6, 7, 28, 35,
+52, 56) and on a 408, 429 or 5xx, and never retries a refusal. If every try fails
+after a passing suite it posts nothing more (not `failure`, and not `cancelled`: a
+`cancelled` would complete the check, `pr-pick.sh` skips every completed head, and
+the PR would stay blocked until a new push) and exits non-zero, so the step shows
+red. The two success reports (`verify-artifact`'s last step and `pr-checks`'
+`on_success`) are wrapped in `try:` so that step's failure is not the job's, and the
+job's own `on_failure` does not post `failure` for a suite that passed. Because of
+`try:` the Concourse build itself goes green and only the inner `check-run` step is
+red, so a green build does not mean the report landed. The check stays in progress,
+which blocks the PR, and `pr-pick.sh` re-judges that head on its next ten-minute
+tick and reports again. A suite that
+really failed still posts `failure`, with the same retries, and if that post never
+gets through the step exits non-zero and the build stays red. A `start` report that
+cannot get through still fails its job (follow-up, not changed here).
+
 The scanning lanes `sast`, `secrets`, `sca` and `iac` are part of this verdict
 since TheHub #60850. `build-and-attest` gathers them: its `passed:` names all
 seven verifying lanes, so `verify-artifact` reports success only for a commit
@@ -526,6 +546,16 @@ token:
   pull-request code. `pr-checks` runs the pull request's code and gets **no params**.
   The end reports run main's `check-run.yml` and `check-run.sh` from `repo/` with the
   token, and read only the head's sha, from `pr-sha/HEAD` (`HEAD_FILE`).
+- **The picker's state is never in the pull request's tree (TheHub #62015).** `pr-pick`
+  writes `.pr` (or `.none`, "nothing to judge") to its own output, `pr-meta/`, and
+  `pr-checks` reads it from there and refuses unless `pr/` is checked out at the picked
+  sha. The first version wrote the markers into `pr/`, the author's tree: a `.none`
+  committed in a pull request made `pr-checks` pass without running a suite, and the
+  check posted green on that head. `pr-checks` declares no outputs and no params, so
+  Concourse discards anything pull-request code writes to `repo/`, `pr/`, `pr-meta/` or
+  `pr-sha/`; `test/check-run.test.py` holds that task shape, and `.sdlc/threat-model.yaml`
+  names pull-request code on the workers (`pr-code-on-workers`). A head that moves between
+  `ls-remote` and `fetch` fails the pick and records nothing (`test/pr-pick.test.py`).
 - **Never map pull-request code into a credentialed step.** A task's `run:` path names an
   input, so `input_mapping: { repo: pr }` on a report would run the **pull request's**
   `check-run.sh` with the token. The first version of this job did exactly that (TheHub
