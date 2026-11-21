@@ -937,6 +937,26 @@ check "a..b.md under evidence"                allow "$(wpayload 'evidence/142/a.
 check "a colon outside evidence"              allow "$(wpayload 'src/x:y.txt' 'x')"                              guard-write.sh
 
 echo ""
+echo "guard-write.sh — the review-round-3 nits (TheHub #62037)"
+# 1. The trailing-dot flag is the last KEPT segment's: a later segment popped by .. must not reset it.
+check "a trailing dot kept, x/.. after it"     block "$(wpayload 'evidence/142/b.md./x/..' 'x')"                 guard-write.sh
+check "a trailing space kept, x/.. after it"   block "$(wpayload 'evidence/142/b.md /x/..' 'x')"                 guard-write.sh
+check "a trailing dot popped by .."            allow "$(wpayload 'evidence/142/x./../b.md' 'x')"                 guard-write.sh
+# 3. The cut reading is popped by .. too, so a ':' in a segment that .. left behind is not evidence.
+check "evidence/.. then a colon file, resolved" allow "$(wpayload 'evidence/../src/a:b.txt' 'x')"                guard-write.sh
+check "out of evidence via .., a ':' in the cwd" allow "$(cwpayload '../../src/a.py' 'x = 1' '/srv/u/my:proj/evidence/142')" guard-write.sh
+check "evidence:foo, then .. inside it"        block "$(wpayload 'evidence:foo/x/../142/a.sarif' 'x')"           guard-write.sh
+# 2. No refusal echoes a control character raw: the "hand-editing" message is cleaned too.
+for guard_raw_case in 'evidence/142/a\u001b[31m.sarif' 'evidence/142/b.md.\u0007'; do
+  guard_err=$(printf '{"tool_input":{"file_path":"%s","content":"x"}}' "$guard_raw_case" | bash .claude/hooks/guard-write.sh 2>&1 >/dev/null); rc=$?
+  case "$guard_err" in
+    *[$'\001'-$'\011'$'\013'-$'\037'$'\177']*) printf '  [FAIL] %-52s %s\n' "no raw control character: $guard_raw_case" "raw in stderr (rc $rc)"; fail=$((fail+1)) ;;
+    *) if [ "$rc" -eq 2 ]; then printf '  [ok]   %-52s %s\n' "no raw control character: $guard_raw_case" "block, cleaned"; pass=$((pass+1))
+       else printf '  [FAIL] %-52s %s\n' "no raw control character: $guard_raw_case" "expected block, got rc $rc"; fail=$((fail+1)); fi ;;
+  esac
+done
+
+echo ""
 echo "──────────────────────────────────────────────────────────────"
 printf '  %d passed, %d failed\n' "$pass" "$fail"
 if [ "$fail" -ne 0 ]; then
