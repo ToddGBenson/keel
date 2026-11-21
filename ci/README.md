@@ -418,6 +418,22 @@ check run per commit. That is the pattern MyKronos D-136 built for TheHub, reuse
 here under TheHub #60580. It does not reopen the archived-resource-type question
 above: there is no new resource type, and no GitHub credential in the pipeline.
 
+**An unreachable reporter never turns a passing suite red (TheHub #62097).** On
+2026-11-18 binnacle #89 passed every unit suite, then `check-run.sh` got curl exit 6
+three times reaching MyKronos, and the job's `on_failure` hook posted `failure`: a
+passing head was recorded red and a train slot was lost. Now `check-run.sh` retries
+a report five times over about two minutes on curl's transient exits (6, 7, 28, 35,
+52, 56) and on a 408, 429 or 5xx, and never retries a refusal. If every try fails
+after a passing suite it posts nothing that says `failure` (at most one
+`cancelled`, which MyKronos never lets replace a failure) and exits non-zero, so the
+step shows red in the build. The two success reports (`verify-artifact`'s last step
+and `pr-checks`' `on_success`) are wrapped in `try:` so that step's failure is not
+the job's, and the job's own `on_failure` does not post `failure` for a suite that
+passed; the check stays as it was, and one still in progress blocks. A suite that
+really failed still posts `failure`, with the same retries, and if that post never
+gets through the step exits non-zero and the build stays red. A `start` report that
+cannot get through still fails its job (follow-up, not changed here).
+
 The scanning lanes `sast`, `secrets`, `sca` and `iac` are part of this verdict
 since TheHub #60850. `build-and-attest` gathers them: its `passed:` names all
 seven verifying lanes, so `verify-artifact` reports success only for a commit
