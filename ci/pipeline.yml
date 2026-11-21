@@ -483,15 +483,15 @@ jobs:
       task: check-run
       tags: [linux]
       file: repo/ci/tasks/check-run.yml
-      # Three attempts of 45s plus two 5s delays is 145s; 5m is twice that.
-      timeout: 5m
+      # Five tries of 45s plus 120s of backoff is 345s; 10m covers it (TheHub #62097).
+      timeout: 10m
       params: { <<: *check_run_params, JOB: build, PHASE: end, CONCLUSION: failure }
     on_error:
       task: check-run
       tags: [linux]
       file: repo/ci/tasks/check-run.yml
-      # Three attempts of 45s plus two 5s delays is 145s; 5m is twice that.
-      timeout: 5m
+      # Five tries of 45s plus 120s of backoff is 345s; 10m covers it (TheHub #62097).
+      timeout: 10m
       params: { <<: *check_run_params, JOB: build, PHASE: end, CONCLUSION: failure }
     plan:
       - get: repo
@@ -508,7 +508,7 @@ jobs:
       - task: check-run
         tags: [linux]
         file: repo/ci/tasks/check-run.yml
-        timeout: 5m
+        timeout: 10m
         params: { <<: *check_run_params, JOB: build, PHASE: start }
       - task: build
         tags: [linux]
@@ -523,15 +523,15 @@ jobs:
       task: check-run
       tags: [linux]
       file: repo/ci/tasks/check-run.yml
-      # Three attempts of 45s plus two 5s delays is 145s; 5m is twice that.
-      timeout: 5m
+      # Five tries of 45s plus 120s of backoff is 345s; 10m covers it (TheHub #62097).
+      timeout: 10m
       params: { <<: *check_run_params, JOB: lint, PHASE: end, CONCLUSION: failure }
     on_error:
       task: check-run
       tags: [linux]
       file: repo/ci/tasks/check-run.yml
-      # Three attempts of 45s plus two 5s delays is 145s; 5m is twice that.
-      timeout: 5m
+      # Five tries of 45s plus 120s of backoff is 345s; 10m covers it (TheHub #62097).
+      timeout: 10m
       params: { <<: *check_run_params, JOB: lint, PHASE: end, CONCLUSION: failure }
     plan:
       - get: repo
@@ -593,15 +593,15 @@ jobs:
       task: check-run
       tags: [linux]
       file: repo/ci/tasks/check-run.yml
-      # Three attempts of 45s plus two 5s delays is 145s; 5m is twice that.
-      timeout: 5m
+      # Five tries of 45s plus 120s of backoff is 345s; 10m covers it (TheHub #62097).
+      timeout: 10m
       params: { <<: *check_run_params, JOB: test, PHASE: end, CONCLUSION: failure }
     on_error:
       task: check-run
       tags: [linux]
       file: repo/ci/tasks/check-run.yml
-      # Three attempts of 45s plus two 5s delays is 145s; 5m is twice that.
-      timeout: 5m
+      # Five tries of 45s plus 120s of backoff is 345s; 10m covers it (TheHub #62097).
+      timeout: 10m
       params: { <<: *check_run_params, JOB: test, PHASE: end, CONCLUSION: failure }
     plan:
       - get: repo
@@ -662,15 +662,15 @@ jobs:
       task: check-run
       tags: [linux]
       file: repo/ci/tasks/check-run.yml
-      # Three attempts of 45s plus two 5s delays is 145s; 5m is twice that.
-      timeout: 5m
+      # Five tries of 45s plus 120s of backoff is 345s; 10m covers it (TheHub #62097).
+      timeout: 10m
       params: { <<: *check_run_params, JOB: sast, PHASE: end, CONCLUSION: failure }
     on_error:
       task: check-run
       tags: [linux]
       file: repo/ci/tasks/check-run.yml
-      # Three attempts of 45s plus two 5s delays is 145s; 5m is twice that.
-      timeout: 5m
+      # Five tries of 45s plus 120s of backoff is 345s; 10m covers it (TheHub #62097).
+      timeout: 10m
       params: { <<: *check_run_params, JOB: sast, PHASE: end, CONCLUSION: failure }
     plan:
       - get: repo
@@ -729,15 +729,15 @@ jobs:
       task: check-run
       tags: [linux]
       file: repo/ci/tasks/check-run.yml
-      # Three attempts of 45s plus two 5s delays is 145s; 5m is twice that.
-      timeout: 5m
+      # Five tries of 45s plus 120s of backoff is 345s; 10m covers it (TheHub #62097).
+      timeout: 10m
       params: { <<: *check_run_params, JOB: secrets, PHASE: end, CONCLUSION: failure }
     on_error:
       task: check-run
       tags: [linux]
       file: repo/ci/tasks/check-run.yml
-      # Three attempts of 45s plus two 5s delays is 145s; 5m is twice that.
-      timeout: 5m
+      # Five tries of 45s plus 120s of backoff is 345s; 10m covers it (TheHub #62097).
+      timeout: 10m
       params: { <<: *check_run_params, JOB: secrets, PHASE: end, CONCLUSION: failure }
     plan:
       - get: repo
@@ -766,15 +766,15 @@ jobs:
       task: check-run
       tags: [linux]
       file: repo/ci/tasks/check-run.yml
-      # Three attempts of 45s plus two 5s delays is 145s; 5m is twice that.
-      timeout: 5m
+      # Five tries of 45s plus 120s of backoff is 345s; 10m covers it (TheHub #62097).
+      timeout: 10m
       params: { <<: *check_run_params, JOB: sca, PHASE: end, CONCLUSION: failure }
     on_error:
       task: check-run
       tags: [linux]
       file: repo/ci/tasks/check-run.yml
-      # Three attempts of 45s plus two 5s delays is 145s; 5m is twice that.
-      timeout: 5m
+      # Five tries of 45s plus 120s of backoff is 345s; 10m covers it (TheHub #62097).
+      timeout: 10m
       params: { <<: *check_run_params, JOB: sca, PHASE: end, CONCLUSION: failure }
     plan:
       - get: repo
@@ -825,15 +825,15 @@ jobs:
       task: check-run
       tags: [linux]
       file: repo/ci/tasks/check-run.yml
-      # Three attempts of 45s plus two 5s delays is 145s; 5m is twice that.
-      timeout: 5m
+      # Five tries of 45s plus 120s of backoff is 345s; 10m covers it (TheHub #62097).
+      timeout: 10m
       params: { <<: *check_run_params, JOB: iac, PHASE: end, CONCLUSION: failure }
     on_error:
       task: check-run
       tags: [linux]
       file: repo/ci/tasks/check-run.yml
-      # Three attempts of 45s plus two 5s delays is 145s; 5m is twice that.
-      timeout: 5m
+      # Five tries of 45s plus 120s of backoff is 345s; 10m covers it (TheHub #62097).
+      timeout: 10m
       params: { <<: *check_run_params, JOB: iac, PHASE: end, CONCLUSION: failure }
     plan:
       - get: repo
@@ -1226,24 +1226,31 @@ jobs:
     # ingestion token, and read ONLY the head's sha, from pr-sha/HEAD. Never map the
     # pull request's checkout into a credentialed step: its script path would then
     # be the pull request's (TheHub #61778 review #1; test/check-run.test.py).
+    #
+    # [TheHub #62097] The success report is wrapped in `try:`. Concourse runs this job's
+    # `on_failure` when an `on_success` hook fails, and that hook posts `failure`: an
+    # unreachable reporter would record a passing head red (binnacle #89, 2026-11-18).
+    # check-run.sh retries, then exits non-zero, so the step still shows red in the
+    # build; the check stays as it was, and one still in progress blocks.
     on_success:
-      task: check-run
-      tags: [linux]
-      file: repo/ci/tasks/check-run.yml
-      # Three attempts of 45s plus two 5s delays is 145s; 5m is twice that.
-      timeout: 5m
-      params: { <<: *check_run_params, JOB: pr-checks, PHASE: end, CONCLUSION: success, NO_COMMIT_OK: "1", HEAD_FILE: pr-sha/HEAD }
+      try:
+        task: check-run
+        tags: [linux]
+        file: repo/ci/tasks/check-run.yml
+        # Five tries of 45s plus 120s of backoff is 345s; 10m covers it (TheHub #62097).
+        timeout: 10m
+        params: { <<: *check_run_params, JOB: pr-checks, PHASE: end, CONCLUSION: success, NO_COMMIT_OK: "1", HEAD_FILE: pr-sha/HEAD }
     on_failure:
       task: check-run
       tags: [linux]
       file: repo/ci/tasks/check-run.yml
-      timeout: 5m
+      timeout: 10m
       params: { <<: *check_run_params, JOB: pr-checks, PHASE: end, CONCLUSION: failure, NO_COMMIT_OK: "1", HEAD_FILE: pr-sha/HEAD }
     on_error:
       task: check-run
       tags: [linux]
       file: repo/ci/tasks/check-run.yml
-      timeout: 5m
+      timeout: 10m
       params: { <<: *check_run_params, JOB: pr-checks, PHASE: end, CONCLUSION: failure, NO_COMMIT_OK: "1", HEAD_FILE: pr-sha/HEAD }
     plan:
       - get: repo
@@ -1347,15 +1354,15 @@ jobs:
       task: check-run
       tags: [linux]
       file: repo/ci/tasks/check-run.yml
-      # Three attempts of 45s plus two 5s delays is 145s; 5m is twice that.
-      timeout: 5m
+      # Five tries of 45s plus 120s of backoff is 345s; 10m covers it (TheHub #62097).
+      timeout: 10m
       params: { <<: *check_run_params, JOB: build-and-attest, PHASE: end, CONCLUSION: failure }
     on_error:
       task: check-run
       tags: [linux]
       file: repo/ci/tasks/check-run.yml
-      # Three attempts of 45s plus two 5s delays is 145s; 5m is twice that.
-      timeout: 5m
+      # Five tries of 45s plus 120s of backoff is 345s; 10m covers it (TheHub #62097).
+      timeout: 10m
       params: { <<: *check_run_params, JOB: build-and-attest, PHASE: end, CONCLUSION: failure }
     plan:
       # The gather. Every verifying lane, on the same commit, before anything
@@ -1402,15 +1409,15 @@ jobs:
       task: check-run
       tags: [linux]
       file: repo/ci/tasks/check-run.yml
-      # Three attempts of 45s plus two 5s delays is 145s; 5m is twice that.
-      timeout: 5m
+      # Five tries of 45s plus 120s of backoff is 345s; 10m covers it (TheHub #62097).
+      timeout: 10m
       params: { <<: *check_run_params, JOB: verify-artifact, PHASE: end, CONCLUSION: failure }
     on_error:
       task: check-run
       tags: [linux]
       file: repo/ci/tasks/check-run.yml
-      # Three attempts of 45s plus two 5s delays is 145s; 5m is twice that.
-      timeout: 5m
+      # Five tries of 45s plus 120s of backoff is 345s; 10m covers it (TheHub #62097).
+      timeout: 10m
       params: { <<: *check_run_params, JOB: verify-artifact, PHASE: end, CONCLUSION: failure }
     plan:
       - get: repo
@@ -1432,11 +1439,17 @@ jobs:
           REPO_SLUG: ((github_owner))/((github_repo))
       # Last, so it runs only once the whole chain has passed on this commit:
       # this is the step that turns `Concourse / keel` green.
-      - task: check-run
-        tags: [linux]
-        file: repo/ci/tasks/check-run.yml
-        timeout: 5m
-        params: { <<: *check_run_params, JOB: verify-artifact, PHASE: end, CONCLUSION: success }
+      #
+      # [TheHub #62097] Wrapped in `try:`. This is the job's last step, so its failure
+      # is the job's, and the `on_failure` above would post `failure` for a commit
+      # whose every lane passed. check-run.sh retries, then exits non-zero: the step
+      # shows red in the build, and the check stays in progress rather than red.
+      - try:
+          task: check-run
+          tags: [linux]
+          file: repo/ci/tasks/check-run.yml
+          timeout: 10m
+          params: { <<: *check_run_params, JOB: verify-artifact, PHASE: end, CONCLUSION: success }
 
   # ── Release (G5) is NOT in this pipeline (POAM-016, TheHub #60935) ───────────
   #
