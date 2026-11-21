@@ -1,6 +1,6 @@
 # Self-review — TheHub #62072: platform-release.sh verify --key (61779 A)
 
-PR: #PRNUM (binnacle pair: #PAIRNUM)   Author: Claude Opus 5.5 (AI-authored)   Date: 2026-11-20
+PR: #206 (binnacle pair: #103)   Author: Claude Opus 5.5 (AI-authored)   Date: 2026-11-20
 Story: the verifier only checks keyless signatures (a Fulcio certificate for release.yml at the
 tag). A keyed release signed in Concourse with a Vault transit key (61779 B, TheHub #62073)
 cannot be verified. Add a keyed mode, with the public key read from the trusted ref.
