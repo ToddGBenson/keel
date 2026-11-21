@@ -426,11 +426,15 @@ def unreachable_reporter_checks():
     check("and says the reporter was unreachable and the suite passed",
           "reporter unreachable; suite passed" in r.stdout + r.stderr, r.stdout + r.stderr)
 
-    # b. the one `cancelled` post, when a post gets through at the end.
+    # b. nothing is posted after the fifth failed try, even if a sixth post would get
+    # through. A `cancelled` would complete the check, pr-pick.sh skips completed heads
+    # and the PR would stay blocked until a new push; left in progress, pr-pick
+    # re-judges the head on the next tick.
     r, bodies, _, _ = run_full(SHA, CURL_RCS="6 6 6 6 6 0", **ok)
     concl = [b["conclusion"] for b in bodies]
-    check("if a post then gets through it is cancelled, never failure",
-          concl == ["success"] * 5 + ["cancelled"], concl)
+    check("after five failed tries nothing more is posted, no cancelled",
+          concl == ["success"] * 5, concl)
+    check("so a passing head is never completed as cancelled", "cancelled" not in concl, concl)
     check("and the step still exits non-zero", r.returncode != 0)
 
     # c. transient exits are retried until one goes through.
@@ -441,9 +445,9 @@ def unreachable_reporter_checks():
         r, bodies, _, _ = run_full(SHA, CURL_RCS=f"{rc} 0", **ok)
         check(f"curl exit {rc} is retried", r.returncode == 0 and len(bodies) == 2, (r.returncode, len(bodies)))
 
-    # d. a refusal is an answer, not an outage: no retry, no cancelled.
+    # d. a refusal is an answer, not an outage: no retry, nothing more posted.
     r, bodies, _, sleeps = run_full(SHA, CURL_RC="22", CURL_CODE="422", **ok)
-    check("a 4xx refusal is not retried and is not turned into a cancelled",
+    check("a 4xx refusal is not retried and posts nothing more",
           r.returncode != 0 and len(bodies) == 1 and not sleeps, (len(bodies), sleeps))
     r, bodies, _, _ = run_full(SHA, CURL_RCS="22 0", CURL_CODE="503", **ok)
     check("a 503 is retried", r.returncode == 0 and len(bodies) == 2, len(bodies))
