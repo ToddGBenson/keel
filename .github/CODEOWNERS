@@ -35,6 +35,7 @@
 /.github/CODEOWNERS             @ToddGBenson
 /.github/dependabot.yml         @ToddGBenson
 /.github/release-floor          @ToddGBenson
+/.github/cosign.pub             @ToddGBenson
 
 # ---------------------------------------------------------------------------
 # Agent and command definitions are configuration items under change control.
