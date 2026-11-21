@@ -424,12 +424,16 @@ three times reaching MyKronos, and the job's `on_failure` hook posted `failure`:
 passing head was recorded red and a train slot was lost. Now `check-run.sh` retries
 a report five times over about two minutes on curl's transient exits (6, 7, 28, 35,
 52, 56) and on a 408, 429 or 5xx, and never retries a refusal. If every try fails
-after a passing suite it posts nothing that says `failure` (at most one
-`cancelled`, which MyKronos never lets replace a failure) and exits non-zero, so the
-step shows red in the build. The two success reports (`verify-artifact`'s last step
-and `pr-checks`' `on_success`) are wrapped in `try:` so that step's failure is not
-the job's, and the job's own `on_failure` does not post `failure` for a suite that
-passed; the check stays as it was, and one still in progress blocks. A suite that
+after a passing suite it posts nothing more (not `failure`, and not `cancelled`: a
+`cancelled` would complete the check, `pr-pick.sh` skips every completed head, and
+the PR would stay blocked until a new push) and exits non-zero, so the step shows
+red. The two success reports (`verify-artifact`'s last step and `pr-checks`'
+`on_success`) are wrapped in `try:` so that step's failure is not the job's, and the
+job's own `on_failure` does not post `failure` for a suite that passed. Because of
+`try:` the Concourse build itself goes green and only the inner `check-run` step is
+red, so a green build does not mean the report landed. The check stays in progress,
+which blocks the PR, and `pr-pick.sh` re-judges that head on its next ten-minute
+tick and reports again. A suite that
 really failed still posts `failure`, with the same retries, and if that post never
 gets through the step exits non-zero and the build stays red. A `start` report that
 cannot get through still fails its job (follow-up, not changed here).

@@ -18,11 +18,13 @@
 #
 # [TheHub #62097] An unreachable reporter must not turn a passing suite red. A report
 # of a PASSING suite that cannot get through is retried five times over about two
-# minutes; if every try fails it posts nothing that says `failure` (at most one
-# `cancelled`, "no verdict reached", which MyKronos never lets replace a failure),
-# and exits non-zero so Concourse shows the error. The pipeline wraps that step in
-# `try:` so its failure is not the job's, and the job's own `on_failure` hook does
-# not post `failure` for a suite that passed. A suite that really FAILED still posts
+# minutes; if every try fails it posts NOTHING more (not `failure`, and not a
+# `cancelled` either: a `cancelled` would complete the check, pr-pick.sh skips every
+# completed head, and the PR would stay blocked until a new push, while a check left
+# in progress is re-judged on the next tick) and exits non-zero so the step shows red.
+# The pipeline wraps that step in `try:` so its failure is not the job's (the build
+# itself goes green and only the inner step is red), and the job's own `on_failure`
+# hook does not post `failure` for a suite that passed. A suite that really FAILED still posts
 # `failure`, with the same retries, and if that post is unreachable the step exits
 # non-zero and the build stays red in Concourse.
 set -eu
@@ -85,8 +87,8 @@ body_for() {
 # in a header, the same way mykronos-preflight.sh sends it.
 #
 # The backoff is 10, 20, 30 and 60 seconds between five tries: about two minutes.
-# Five tries of --max-time 45 plus that is 345s, and the one `cancelled` post after
-# them is 45s more, so the 10m step timeout in ci/pipeline.yml holds with room.
+# Five tries of --max-time 45 plus that is 345s, so the 10m step timeout in
+# ci/pipeline.yml holds with room.
 post() {
   _body=$1
   _tries=${2:-5}
@@ -134,10 +136,10 @@ if [ "$_status" -eq 0 ]; then
 fi
 
 if [ "$_status" -eq 2 ] && [ "$PHASE" = end ] && [ "${CONCLUSION:-}" = success ]; then
-  # The suite passed and only the report failed. Say so where MyKronos can be
-  # reached, once, as a verdict of "none reached" and never as a failure.
+  # The suite passed and only the report failed. Say so in the build log and post
+  # nothing more: the check stays in progress, which pr-pick.sh re-judges on its next
+  # tick, whereas a `cancelled` would complete it and strand the head.
   echo "check-run: reporter unreachable; suite passed. Not reporting failure for ${JOB} on ${SHA}."
-  post "$(body_for '"cancelled"')" 1 >/dev/null 2>&1 || true
 fi
 echo "The ${PHASE} report for ${JOB} on ${SHA} did not get through, so this step fails." >&2
 exit 1

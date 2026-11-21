@@ -483,14 +483,14 @@ jobs:
       task: check-run
       tags: [linux]
       file: repo/ci/tasks/check-run.yml
-      # Five tries of 45s plus 120s of backoff, then one 45s post, is 390s; 10m covers it (TheHub #62097).
+      # Five tries of 45s plus 120s of backoff is 345s; 10m covers it (TheHub #62097).
       timeout: 10m
       params: { <<: *check_run_params, JOB: build, PHASE: end, CONCLUSION: failure }
     on_error:
       task: check-run
       tags: [linux]
       file: repo/ci/tasks/check-run.yml
-      # Five tries of 45s plus 120s of backoff, then one 45s post, is 390s; 10m covers it (TheHub #62097).
+      # Five tries of 45s plus 120s of backoff is 345s; 10m covers it (TheHub #62097).
       timeout: 10m
       params: { <<: *check_run_params, JOB: build, PHASE: end, CONCLUSION: failure }
     plan:
@@ -523,14 +523,14 @@ jobs:
       task: check-run
       tags: [linux]
       file: repo/ci/tasks/check-run.yml
-      # Five tries of 45s plus 120s of backoff, then one 45s post, is 390s; 10m covers it (TheHub #62097).
+      # Five tries of 45s plus 120s of backoff is 345s; 10m covers it (TheHub #62097).
       timeout: 10m
       params: { <<: *check_run_params, JOB: lint, PHASE: end, CONCLUSION: failure }
     on_error:
       task: check-run
       tags: [linux]
       file: repo/ci/tasks/check-run.yml
-      # Five tries of 45s plus 120s of backoff, then one 45s post, is 390s; 10m covers it (TheHub #62097).
+      # Five tries of 45s plus 120s of backoff is 345s; 10m covers it (TheHub #62097).
       timeout: 10m
       params: { <<: *check_run_params, JOB: lint, PHASE: end, CONCLUSION: failure }
     plan:
@@ -593,14 +593,14 @@ jobs:
       task: check-run
       tags: [linux]
       file: repo/ci/tasks/check-run.yml
-      # Five tries of 45s plus 120s of backoff, then one 45s post, is 390s; 10m covers it (TheHub #62097).
+      # Five tries of 45s plus 120s of backoff is 345s; 10m covers it (TheHub #62097).
       timeout: 10m
       params: { <<: *check_run_params, JOB: test, PHASE: end, CONCLUSION: failure }
     on_error:
       task: check-run
       tags: [linux]
       file: repo/ci/tasks/check-run.yml
-      # Five tries of 45s plus 120s of backoff, then one 45s post, is 390s; 10m covers it (TheHub #62097).
+      # Five tries of 45s plus 120s of backoff is 345s; 10m covers it (TheHub #62097).
       timeout: 10m
       params: { <<: *check_run_params, JOB: test, PHASE: end, CONCLUSION: failure }
     plan:
@@ -662,14 +662,14 @@ jobs:
       task: check-run
       tags: [linux]
       file: repo/ci/tasks/check-run.yml
-      # Five tries of 45s plus 120s of backoff, then one 45s post, is 390s; 10m covers it (TheHub #62097).
+      # Five tries of 45s plus 120s of backoff is 345s; 10m covers it (TheHub #62097).
       timeout: 10m
       params: { <<: *check_run_params, JOB: sast, PHASE: end, CONCLUSION: failure }
     on_error:
       task: check-run
       tags: [linux]
       file: repo/ci/tasks/check-run.yml
-      # Five tries of 45s plus 120s of backoff, then one 45s post, is 390s; 10m covers it (TheHub #62097).
+      # Five tries of 45s plus 120s of backoff is 345s; 10m covers it (TheHub #62097).
       timeout: 10m
       params: { <<: *check_run_params, JOB: sast, PHASE: end, CONCLUSION: failure }
     plan:
@@ -729,14 +729,14 @@ jobs:
       task: check-run
       tags: [linux]
       file: repo/ci/tasks/check-run.yml
-      # Five tries of 45s plus 120s of backoff, then one 45s post, is 390s; 10m covers it (TheHub #62097).
+      # Five tries of 45s plus 120s of backoff is 345s; 10m covers it (TheHub #62097).
       timeout: 10m
       params: { <<: *check_run_params, JOB: secrets, PHASE: end, CONCLUSION: failure }
     on_error:
       task: check-run
       tags: [linux]
       file: repo/ci/tasks/check-run.yml
-      # Five tries of 45s plus 120s of backoff, then one 45s post, is 390s; 10m covers it (TheHub #62097).
+      # Five tries of 45s plus 120s of backoff is 345s; 10m covers it (TheHub #62097).
       timeout: 10m
       params: { <<: *check_run_params, JOB: secrets, PHASE: end, CONCLUSION: failure }
     plan:
@@ -766,14 +766,14 @@ jobs:
       task: check-run
       tags: [linux]
       file: repo/ci/tasks/check-run.yml
-      # Five tries of 45s plus 120s of backoff, then one 45s post, is 390s; 10m covers it (TheHub #62097).
+      # Five tries of 45s plus 120s of backoff is 345s; 10m covers it (TheHub #62097).
       timeout: 10m
       params: { <<: *check_run_params, JOB: sca, PHASE: end, CONCLUSION: failure }
     on_error:
       task: check-run
       tags: [linux]
       file: repo/ci/tasks/check-run.yml
-      # Five tries of 45s plus 120s of backoff, then one 45s post, is 390s; 10m covers it (TheHub #62097).
+      # Five tries of 45s plus 120s of backoff is 345s; 10m covers it (TheHub #62097).
       timeout: 10m
       params: { <<: *check_run_params, JOB: sca, PHASE: end, CONCLUSION: failure }
     plan:
@@ -825,14 +825,14 @@ jobs:
       task: check-run
       tags: [linux]
       file: repo/ci/tasks/check-run.yml
-      # Five tries of 45s plus 120s of backoff, then one 45s post, is 390s; 10m covers it (TheHub #62097).
+      # Five tries of 45s plus 120s of backoff is 345s; 10m covers it (TheHub #62097).
       timeout: 10m
       params: { <<: *check_run_params, JOB: iac, PHASE: end, CONCLUSION: failure }
     on_error:
       task: check-run
       tags: [linux]
       file: repo/ci/tasks/check-run.yml
-      # Five tries of 45s plus 120s of backoff, then one 45s post, is 390s; 10m covers it (TheHub #62097).
+      # Five tries of 45s plus 120s of backoff is 345s; 10m covers it (TheHub #62097).
       timeout: 10m
       params: { <<: *check_run_params, JOB: iac, PHASE: end, CONCLUSION: failure }
     plan:
@@ -1237,7 +1237,7 @@ jobs:
         task: check-run
         tags: [linux]
         file: repo/ci/tasks/check-run.yml
-        # Five tries of 45s plus 120s of backoff, then one 45s post, is 390s; 10m covers it (TheHub #62097).
+        # Five tries of 45s plus 120s of backoff is 345s; 10m covers it (TheHub #62097).
         timeout: 10m
         params: { <<: *check_run_params, JOB: pr-checks, PHASE: end, CONCLUSION: success, NO_COMMIT_OK: "1", HEAD_FILE: pr-sha/HEAD }
     on_failure:
@@ -1354,14 +1354,14 @@ jobs:
       task: check-run
       tags: [linux]
       file: repo/ci/tasks/check-run.yml
-      # Five tries of 45s plus 120s of backoff, then one 45s post, is 390s; 10m covers it (TheHub #62097).
+      # Five tries of 45s plus 120s of backoff is 345s; 10m covers it (TheHub #62097).
       timeout: 10m
       params: { <<: *check_run_params, JOB: build-and-attest, PHASE: end, CONCLUSION: failure }
     on_error:
       task: check-run
       tags: [linux]
       file: repo/ci/tasks/check-run.yml
-      # Five tries of 45s plus 120s of backoff, then one 45s post, is 390s; 10m covers it (TheHub #62097).
+      # Five tries of 45s plus 120s of backoff is 345s; 10m covers it (TheHub #62097).
       timeout: 10m
       params: { <<: *check_run_params, JOB: build-and-attest, PHASE: end, CONCLUSION: failure }
     plan:
@@ -1409,14 +1409,14 @@ jobs:
       task: check-run
       tags: [linux]
       file: repo/ci/tasks/check-run.yml
-      # Five tries of 45s plus 120s of backoff, then one 45s post, is 390s; 10m covers it (TheHub #62097).
+      # Five tries of 45s plus 120s of backoff is 345s; 10m covers it (TheHub #62097).
       timeout: 10m
       params: { <<: *check_run_params, JOB: verify-artifact, PHASE: end, CONCLUSION: failure }
     on_error:
       task: check-run
       tags: [linux]
       file: repo/ci/tasks/check-run.yml
-      # Five tries of 45s plus 120s of backoff, then one 45s post, is 390s; 10m covers it (TheHub #62097).
+      # Five tries of 45s plus 120s of backoff is 345s; 10m covers it (TheHub #62097).
       timeout: 10m
       params: { <<: *check_run_params, JOB: verify-artifact, PHASE: end, CONCLUSION: failure }
     plan:
