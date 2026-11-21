@@ -9,16 +9,26 @@
 # no ingestion token, no params at all. The script itself is the BASE branch's copy
 # (repo/), so a pull request cannot change how it is judged by editing this file.
 #
-# `pr/.none` means pr-pick.sh found nothing to judge: a pass that runs nothing.
+# `pr-meta/.none` means pr-pick.sh found nothing to judge: a pass that runs nothing. That
+# state is read from pr-meta/, which the picker owns. It is never read from pr/, the pull
+# request's own tree: a file the author commits there must not decide whether the suites
+# run (TheHub #62015).
 set -uo pipefail
 
 PR_DIR="${PR_DIR:-pr}"
-if [ -f "$PR_DIR/.none" ]; then
+META_DIR="${META_DIR:-pr-meta}"
+if [ -f "$META_DIR/.none" ]; then
   echo "No pull request head to judge this run."
   exit 0
 fi
-[ -f "$PR_DIR/.pr" ] || { echo "pr/ has no picked head (.pr missing); refusing to judge." >&2; exit 1; }
-read -r number sha branch < "$PR_DIR/.pr"
+[ -f "$META_DIR/.pr" ] || { echo "pr-meta/ has no picked head (.pr missing); refusing to judge." >&2; exit 1; }
+read -r number sha branch < "$META_DIR/.pr"
+# The checkout must be the head that was picked. A mismatch is refused, never judged.
+checked_out=$(tr -d ' \n\r\t' < "$PR_DIR/.git/HEAD" 2>/dev/null || true)
+if [ -z "$sha" ] || [ "$checked_out" != "$sha" ]; then
+  echo "pr/ is not at the picked head (picked '${sha}', checked out '${checked_out}'); refusing to judge." >&2
+  exit 1
+fi
 echo "Unit suites on #${number} ${sha} (${branch})."
 
 # The pull request's own pins, as Actions installs them.
