@@ -108,7 +108,7 @@ post() {
       return 0
     fi
     _transient=0
-    case " 6 7 28 35 52 56 " in *" $_rc "*) _transient=1 ;; esac
+    case "$_rc" in 6|7|28|35|52|56) _transient=1 ;; esac
     if [ "$_rc" -eq 22 ]; then
       case "$_code" in 408|429|5[0-9][0-9]) _transient=1 ;; esac
     fi

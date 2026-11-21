@@ -817,6 +817,22 @@ check "tag -m <mark 2>x v*"                   block "$(ctl 'git tag -m "CTLx" v0
 check "PS: tag -m <mark 1> v*"                block "$(pctl 'git tag -m "CTL" v0.0.0' 1)"                         guard-bash.sh
 check "commit -m with a mark in it"           allow "$(ctl 'git commit -m "aCTLb"' 1)"                            guard-bash.sh
 check "push -o <mark 1> a branch"             allow "$(ctl 'git push -o "CTL" origin feat' 1)"                    guard-bash.sh
+# The same, with the checkout pinned to main (TheHub #61972 follow-up): a mark inside -o's value
+# must not end the command and leave "origin feat" judged as a push of the current branch. The
+# case above takes the cwd of whoever runs the selftest, so it was red only when that was main.
+cctl() { ctl "$2" "$3" | sed "s|^{|{\"cwd\":\"$1\",|"; }
+cmain=$(mktemp -d); cfeat=$(mktemp -d)
+git -C "$cmain" init -q -b main 2>/dev/null || { git -C "$cmain" init -q; git -C "$cmain" checkout -q -b main; }
+git -C "$cfeat" init -q -b feat 2>/dev/null || { git -C "$cfeat" init -q; git -C "$cfeat" checkout -q -b feat; }
+check "on main: push -o <mark 1> a branch"    allow "$(cctl "$cmain" 'git push -o "CTL" origin feat' 1)"        guard-bash.sh
+check "on main: push -o <mark 2>x a branch"   allow "$(cctl "$cmain" 'git push -o "CTLx" origin feat' 2)"       guard-bash.sh
+check "on main: push -o <mark 3> a branch"    allow "$(cctl "$cmain" 'git push -o "CTL" origin feat' 3)"        guard-bash.sh
+check "on main: push -o <mark 1>, no refspec" block "$(cctl "$cmain" 'git push -o "CTL" origin' 1)"            guard-bash.sh
+check "on main: push -o <mark 1> origin main" block "$(cctl "$cmain" 'git push -o "CTL" origin main' 1)"        guard-bash.sh
+check "on main: push -o <mark 1> force"       block "$(cctl "$cmain" 'git push -o "CTL" --force origin feat' 1)" guard-bash.sh
+check "on main: push -o <mark 1> a v* tag"    block "$(cctl "$cmain" 'git push -o "CTL" origin v0.0.0' 1)"      guard-bash.sh
+check "on feat: push -o <mark 1> a branch"    allow "$(cctl "$cfeat" 'git push -o "CTL" origin feat' 1)"        guard-bash.sh
+rm -rf "$cmain" "$cfeat"
 # Review of keel #192, the final round: ordinary work main allows (round 3 false positives).
 check "PS: \$url = git config --get"    allow "$(pspayload '$url = git config --get remote.origin.url')" guard-bash.sh
 check "PS: \$tags = git tag -l"         allow "$(pspayload '$tags = git tag -l')"                     guard-bash.sh
