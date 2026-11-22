@@ -149,6 +149,7 @@ guard_run() { # $1: tool, $2: highest exit status that is not an error; the rest
 }
 grep() { # -q (and --quiet/--silent) dropped, output discarded: grep reads all its input
   local a args=() quiet=0 opts=1
+  guard_grep_ran=1   # grep_in reads this: grep ran (TheHub #62258)
   for a in "$@"; do
     if [ "$opts" -eq 1 ]; then
       case "$a" in
@@ -178,6 +179,42 @@ git()     { guard_run git 0 "$@"; }
 python3() { guard_run python3 0 "$@"; }
 # shellcheck disable=SC2317  # wrapped for when a rule calls it
 python()  { guard_run python 0 "$@"; }
+# TheHub #62258: grep_nl TEXT ARGS... is `printf '%s\n' "$TEXT" | grep ARGS...`, and grep_in
+# TEXT ARGS... is `printf '%s' "$TEXT" | grep ARGS...`, each with the same verdict and output
+# and one process instead of three. A pipeline forks a subshell for each side before grep
+# starts, and most rules below are one such pipeline per view, so on a host where a fork is
+# slow (Git Bash) the pipelines were most of this hook's time.
+#
+# The text goes to grep as a here-string: exactly the text and one newline, which is what
+# printf '%s\n' writes. grep reads input that does not end in a newline as if it did, so for
+# printf '%s' the here-string gives grep the same lines whenever the text is not empty and
+# does not already end in one. Text that is empty, or ends in a newline, would gain an empty
+# line there (a -v or -c would see it), so grep_in takes the pipeline for it, as before.
+# A here-string bash cannot set up never runs grep and would read as "no match", so it is
+# recorded as a fault.
+grep_nl() { # $1: the text; the rest: grep's arguments
+  local guard_t=$1 guard_rc; shift
+  guard_grep_ran=0
+  grep "$@" <<<"$guard_t"; guard_rc=$?
+  [ "$guard_grep_ran" -eq 1 ] || guard_fault "here-string" "$guard_rc"
+  return "$guard_rc"
+}
+grep_in() { # $1: the text; the rest: grep's arguments
+  case "$1" in
+    ''|*$'\n') local guard_t=$1; shift; printf '%s' "$guard_t" | grep "$@"; return ;;
+  esac
+  grep_nl "$@"
+}
+# TheHub #62258: g_lit LITERAL ERE is g ERE (below) for an ERE that can only match text
+# holding LITERAL, a word every match must contain (git, /pulls/, --approve). A command
+# without that word cannot match, so the test is answered in the shell, with no grep: most
+# rules name a word most commands never hold. Name only a word the ERE cannot match
+# without: not one inside an optional group or one side of an alternation, and never for a
+# case-insensitive (-i) rule.
+g_lit() { # $1: the literal; $2: the extended regex, read against $cmd
+  [[ $cmd == *"$1"* ]] || return 1
+  grep_in "$cmd" -qE "$2"
+}
 # shellcheck disable=SC2317  # run by the EXIT trap
 guard_exit() { # builtins only: a broken helper must not be able to hide its own fault
   local rc=$? why="" lines=()
@@ -273,8 +310,12 @@ AWK
 # would report it even where no jq binary exists.
 if type -P jq >/dev/null 2>&1; then
   cmd="$(printf '%s' "$payload" | jq -r '.tool_input.command // empty')"
-  tool_name="$(printf '%s' "$payload" | jq -r '.tool_name // empty' 2>/dev/null)" || tool_name=""
-  payload_cwd="$(printf '%s' "$payload" | jq -r '.cwd // empty')"
+  # TheHub #62258: the tool name and the cwd are read when the hook first needs them, not
+  # here: a command a rule blocks first never pays for them, and where jq is a python shim
+  # each call is an interpreter start. The same input gives the same parse, so a payload jq
+  # cannot read still faults at the command, above.
+  guard_read_tool_name() { tool_name="$(printf '%s' "$payload" | jq -r '.tool_name // empty' 2>/dev/null)" || tool_name=""; }
+  guard_read_cwd() { payload_cwd="$(printf '%s' "$payload" | jq -r '.cwd // empty')"; }
 else
   # TheHub #61038 review: take the JSON string itself (not everything up to the
   # payload's last quote, which swallowed the "description" field) and decode it, so
@@ -309,24 +350,25 @@ else
   [ "${guard_keys:-0}" -gt 1 ] && guard_nojq_refuse "the hook payload names more than one \"command\" key"
   printf '%s' "$payload_flat" | LC_ALL=C grep -oE "$guard_kp" | LC_ALL=C grep -qvE '^"command"[[:space:]]*:' \
     && guard_nojq_refuse "the hook payload spells its \"command\" key with escapes"
-  printf '%s' "$payload_flat" | LC_ALL=C grep -qE '\\"command"[[:space:]]*:' \
+  LC_ALL=C grep_in "$payload_flat" -qE '\\"command"[[:space:]]*:' \
     && guard_nojq_refuse "the hook payload has a key ending in an escaped quote and \"command\""
   cmd="$(printf '%s' "$payload_flat" | LC_ALL=C sed -nE 's/.*"command"[[:space:]]*:[[:space:]]*"(([^"\\]|\\.)*)".*/\1/p')"
-  payload_cwd="$(printf '%s' "$payload" | sed -nE 's/.*"cwd"[[:space:]]*:[[:space:]]*"(([^"\\]|\\.)*)".*/\1/p' | sed 's/\\\\/\\/g')"
+  # TheHub #62258: the cwd and the tool name are read on first use, as in the jq branch.
+  guard_read_cwd() { payload_cwd="$(printf '%s' "$payload" | sed -nE 's/.*"cwd"[[:space:]]*:[[:space:]]*"(([^"\\]|\\.)*)".*/\1/p' | sed 's/\\\\/\\/g')"; }
   cmd_json="$cmd"
   cmd="$(printf '%s' "$cmd_json" | LC_ALL=C awk "$json_unescape_awk" 2>/dev/null)"; guard_rc=$?
   # Round 2: the decoder itself says whether the value held a real \u0000 escape. A text match
   # refused a command holding the literal text (an escaped backslash, then u0000).
   [ "$guard_rc" -eq 3 ] && guard_nojq_refuse "the command holds a \\u0000 escape"
   [ "$guard_rc" -eq 0 ] || cmd="$cmd_json"
-  tool_name="$(printf '%s' "$payload" | sed -nE 's/.*"tool_name"[[:space:]]*:[[:space:]]*"([A-Za-z]+)".*/\1/p')"
+  guard_read_tool_name() { tool_name="$(printf '%s' "$payload" | sed -nE 's/.*"tool_name"[[:space:]]*:[[:space:]]*"([A-Za-z]+)".*/\1/p')"; }
   # TheHub #61978 / #62016: jq refuses a payload it cannot parse, and the wrapper makes that a
   # block. This fallback read the same payload as "no command" and allowed it. So, with
   # nothing extracted: a payload that names a non-empty command, or that does not end in a
   # closing brace (truncated), is refused here too.
   if [ -z "$cmd" ]; then
     guard_tail="${payload%"${payload##*[![:space:]]}"}"
-    if printf '%s' "$payload_flat" | LC_ALL=C grep -qE '"command"[[:space:]]*:[[:space:]]*"[^"]' || [ "${guard_tail: -1}" != "}" ]; then
+    if LC_ALL=C grep_in "$payload_flat" -qE '"command"[[:space:]]*:[[:space:]]*"[^"]' || [ "${guard_tail: -1}" != "}" ]; then
       echo "BLOCKED by .claude/hooks/guard-bash.sh — internal error: it cannot parse the hook payload (no jq here, and the fallback parser could not read the command), so it cannot tell whether the command is allowed. Retry the call; installing jq gives this hook a full JSON parser (TheHub #61978)." >&2
       exit 2
     fi
@@ -583,7 +625,9 @@ AWK
 ps_sed=(-e 's#(^|[[:space:](])([Ss][Tt][Aa][Rr][Tt]-[Pp][Rr][Oo][Cc][Ee][Ss][Ss]|[Ss][Aa][Pp][Ss]|[Ss][Tt][Aa][Rr][Tt])([[:space:]]+-[Ff][A-Za-z]*)?[[:space:]]+#\1#g'
         -e 's#[[:space:]]-[Aa][Rr][Gg][A-Za-z]*([[:space:]]|$)# #g'
         -e 's#\(([Gg][Ee][Tt]-[Cc][Oo][Mm][Mm][Aa][Nn][Dd]|[Gg][Cc][Mm])([[:space:]]+-[A-Za-z]+)*[[:space:]]+([^()[:space:]]+)([[:space:]]+(gh|git|curl|docker|docker-compose))*[[:space:]]*\)(\.[A-Za-z]+)?# \3 \5 #g')
-ps_cmd="$(printf '%s' "$raw_cmd" | LC_ALL=C awk "$ps_awk" 2>/dev/null | sed -E "${ps_sed[@]}" | normalize)" || ps_cmd="$raw_cmd"
+# TheHub #62258: ps_sed and norm are s commands only, each applied to one line at a time, so
+# one sed running both lists in turn writes what `sed ps_sed | normalize` wrote, in one process.
+ps_cmd="$(printf '%s' "$raw_cmd" | LC_ALL=C awk "$ps_awk" 2>/dev/null | sed -E "${ps_sed[@]}" "${norm[@]}")" || ps_cmd="$raw_cmd"
 
 block() {
   echo "BLOCKED by .claude/hooks/guard-bash.sh — $1" >&2
@@ -628,9 +672,9 @@ guard() {
 # siblings in the same file, which is the definition of L0008.
 #
 # Now anchored: the flag must belong to a git commit/push invocation.
-if printf '%s' "$cmd" | grep -qE "$B"'git[[:space:]]+[^|;&]*(commit|push|merge)[^|;&]*[[:space:]]--no-verify\b' \
-   || printf '%s' "$cmd" | grep -qE "$B"'git[[:space:]]+(commit|push)[[:space:]]+[^|;&]*[[:space:]]-[a-zA-Z]*n([[:space:])`"'"'"';|&<>]|$)' \
-   || printf '%s' "$cmd" | grep -qiE "$B"'git[[:space:]]+([^|;&]*[[:space:]])?-c[[:space:]]*core[.]hookspath='; then
+if g_lit --no-verify "$B"'git[[:space:]]+[^|;&]*(commit|push|merge)[^|;&]*[[:space:]]--no-verify\b' \
+   || g_lit git "$B"'git[[:space:]]+(commit|push)[[:space:]]+[^|;&]*[[:space:]]-[a-zA-Z]*n([[:space:])`"'"'"';|&<>]|$)' \
+   || grep_in "$cmd" -qiE "$B"'git[[:space:]]+([^|;&]*[[:space:]])?-c[[:space:]]*core[.]hookspath='; then
   block "hook bypass (--no-verify / -n on a git commit). Fix the cause the hook found." "AIC-3, IA-5"
 fi
 
@@ -645,14 +689,14 @@ fi
 # When adding a rule here: anchor it, and add BOTH a must-block and a must-allow case to
 # selftest.sh. GP-5.
 g() { # g <extended-regex> -> true if the command actually invokes this
-  printf '%s' "$cmd" | grep -qE "$1"
+  grep_in "$cmd" -qE "$1"
 }
 
 # TheHub #61038 second review: `gh alias import FILE` defines aliases from a YAML file,
 # one `name: body` per line. Each body is a gh command (or `!gh ...` for a shell
 # alias), so it is read and judged with the rest; a file this hook cannot read (stdin,
 # a missing file) is refused. `gh alias set` is handled in normalize() above.
-if g "$B"'gh[[:space:]]+alias[[:space:]]+import\b'; then
+if g_lit import "$B"'gh[[:space:]]+alias[[:space:]]+import\b'; then
   af=$(printf '%s' "$cmd" | grep -oE "$B"'gh[[:space:]]+alias[[:space:]]+import([[:space:]]+--?[a-z-]+)*[[:space:]]+[^[:space:]|;&)`"'"'"'-][^[:space:]|;&)`"'"'"']*|'"$B"'gh[[:space:]]+alias[[:space:]]+import([[:space:]]+--?[a-z-]+)*[[:space:]]+-'"$E" \
     | head -n1 | sed -E 's/[[:space:])`"'"'"']+$//; s/.*[[:space:]]//')
   if [ -z "$af" ] || [ "$af" = "-" ] || [ ! -r "$af" ]; then
@@ -665,32 +709,32 @@ fi
 # Destructive git
 # #120: the flag may come straight after push. `push([[:space:]]|$)` used to eat the one
 # space in front of it, so `git push --force origin feat` passed.
-g "$B"'git[[:space:]]+([^|;&]*[[:space:]])?push[[:space:]]([^|;&]*[[:space:]])?--?(force|f)(-with-lease)?\b' \
+g_lit push "$B"'git[[:space:]]+([^|;&]*[[:space:]])?push[[:space:]]([^|;&]*[[:space:]])?--?(force|f)(-with-lease)?\b' \
   && block "force push. Published history is immutable — it is the AU-12 audit trail." "AIC-3, AU-12, SI-7"
-g "$B"'git[[:space:]]+([^|;&]*[[:space:]])?reset([[:space:]]|$)[^|;&]*--hard\b' \
+g_lit --hard "$B"'git[[:space:]]+([^|;&]*[[:space:]])?reset([[:space:]]|$)[^|;&]*--hard\b' \
   && block "git reset --hard. Discards work irrecoverably; use git revert or a branch." "AIC-3"
-g "$B"'git[[:space:]]+(filter-branch|filter-repo)\b' \
+g_lit filter- "$B"'git[[:space:]]+(filter-branch|filter-repo)\b' \
   && block "history rewrite. Destroys the attributable, signed commit record." "AU-12, SI-7"
 # TheHub #62031: an argument here ends at a separator or a redirect too (; & | < >), so
 # `git push origin main;echo` is a push to main. The refspec, +, every-branch, ':',
 # -c push.* and send-pack rules are read as shell words in push_judge below (review round 2:
 # a regex over the line lost them behind a quoted global option such as -C "my dir").
 EP='([[:space:])`"'"'"';|&<>]|$)'
-g "$B"'git[[:space:]]+([^|;&]*[[:space:]])?push([[:space:]]+[^|;&]*)?[[:space:]](origin[[:space:]]+)?(HEAD:)?(main|master)'"$EP" \
+g_lit push "$B"'git[[:space:]]+([^|;&]*[[:space:]])?push([[:space:]]+[^|;&]*)?[[:space:]](origin[[:space:]]+)?(HEAD:)?(main|master)'"$EP" \
   && block "direct push to main. All change goes through a reviewed PR." "AC-5, CM-5"
-g "$B"'git[[:space:]]+([^|;&]*[[:space:]])?commit[[:space:]]([^|;&]*[[:space:]])?-[aeiopqsvzn]*n[a-zA-Z]*'"$EP" \
+g_lit commit "$B"'git[[:space:]]+([^|;&]*[[:space:]])?commit[[:space:]]([^|;&]*[[:space:]])?-[aeiopqsvzn]*n[a-zA-Z]*'"$EP" \
   && block "hook bypass (-n on a git commit, alone or in a cluster of flags). Fix the cause the hook found." "AIC-3, IA-5"
 
 # Self-approval and self-merge — the control that makes every gate meaningful
-g "$B"'gh[[:space:]]+pr[[:space:]]+review\b[^|;&]*--approve\b' \
+g_lit --approve "$B"'gh[[:space:]]+pr[[:space:]]+review\b[^|;&]*--approve\b' \
   && block "approving a PR. Agents recommend; a human or a separate identity approves." "AC-5, AIC-2"
-g "$B"'gh[[:space:]]+pr[[:space:]]+merge\b' \
+g_lit merge "$B"'gh[[:space:]]+pr[[:space:]]+merge\b' \
   && block "merging a PR. Merge happens after independent review, via GitHub." "AC-5, CM-5, AIC-2"
-g "$B"'gh[[:space:]]+release[[:space:]]+(create|edit|delete)\b' \
+g_lit release "$B"'gh[[:space:]]+release[[:space:]]+(create|edit|delete)\b' \
   && block "creating a release. G5 requires human authorization via the Environment." "CM-3, AIC-1"
 
 # Weakening a security control
-g 'continue-on-error:[[:space:]]*true' \
+g_lit continue-on-error: 'continue-on-error:[[:space:]]*true' \
   && block "setting continue-on-error on a check. Relaxing a gate is a visible process change." "CM-5, AIC-3"
 # -- gh api reaches every endpoint the named subcommands do -------------------
 # The rules above block `gh pr merge`, `gh pr review --approve` and
@@ -741,8 +785,8 @@ GH_M='(-[a-zA-Z]*X[[:space:]]*=?|--method[[:space:]]*=?)[[:space:]]*["'"'"']?'
 GH_WRITE='([Pp][Oo][Ss][Tt]|[Pp][Uu][Tt]|[Pp][Aa][Tt][Cc][Hh]|[Dd][Ee][Ll][Ee][Tt][Ee])\b'
 
 gh_api_write() { # true if this is a gh api call carrying a write method
-  g "$B"'gh[[:space:]]+api\b' || return 1
-  printf '%s' "$cmd" | grep -qE "$GH_M$GH_WRITE" && return 0
+  g_lit api "$B"'gh[[:space:]]+api\b' || return 1
+  grep_in "$cmd" -qE "$GH_M$GH_WRITE" && return 0
   printf '%s' "$cmd" | tr '|;&' '\n' \
     | grep -E "$B"'gh[[:space:]]+api\b' \
     | grep -E '[[:space:]](-i*[fF]|--(raw-)?field([=[:space:]]|$)|--input([=[:space:]]|$))' \
@@ -752,55 +796,57 @@ gh_api_write() { # true if this is a gh api call carrying a write method
 # Second review: a body flag supplied by $(...), backticks or an array expansion
 # (gh api .../pending_deployments $(printf -- '-f state=approved')) cannot be seen, so
 # a call to these endpoints that carries one and is not an explicit GET is refused.
-if g "$B"'gh[[:space:]]+api\b'; then
+if g_lit api "$B"'gh[[:space:]]+api\b'; then
   # The endpoint path itself is dropped first: a run id from $(gh run list ...) in a
-  # listing is still a read.
-  printf '%s' "$cmd" | tr '|;&' '\n' | grep -E "$B"'gh[[:space:]]+api\b' | grep -E "$DEPLOY_REVIEW" \
+  # listing is still a read. TheHub #62258: only a command holding /actions/runs/ can match
+  # $DEPLOY_REVIEW, so any other skips the six processes of this pipeline.
+  [[ $cmd == *"/actions/runs/"* ]] \
+    && printf '%s' "$cmd" | tr '|;&' '\n' | grep -E "$B"'gh[[:space:]]+api\b' | grep -E "$DEPLOY_REVIEW" \
     | sed -E 's#[^[:space:]]*/actions/runs/[^[:space:]]*/(pending_deployments|deployment_protection_rule)##' \
     | grep -E '\$\(|`|\[[@*]\]' | grep -qvE "$GH_M"'[Gg][Ee][Tt]\b' \
     && block "a gh api call to an environment deployment review whose arguments come from \$(...), backticks or an array. Its method cannot be read here; list pending deployments with a plain GET." "CM-3, AC-5, AIC-1, AIC-2"
 fi
 
 if gh_api_write; then
-  g "$B"'gh[[:space:]]+api[^|;&]*/pulls/[^|;&/]+/merge([^A-Za-z0-9_-]|$)' \
+  g_lit /pulls/ "$B"'gh[[:space:]]+api[^|;&]*/pulls/[^|;&/]+/merge([^A-Za-z0-9_-]|$)' \
     && block "merging a PR through gh api. Merge happens after independent review, via GitHub." "AC-5, CM-5, AIC-2"
-  g "$B"'gh[[:space:]]+api[^|;&]*/pulls/[^|;&/]+/reviews([^A-Za-z0-9_-]|$)' \
+  g_lit /pulls/ "$B"'gh[[:space:]]+api[^|;&]*/pulls/[^|;&/]+/reviews([^A-Za-z0-9_-]|$)' \
     && block "reviewing a PR through gh api. Agents recommend; a human or a separate identity approves. Use gh pr comment to say something." "AC-5, AIC-2"
-  g "$B"'gh[[:space:]]+api[^|;&]*/releases([^A-Za-z0-9_-]|$)' \
+  g_lit /releases "$B"'gh[[:space:]]+api[^|;&]*/releases([^A-Za-z0-9_-]|$)' \
     && block "creating or changing a release through gh api. G5 requires human authorization via the Environment." "CM-3, AIC-1"
-  g "$B"'gh[[:space:]]+api[^|;&]*/branches/[^|;&]*/protection' \
+  g_lit /branches/ "$B"'gh[[:space:]]+api[^|;&]*/branches/[^|;&]*/protection' \
     && block "removing branch protection. This enforces separation of duties." "AC-5, CM-5"
-  g "$B"'gh[[:space:]]+api[^|;&]*/rulesets([^A-Za-z0-9_-]|$)' \
+  g_lit /rulesets "$B"'gh[[:space:]]+api[^|;&]*/rulesets([^A-Za-z0-9_-]|$)' \
     && block "changing a ruleset. Rulesets are branch protection under a newer name, and the same separation of duties rests on them." "AC-5, CM-5"
-  g "$B"'gh[[:space:]]+api[^|;&]*/(actions|codespaces|dependabot)/secrets' \
+  g_lit /secrets "$B"'gh[[:space:]]+api[^|;&]*/(actions|codespaces|dependabot)/secrets' \
     && block "writing a secret through gh api. Agents never touch secrets; escalate to a human." "AIC-5, IA-5"
-  g "$B"'gh[[:space:]]+api[^|;&]*/environments([^A-Za-z0-9_-]|$)' \
+  g_lit /environments "$B"'gh[[:space:]]+api[^|;&]*/environments([^A-Za-z0-9_-]|$)' \
     && block "changing a deployment environment. Its reviewers ARE the G5 authorization gate." "CM-3, AC-5, AIC-1"
   # TheHub #61038: approving the deployment is the gate itself, not its configuration.
-  g "$B"'gh[[:space:]]+api[^|;&]*'"$DEPLOY_REVIEW" \
+  g_lit /actions/runs/ "$B"'gh[[:space:]]+api[^|;&]*'"$DEPLOY_REVIEW" \
     && block "approving or rejecting an environment deployment through gh api. Only a human reviews a deployment; the environment's reviewers ARE the G5 authorization gate." "CM-3, AC-5, AIC-1, AIC-2"
   # Second review, run-time values (the cheap part of TheHub #61039): the endpoint named
   # anywhere in the command, not only in the gh api call (P=.../pending_deployments;
   # gh api -X POST $P, or piped to xargs gh api), and an action segment that is a
   # variable (.../runs/1/$E). A run id in a variable (.../runs/$ID/rerun) stays allowed.
-  { g "$DEPLOY_REVIEW" || g "$B"'gh[[:space:]]+api[^|;&]*/actions/runs/[^|;&/[:space:]]+/\$'; } \
+  { g_lit /actions/runs/ "$DEPLOY_REVIEW" || g_lit /actions/runs/ "$B"'gh[[:space:]]+api[^|;&]*/actions/runs/[^|;&/[:space:]]+/\$'; } \
     && block "a gh api write in a command that names an environment deployment review, or whose action is a variable. Only a human reviews a deployment." "CM-3, AC-5, AIC-1, AIC-2"
   # #127: the push-to-main rule knew one spelling, git push. These three reach main
   # through the REST API instead.
-  g "$B"'gh[[:space:]]+api[^|;&]*/git/refs/heads/(main|master)'"$E" \
+  g_lit /git/refs/heads/ "$B"'gh[[:space:]]+api[^|;&]*/git/refs/heads/(main|master)'"$E" \
     && block "moving main through the git refs API. All change goes through a reviewed PR." "AC-5, CM-5"
   # The value a -f/-F/--field/--raw-field flag gives to field $1, if any.
   api_field() { printf '%s' "$cmd" \
     | grep -oE '(-[fF][[:space:]]*|--(raw-)?field[[:space:]=]+)'"$1"'=[^[:space:]|;&)`"'"'"']+' \
     | head -n1 | sed -E 's/^[^=]*=//'; }
-  is_main() { printf '%s' "$1" | grep -qE '^(refs/heads/)?(main|master)$'; }
+  is_main() { grep_in "$1" -qE '^(refs/heads/)?(main|master)$'; }
   # A contents write is a commit. With no branch field it lands on the default branch.
-  if g "$B"'gh[[:space:]]+api[^|;&]*/contents/'; then
+  if g_lit /contents/ "$B"'gh[[:space:]]+api[^|;&]*/contents/'; then
     br=$(api_field branch)
     { [ -z "$br" ] || is_main "$br"; } \
       && block "a commit to main through the contents API (it commits to the default branch when no branch is named). All change goes through a reviewed PR; pass -f branch=<feature>." "AC-5, CM-5"
   fi
-  if g "$B"'gh[[:space:]]+api[^|;&]*/merges'"$E"; then
+  if g_lit /merges "$B"'gh[[:space:]]+api[^|;&]*/merges'"$E"; then
     is_main "$(api_field base)" \
       && block "merging into main through the merges API. Merge happens after independent review, via GitHub." "AC-5, CM-5, AIC-2"
   fi
@@ -821,8 +867,8 @@ cat_files() { # stdin: command text -> the files that $(cat FILE) / $(< FILE) re
 # $1 is the document text, $2 says how it was sent and is added to each reason.
 gql_mutations() {
   local gql="$1" via="$2"
-  printf '%s' "$gql" | grep -qE '(^|[^A-Za-z0-9_])mutation([^A-Za-z0-9_]|$)' || return 0
-  m() { printf '%s' "$gql" | grep -qE '(^|[^A-Za-z0-9_])('"$1"')([^A-Za-z0-9_]|$)'; }
+  grep_in "$gql" -qE '(^|[^A-Za-z0-9_])mutation([^A-Za-z0-9_]|$)' || return 0
+  m() { grep_in "$gql" -qE '(^|[^A-Za-z0-9_])('"$1"')([^A-Za-z0-9_]|$)'; }
   m 'mergePullRequest|enablePullRequestAutoMerge|mergeBranch' \
     && block "merging through a GraphQL mutation$via. Merge happens after independent review, via GitHub." "AC-5, CM-5, AIC-2"
   m 'addPullRequestReview|submitPullRequestReview|dismissPullRequestReview' \
@@ -841,18 +887,18 @@ gql_mutations() {
   # id. Quotes may still be JSON-escaped here, so main is matched as a word, not
   # as "main". Push a feature branch with git instead.
   # TheHub #61972: createRef with a tag name is a pushed tag.
-  m 'createRef' && printf '%s' "$gql" | grep -qE 'refs/tags/' \
+  m 'createRef' && grep_in "$gql" -qE 'refs/tags/' \
     && block "creating a tag through GraphQL$via. A v* tag is the ref a release is cut from, and cutting a release is the operator's decision. Push your branch and open a PR; after merge the operator creates the tag and dispatches release.yml." "CM-3, AIC-1, AC-5"
   m 'updateRefs?' \
     && block "moving a ref through GraphQL$via. A ref id may be main; push a feature branch with git." "AC-5, CM-5"
   if m 'createCommitOnBranch'; then
-    { printf '%s' "$gql" | grep -qE '(^|[^A-Za-z0-9_/.-])(refs/heads/)?(main|master)([^A-Za-z0-9_/.-]|$)' \
-      || ! printf '%s' "$gql" | grep -qE '(^|[^A-Za-z0-9_])branchName([^A-Za-z0-9_]|$)'; } \
+    { grep_in "$gql" -qE '(^|[^A-Za-z0-9_/.-])(refs/heads/)?(main|master)([^A-Za-z0-9_/.-]|$)' \
+      || ! grep_in "$gql" -qE '(^|[^A-Za-z0-9_])branchName([^A-Za-z0-9_]|$)'; } \
       && block "a commit to main through GraphQL$via (or to a branch named only by id). All change goes through a reviewed PR." "AC-5, CM-5"
   fi
   return 0
 }
-if g "$B"'gh[[:space:]]+api[[:space:]]+([^|;&]*[[:space:]])?graphql'"$E"; then
+if g_lit graphql "$B"'gh[[:space:]]+api[[:space:]]+([^|;&]*[[:space:]])?graphql'"$E"; then
   gql="$cmd"
   # Only -F/--field reads @path; with -f/--raw-field "@q.graphql" is a literal string.
   for f in $(printf '%s' "$cmd" | grep -oE '((-F[[:space:]]*|--field[[:space:]=]+)query=@|--input[[:space:]=]+)[^[:space:]|;&)`"'"'"']+' \
@@ -902,28 +948,28 @@ http_write() { # $1: one curl or web-cmdlet invocation -> true if it is a write
   # it is curl, carries a body and gives no -X and no -G.
   local curl_m='(-[a-zA-Z]*X[[:space:]]*|--request[[:space:]=]+)[\"'"'"']*'
   local ps_m='(^|[[:space:]])-([Mm][Ee][A-Za-z]*|[Cc][Uu][A-Za-z]*)([[:space:]]*:[[:space:]]*|[[:space:]]+)[\"'"'"']*'
-  printf '%s' "$seg" | grep -qiE "$B$PS_HTTP"'([[:space:]]|$)' \
-    && printf '%s' "$seg" | grep -qE '(^|[[:space:]])@[A-Za-z_]' && return 0
+  grep_in "$seg" -qiE "$B$PS_HTTP"'([[:space:]]|$)' \
+    && grep_in "$seg" -qE '(^|[[:space:]])@[A-Za-z_]' && return 0
   ms=$(printf '%s' "$seg" | grep -oE "$curl_m"'[$(A-Za-z][A-Za-z]*' | sed -E "s/^$curl_m//"
        printf '%s' "$seg" | grep -oE "$ps_m"'[$(A-Za-z][A-Za-z]*' | sed -E "s/^$ps_m//")
   if [ -n "$ms" ]; then
-    printf '%s\n' "$ms" | grep -qvxE '[Gg][Ee][Tt]|[Hh][Ee][Aa][Dd]'
+    grep_nl "$ms" -qvxE '[Gg][Ee][Tt]|[Hh][Ee][Aa][Dd]'
     return
   fi
-  printf '%s' "$seg" | grep -qiE "$B"'curl([[:space:]]|$)' || return 1
-  printf '%s' "$seg" | grep -qE '[[:space:]](-[a-zA-Z]*[dFTK]|--data|--json|--form|--upload-file|--config)' || return 1
-  printf '%s' "$seg" | grep -qE '[[:space:]](-[a-zA-Z]*G|--get)([[:space:]]|$)' && return 1
+  grep_in "$seg" -qiE "$B"'curl([[:space:]]|$)' || return 1
+  grep_in "$seg" -qE '[[:space:]](-[a-zA-Z]*[dFTK]|--data|--json|--form|--upload-file|--config)' || return 1
+  grep_in "$seg" -qE '[[:space:]](-[a-zA-Z]*G|--get)([[:space:]]|$)' && return 1
   return 0
 }
 
-if g "$B"'curl([[:space:]]|$)' || printf '%s' "$cmd" | grep -qiE "$B$PS_HTTP"'([[:space:]]|$)'; then
+if g_lit curl "$B"'curl([[:space:]]|$)' || grep_in "$cmd" -qiE "$B$PS_HTTP"'([[:space:]]|$)'; then
   curl_segs=$(printf '%s' "$cmd" | tr '|;&' '\n' | grep -iE "$B"'(curl|'"$PS_HTTP"')([[:space:]]|$)')
   # TheHub #61038 review: a GraphQL document sent from a file (-d @file, --data-binary
   # @file, --json @file, -T file, -K config) is read, or refused when it cannot be --
   # stdin, a missing file -- exactly as the gh api graphql rule does. TheHub #61064:
   # and a cmdlet's -InFile file, or a -Body read with (Get-Content FILE) / (gc FILE).
   curl_text="$curl_segs"
-  curl_gql=$(printf '%s\n' "$curl_segs" | grep -E '/graphql([^A-Za-z0-9_-]|$)')
+  curl_gql=$(grep_nl "$curl_segs" -E '/graphql([^A-Za-z0-9_-]|$)')
   if [ -n "$curl_gql" ]; then
     while IFS= read -r f; do
       [ -n "$f" ] || continue
@@ -940,7 +986,7 @@ $(cat -- "$f")"
       | sed -E 's/.*[[:space:]"'"'"']//; s/^-[A-Za-z]+://'
       printf '%s\n' "$curl_gql" | cat_files)
   fi
-  printf '%s' "$curl_text" | grep -qE '(^|[^A-Za-z0-9_])(approve|reject)Deployments([^A-Za-z0-9_]|$)' \
+  grep_in "$curl_text" -qE '(^|[^A-Za-z0-9_])(approve|reject)Deployments([^A-Za-z0-9_]|$)' \
     && block "approving or rejecting an environment deployment through GraphQL over curl. Only a human reviews a deployment; the environment's reviewers ARE the G5 authorization gate." "CM-3, AC-5, AIC-1, AIC-2"
   # TheHub #61048: every other mutation the gh api graphql rule blocks, read from the
   # GraphQL calls (and the documents they send) only.
@@ -969,7 +1015,7 @@ ta')
   # and HTTP_GH unused (shellcheck SC2034); binnacle #63 merged the same way and
   # binnacle #74 is the same fix.
   curl_ctx=""
-  if g "$DEPLOY_REVIEW" || g "$HTTP_GH"; then
+  if g_lit /actions/runs/ "$DEPLOY_REVIEW" || g "$HTTP_GH"; then
     curl_ctx=$(printf '%s\n' "$cmd" | sed -E ':a
 s#/\./#/#g
 s#/[^/[:space:]]+/\.\./#/#
@@ -1008,7 +1054,7 @@ AWK
   curl_field() { printf '%s' "$1" \
     | grep -oE '(^|[^A-Za-z0-9_])'"$2"'[\"'"'"']*[[:space:]]*[:=][[:space:]]*[\"'"'"']*[^\"'"'"',}&[:space:]]+' \
     | head -n1 | sed -E 's/^[^:=]*[:=][[:space:]]*//; s/[\"'"'"']//g'; }
-  curl_main() { printf '%s' "$1" | grep -qE '^(refs/heads/)?(main|master)$'; }
+  curl_main() { grep_in "$1" -qE '^(refs/heads/)?(main|master)$'; }
   # TheHub #61048: the deployment review was the only endpoint curl was judged on.
   # Every endpoint the gh api rules guard is judged here, on the same write test:
   # an explicit write method, or a body with no -X and no -G. A GET stays a read.
@@ -1020,35 +1066,36 @@ AWK
     cu_text="$seg
 $(printf '%s\n' "$seg" | grep -oE '[^[:space:]]*/[^[:space:]]*' | grep -E '[][{}]' | LC_ALL=C awk "$curl_glob_awk" 2>/dev/null)
 $curl_ctx"
-    cu() { printf '%s\n' "$cu_text" | grep -qE "$1"; }
-    cu "$DEPLOY_REVIEW"'|/actions/runs/[^|;&/[:space:]]+/[^[:space:]]*[][{}]' \
+    # TheHub #62258: cu LITERAL ERE, the literal a word every match holds, as g_lit reads it.
+    cu() { [[ $cu_text == *"$1"* ]] || return 1; grep_nl "$cu_text" -qE "$2"; }
+    cu /actions/runs/ "$DEPLOY_REVIEW"'|/actions/runs/[^|;&/[:space:]]+/[^[:space:]]*[][{}]' \
       && block "approving or rejecting an environment deployment through curl. Only a human reviews a deployment; the environment's reviewers ARE the G5 authorization gate." "CM-3, AC-5, AIC-1, AIC-2"
-    cu '^CURL_GLOB_OVERFLOW$' \
+    cu CURL_GLOB_OVERFLOW '^CURL_GLOB_OVERFLOW$' \
       && block "a curl write whose URL glob is too large to read here. Name the endpoint without {} or [] globs." "AC-5, CM-5"
-    cu '/pulls/[^/[:space:]]+/merge([^A-Za-z0-9_-]|$)' \
+    cu /pulls/ '/pulls/[^/[:space:]]+/merge([^A-Za-z0-9_-]|$)' \
       && block "merging a PR through curl. Merge happens after independent review, via GitHub." "AC-5, CM-5, AIC-2"
-    cu '/pulls/[^/[:space:]]+/reviews([^A-Za-z0-9_-]|$)' \
+    cu /pulls/ '/pulls/[^/[:space:]]+/reviews([^A-Za-z0-9_-]|$)' \
       && block "reviewing a PR through curl. Agents recommend; a human or a separate identity approves. Use gh pr comment to say something." "AC-5, AIC-2"
-    cu '/releases([^A-Za-z0-9_-]|$)' \
+    cu /releases '/releases([^A-Za-z0-9_-]|$)' \
       && block "creating or changing a release through curl. G5 requires human authorization via the Environment." "CM-3, AIC-1"
-    cu '/branches/[^[:space:]]*/protection' \
+    cu /branches/ '/branches/[^[:space:]]*/protection' \
       && block "changing branch protection through curl. This enforces separation of duties." "AC-5, CM-5"
-    cu '/rulesets([^A-Za-z0-9_-]|$)' \
+    cu /rulesets '/rulesets([^A-Za-z0-9_-]|$)' \
       && block "changing a ruleset through curl. Rulesets are branch protection under a newer name, and the same separation of duties rests on them." "AC-5, CM-5"
-    cu '/(actions|codespaces|dependabot)/secrets' \
+    cu /secrets '/(actions|codespaces|dependabot)/secrets' \
       && block "writing a secret through curl. Agents never touch secrets; escalate to a human." "AIC-5, IA-5"
-    cu '/environments([^A-Za-z0-9_-]|$)' \
+    cu /environments '/environments([^A-Za-z0-9_-]|$)' \
       && block "changing a deployment environment through curl. Its reviewers ARE the G5 authorization gate." "CM-3, AC-5, AIC-1"
-    cu '/git/refs/heads/(main|master)([^A-Za-z0-9_./-]|$)' \
+    cu /git/refs/heads/ '/git/refs/heads/(main|master)([^A-Za-z0-9_./-]|$)' \
       && block "moving main through the git refs API with curl. All change goes through a reviewed PR." "AC-5, CM-5"
     # A contents write is a commit; with no branch in the body it lands on the
     # default branch. A body this hook cannot see (a file) names no branch.
-    if cu '/contents/'; then
+    if cu /contents/ '/contents/'; then
       br=$(curl_field "$seg" branch)
       { [ -z "$br" ] || curl_main "$br"; } \
         && block "a commit to main through the contents API with curl (it commits to the default branch when the body names no branch). All change goes through a reviewed PR; put \"branch\":\"<feature>\" in an inline body." "AC-5, CM-5"
     fi
-    if cu '/merges([^A-Za-z0-9_-]|$)'; then
+    if cu /merges '/merges([^A-Za-z0-9_-]|$)'; then
       bs=$(curl_field "$seg" base)
       { [ -z "$bs" ] || curl_main "$bs"; } \
         && block "merging into main through the merges API with curl (or into a base this hook cannot read). Merge happens after independent review, via GitHub." "AC-5, CM-5, AIC-2"
@@ -1077,8 +1124,8 @@ fi
 # it (L0007), so the exemption is explicit and narrow: the path must END in .pub.
 #
 # #117: the path ends at "$E", so `x=$(cat .env)` is a read too.
-if printf '%s' "$cmd" | grep -qE "$B"'(cat|less|more|head|tail|bat|type)[[:space:]]+[^|;&]*([.]env([.][A-Za-z0-9_-]+)?|[.]pem|[.]p12|[.]pfx|[.]key|/[.]ssh/|/[.]aws/|id_rsa|id_ed25519)'"$E" \
-   && ! printf '%s' "$cmd" | grep -qE '[.]pub'"$E"; then
+if grep_in "$cmd" -qE "$B"'(cat|less|more|head|tail|bat|type)[[:space:]]+[^|;&]*([.]env([.][A-Za-z0-9_-]+)?|[.]pem|[.]p12|[.]pfx|[.]key|/[.]ssh/|/[.]aws/|id_rsa|id_ed25519)'"$E" \
+   && ! grep_in "$cmd" -qE '[.]pub'"$E"; then
   block "reading credential material into the context. Rotate rather than inspect." "AIC-5, IA-5, SC-28"
 fi
 case "$cmd" in
@@ -1121,7 +1168,7 @@ docker_exec="$B"'(docker|podman|nerdctl)([[:space:]]+[^|;&]*)?[[:space:]](contai
 # can be allowed here, by construction.
 main_docker_exec="$B"'docker([[:space:]]+[^|;&]*)?[[:space:]](container[[:space:]]+)?exec[[:space:]]+([^|;&]*[[:space:]])?'
 compose_exec="$B"'(docker([[:space:]]+[^|;&]*)?[[:space:]]compose|docker-compose)[[:space:]]+([^|;&]*[[:space:]])?exec[[:space:]]+([^|;&]*[[:space:]])?'
-if g "$main_docker_exec$prod_ctr$runner_after" || g "$compose_exec$prod_svc$runner_after"; then
+if g_lit exec "$main_docker_exec$prod_ctr$runner_after" || g_lit exec "$compose_exec$prod_svc$runner_after"; then
   block "running a test suite inside a production container with docker exec. It runs under no --cpus/--memory cap (the 2026-10-23 outage, TheHub #61001). Run it in a capped test container through the shared lock instead: bash scripts/docker-test-lock.sh run <owner> -- bash scripts/test-offline.sh ... (--cpus 2 --memory 2g)." "AIC-3, SC-6, CP-2"
 fi
 #
@@ -1146,8 +1193,8 @@ ctr_is_runner() { # $1: the command line (entrypoint and arguments), quotes remo
   local c ws
   read -r -a ws <<< "$1"                                    # one space between words, none at the ends
   c=" ${ws[*]-} "
-  printf '%s' "$c" | grep -qE '^ ([A-Za-z_][A-Za-z0-9_]*=[^ ]* )*(nice( -n ?[-0-9]+)? )?([^ ]*/)?(pytest|py[.]test|tox|nox) ' && return 0
-  printf '%s' "$c" | grep -qE '^ ([A-Za-z_][A-Za-z0-9_]*=[^ ]* )*(nice( -n ?[-0-9]+)? )?([^ ]*/)?python[0-9.]*( -[A-Za-z]+)* -m ?pytest ' && return 0
+  grep_in "$c" -qE '^ ([A-Za-z_][A-Za-z0-9_]*=[^ ]* )*(nice( -n ?[-0-9]+)? )?([^ ]*/)?(pytest|py[.]test|tox|nox) ' && return 0
+  grep_in "$c" -qE '^ ([A-Za-z_][A-Za-z0-9_]*=[^ ]* )*(nice( -n ?[-0-9]+)? )?([^ ]*/)?python[0-9.]*( -[A-Za-z]+)* -m ?pytest ' && return 0
   # Review of #198, round 2: a runner anywhere in the command, not only as its first word
   # (timeout 30 pytest, env X=1 pytest, uv run pytest, python -X dev -m pytest, sh -c 'pytest'),
   # as main's rule effectively read it. A package being installed (pip install pytest) is not
@@ -1156,7 +1203,7 @@ ctr_is_runner() { # $1: the command line (entrypoint and arguments), quotes remo
   # runner is left once every `install` and the words after it, up to a separator, are removed
   # (pip install pytest && pytest is a run).
   local R='[ /;&|(]((py[.]?test|tox|nox)|-m ?(pytest|unittest)|npm (run )?test)([ ;&|)]|$)'
-  printf '%s' "$c" | grep -qE "$R" || return 1
+  grep_in "$c" -qE "$R" || return 1
   printf '%s' "$c" | sed -E 's/(^|[ ;&|(])install( [^ ;&|()]+)*/\1/g' | grep -qE "$R"
 }
 ctr_cpu_ok() { # $1 --cpus value; $2 --cpu-quota; $3 --cpu-period. True when 0 < CPUs <= 2.
@@ -1222,7 +1269,7 @@ ctr_judge() { # $@: the words of one invocation
       # took the service's place.
       for a in "${w[@]:i-1}"; do ctr_u "$a"; [[ $_cu =~ ^${prod_svc}$ ]] && svc=$_cu; done
       case "$svc" in *'$'*|*'`'*) block "a test suite in a compose service named by a variable ($svc); it may be a production service. Name the service. $ctr_route" "AIC-3, SC-6, CP-2" ;; esac
-      printf '%s' "$svc" | grep -qxE "$prod_svc" \
+      grep_in "$svc" -qxE "$prod_svc" \
         && block "running a test suite in a production compose service with $eng ${sub#compose-} ($svc: thehub-backend, thehub-postgres, mykronos-backend). It runs under none of a test container's caps. $ctr_route" "AIC-3, SC-6, CP-2"
       return 0 ;;
     run)
@@ -1261,7 +1308,7 @@ ctr_judge() { # $@: the words of one invocation
   esac
   return 0
 }
-if g "$docker_exec$prod_ctr$runner_after"; then
+if g_lit exec "$docker_exec$prod_ctr$runner_after"; then
   block "running a test suite inside a production container with docker exec. It runs under no --cpus/--memory cap (the 2026-10-23 outage, TheHub #61001). Run it in a capped test container through the shared lock instead: bash scripts/docker-test-lock.sh run <owner> -- bash scripts/test-offline.sh ... (--cpus 2 --memory 2g)." "AIC-3, SC-6, CP-2"
 fi
 }
@@ -1451,6 +1498,7 @@ push_judge() { # $@: the words of one invocation
   [ "$cur" -eq 1 ] || return 0
   [ "$push_moves" -eq 1 ] && block "a push of the current branch after the command changes directory, the git directory or the branch: which branch it pushes cannot be read here. Run the push as a command of its own, from the checkout you mean, or name the branch: git push origin <feature>." "AC-5, CM-5"
   { [ "$ndir" -gt 1 ] || [ "$dir" = '$' ]; } && block "a push of the current branch from a git -C this hook cannot read literally (a variable, \$(...), ~, or -C given twice). Name the branch: git push origin <feature>." "AC-5, CM-5"
+  [ -n "${guard_cwd_read:-}" ] || { guard_read_cwd; guard_cwd_read=1; }   # TheHub #62258: on first use
   local base="${payload_cwd:-$PWD}" branch rc
   if [ -n "$dir" ]; then case "$dir" in /*|[A-Za-z]:[/\\]*) base=$dir ;; *) base="$base/$dir" ;; esac; fi
   branch=$(command git -C "$base" symbolic-ref --short -q HEAD 2>/dev/null); rc=$?
@@ -1897,7 +1945,7 @@ tag_ref_field() { # $1: the flag, $2: key=value. Counts ref= fields; marks one t
   local v=${2#ref=}
   if tag_dyn "$v"; then ref_ok=0; return 0; fi
   case "$1" in -F|--field) case "$v" in @*) ref_ok=0; return 0 ;; esac ;; esac
-  printf '%s' "$v" | grep -qE '^refs/heads/[A-Za-z0-9._/-]+$' || ref_ok=0
+  grep_in "$v" -qE '^refs/heads/[A-Za-z0-9._/-]+$' || ref_ok=0
   return 0
 }
 tag_ghapi() { # tag_ghapi <words after gh api>
@@ -1950,11 +1998,11 @@ tag_ghapi() { # tag_ghapi <words after gh api>
   while case "$ep" in *//*) true ;; *) false ;; esac; do ep=${ep//\/\//\/}; done
   ep=${ep#/}; while case "$ep" in */) true ;; *) false ;; esac; do ep=${ep%/}; done
   local R='^(repos/[^/]+/[^/]+|repositories/[^/]+)'
-  printf '%s' "$ep" | grep -qE "$R/git/tags\$" \
+  grep_in "$ep" -qE "$R/git/tags\$" \
     && block "creating a tag object through gh api. $tag_msg" "CM-3, AIC-1, AC-5"
-  printf '%s' "$ep" | grep -qE "$R/git/refs/tags(/|\$)" \
+  grep_in "$ep" -qE "$R/git/refs/tags(/|\$)" \
     && block "writing a tag ref through gh api. $tag_msg" "CM-3, AIC-1, AC-5"
-  if printf '%s' "$ep" | grep -qE "$R/git/refs\$"; then
+  if grep_in "$ep" -qE "$R/git/refs\$"; then
     { [ "$input" -eq 1 ] || [ "$refs" -ne 1 ] || [ "$ref_ok" -eq 0 ]; } \
       && block "creating a ref through gh api that is not one literal ref=refs/heads/<branch> (a tag, a variable, a file, --input or more than one ref). $tag_msg" "CM-3, AIC-1, AC-5"
   fi
@@ -2144,6 +2192,7 @@ tag_seg() { # $@: the words of one simple command
 }
 
 cmd="$raw_cmd"; guard
+guard_read_tool_name   # TheHub #62258: on first use, after the rules that block without it
 case "$tool_name" in
   Bash) tag_guard bash "$tag_src" ;;
   PowerShell) tag_guard ps "$tag_src" ;;
