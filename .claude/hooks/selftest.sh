@@ -794,6 +794,22 @@ check "nested: ls with a continuation"        allow "$(payload "bash -c 'ls \\${
 check "nested: build && test, continued"      allow "$(payload "bash -c 'echo build \\${nl}&& echo test'")"         guard-bash.sh
 ctl() { local p; p=$(payload "$1"); printf '%s' "${p//CTL/\\u000$2}"; }        # CTL -> \u000N in the JSON
 pctl() { ctl "$1" "$2" | sed 's/^{/{"tool_name":"PowerShell",/'; }
+# Review of keel #210: the container tokenizer had the same split. A \001 written into a flag's
+# value ended the docker invocation there, so the image and the test runner after it were never
+# judged and an uncapped test container ran; a word starting with \002 was read as a heredoc body
+# and dropped. Each mark, in each value-taking flag, must leave the command judged as written.
+for m in 1 2 3; do
+  for f in -l -e --name; do
+    check "docker run $f <mark $m>, uncapped"     block "$(ctl "docker run --rm $f \"CTL\" python:3.12 python -m pytest" "$m")"  guard-bash.sh
+    check "docker run $f <mark $m>x, uncapped"    block "$(ctl "docker run --rm $f \"CTLx\" python:3.12 pytest" "$m")"          guard-bash.sh
+  done
+  check "docker run -l <mark $m>, capped"         allow "$(ctl "docker run --rm --cpus 2 --memory 2g -l \"CTL\" python:3.12 pytest" "$m")" guard-bash.sh
+  check "docker exec -e <mark $m> pytest"         block "$(ctl "docker exec -e \"CTL\" thehub-backend pytest" "$m")"            guard-bash.sh
+  check "compose exec -e <mark $m> pytest"        block "$(ctl "docker compose exec -e \"CTL\" backend pytest" "$m")"           guard-bash.sh
+  check "compose run -l <mark $m> pytest"         block "$(ctl "docker compose run --rm -l \"CTL\" backend pytest" "$m")"       guard-bash.sh
+  check "bash -c docker run -l <mark $m>"         block "$(ctl "bash -c 'docker run --rm -l \"CTL\" python:3.12 pytest'" "$m")" guard-bash.sh
+  check "PS: docker run -l <mark $m>, uncapped"   block "$(pctl "docker run --rm -l \"CTL\" python:3.12 python -m pytest" "$m")" guard-bash.sh
+done
 check "tag -m <mark 1> v*: mark ends nothing" block "$(ctl 'git tag -m "CTL" v0.0.0' 1)"                          guard-bash.sh
 check "push -o <mark 1> a v* tag"             block "$(ctl 'git push -o "CTL" origin v0.0.0' 1)"                  guard-bash.sh
 check "push -o <mark 2>x drops no word"       block "$(ctl 'git push -o "CTLx" origin v0.0.0' 2)"                 guard-bash.sh
@@ -801,6 +817,22 @@ check "tag -m <mark 2>x v*"                   block "$(ctl 'git tag -m "CTLx" v0
 check "PS: tag -m <mark 1> v*"                block "$(pctl 'git tag -m "CTL" v0.0.0' 1)"                         guard-bash.sh
 check "commit -m with a mark in it"           allow "$(ctl 'git commit -m "aCTLb"' 1)"                            guard-bash.sh
 check "push -o <mark 1> a branch"             allow "$(ctl 'git push -o "CTL" origin feat' 1)"                    guard-bash.sh
+# The same, with the checkout pinned to main (TheHub #61972 follow-up): a mark inside -o's value
+# must not end the command and leave "origin feat" judged as a push of the current branch. The
+# case above takes the cwd of whoever runs the selftest, so it was red only when that was main.
+cctl() { ctl "$2" "$3" | sed "s|^{|{\"cwd\":\"$1\",|"; }
+cmain=$(mktemp -d); cfeat=$(mktemp -d)
+git -C "$cmain" init -q -b main 2>/dev/null || { git -C "$cmain" init -q; git -C "$cmain" checkout -q -b main; }
+git -C "$cfeat" init -q -b feat 2>/dev/null || { git -C "$cfeat" init -q; git -C "$cfeat" checkout -q -b feat; }
+check "on main: push -o <mark 1> a branch"    allow "$(cctl "$cmain" 'git push -o "CTL" origin feat' 1)"        guard-bash.sh
+check "on main: push -o <mark 2>x a branch"   allow "$(cctl "$cmain" 'git push -o "CTLx" origin feat' 2)"       guard-bash.sh
+check "on main: push -o <mark 3> a branch"    allow "$(cctl "$cmain" 'git push -o "CTL" origin feat' 3)"        guard-bash.sh
+check "on main: push -o <mark 1>, no refspec" block "$(cctl "$cmain" 'git push -o "CTL" origin' 1)"            guard-bash.sh
+check "on main: push -o <mark 1> origin main" block "$(cctl "$cmain" 'git push -o "CTL" origin main' 1)"        guard-bash.sh
+check "on main: push -o <mark 1> force"       block "$(cctl "$cmain" 'git push -o "CTL" --force origin feat' 1)" guard-bash.sh
+check "on main: push -o <mark 1> a v* tag"    block "$(cctl "$cmain" 'git push -o "CTL" origin v0.0.0' 1)"      guard-bash.sh
+check "on feat: push -o <mark 1> a branch"    allow "$(cctl "$cfeat" 'git push -o "CTL" origin feat' 1)"        guard-bash.sh
+rm -rf "$cmain" "$cfeat"
 # Review of keel #192, the final round: ordinary work main allows (round 3 false positives).
 check "PS: \$url = git config --get"    allow "$(pspayload '$url = git config --get remote.origin.url')" guard-bash.sh
 check "PS: \$tags = git tag -l"         allow "$(pspayload '$tags = git tag -l')"                     guard-bash.sh

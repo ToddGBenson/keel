@@ -1947,6 +1947,52 @@ entries:
     expect: block
     why: "the PowerShell tool sending a nested shell whose tag creation line continuations split"
 
+  # ── Review of keel #210 (TheHub #61972): the container tokenizer's marks. A \001 written
+  # into a flag's value ended the docker invocation, so the image and the runner after it were
+  # never judged; a word starting with \002 was read as a heredoc body and dropped. ──
+  - id: KB-325
+    hook: guard-bash.sh
+    class: container
+    source: TheHub#61972
+    command: "docker run --rm -l \"\x01\" python:3.12 python -m pytest"
+    expect: block
+    why: "an uncapped test container, its image and runner cut off by a command mark in a label"
+  - id: KB-326
+    hook: guard-bash.sh
+    class: container
+    source: TheHub#61972
+    command: "docker run --rm -l \"\x02x\" python:3.12 pytest"
+    expect: block
+    why: "an uncapped test container, a label read as a heredoc body"
+  - id: KB-327
+    hook: guard-bash.sh
+    class: container
+    source: TheHub#61972
+    command: "docker run --rm -e \"\x03\" python:3.12 pytest"
+    expect: block
+    why: "an uncapped test container, a heredoc line mark in an environment value"
+  - id: KB-328
+    hook: guard-bash.sh
+    class: container
+    source: TheHub#61972
+    command: "docker run --rm --name \"\x01\" python:3.12 python -m pytest"
+    expect: block
+    why: "an uncapped test container, a command mark in its name"
+  - id: KB-329
+    hook: guard-bash.sh
+    class: container
+    source: TheHub#61972
+    command: "docker compose run --rm -l \"\x01\" backend pytest"
+    expect: block
+    why: "a test suite run in the production service, a command mark in a label"
+  - id: KB-330
+    hook: guard-bash.sh
+    class: container
+    source: TheHub#61972
+    command: "bash -c 'docker run --rm -l \"\x01\" python:3.12 pytest'"
+    expect: block
+    why: "an uncapped test container inside nested text, a command mark in a label"
+
   # ── TheHub #61391: guard-write.sh on every write tool ─────────────────────────
   # guard-write.sh was bound to Write|Edit and read only file_path and content /
   # new_string. A NotebookEdit carries notebook_path and new_source, and a MultiEdit
