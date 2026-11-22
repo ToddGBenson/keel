@@ -36,6 +36,23 @@
 #       a v* tag are repository rulesets, which the operator owns
 #       (docs/compliance/poam.md, POAM-011).
 #
+#   platform-release.sh verify --key --manifest F --bundle B --repo OWNER/REPO --tag TAG
+#                              --git DIR --trusted-ref REF [--tree DIR]
+#       The same, for a KEYED signature (TheHub #62072, 61779): a release
+#       signed in Concourse with a key held in Vault transit, which has no
+#       OIDC identity for Fulcio to certify. B must verify against the PEM
+#       public key .github/cosign.pub AS COMMITTED ON REF (git show REF:...),
+#       with `cosign verify-blob --key` and no certificate-identity flags: a
+#       key signature carries no certificate to hold them against.
+#       The key is reviewed content on the trusted ref, like
+#       .github/release-floor. It is never taken from the working tree or
+#       from an argument (`--key` takes no value), because whoever runs the
+#       verifier, or whoever pushed the tag, must not choose the key that
+#       checks the signature. No key on REF is a refusal.
+#       The tag, trusted-ref, release-floor and --tree checks are the same
+#       code in both modes; only the signature check differs. Keyless stays
+#       the default.
+#
 #       And "on main" is not enough on its own (wave-2 review of #145): main's
 #       history holds release.yml versions that are unsafe to sign from. Before
 #       af878f1, preflight held `id-token: write` and interpolated the free-text
@@ -51,6 +68,8 @@ set -euo pipefail
 
 ISSUER="https://token.actions.githubusercontent.com"
 WORKFLOW_PATH=".github/workflows/release.yml"
+# The keyed mode's public key, read only from the trusted ref (TheHub #62072).
+KEY_PATH=".github/cosign.pub"
 
 # The release floor: af878f1 (#143, TheHub #60935), the first commit on main
 # whose release.yml has authorize-release (G5, refusing a run with no recorded
@@ -175,10 +194,56 @@ PY
   [ -s "$out" ] || die "no tracked platform-owned files; nothing to sign"
 }
 
+# Keyless (the default): a Fulcio certificate for release.yml on the tag.
+verify_keyless() { # $1 bundle, $2 manifest, $3 OWNER/REPO, $4 tag, $5 tag's commit
+  local bundle=$1 manifest=$2 repo=$3 tag=$4 commit=$5
+  # An exact identity, not a regexp: a signature made by any other workflow,
+  # branch or tag of this repository (or by a fork) does not verify. And the
+  # certificate's own claims: this repository, dispatched (release.yml's only
+  # trigger), on the tag, at the commit checked above.
+  local identity="https://github.com/${repo}/${WORKFLOW_PATH}@refs/tags/${tag}"
+  if ! cosign verify-blob \
+        --bundle "$bundle" \
+        --certificate-identity "$identity" \
+        --certificate-oidc-issuer "$ISSUER" \
+        --certificate-github-workflow-repository "$repo" \
+        --certificate-github-workflow-ref "refs/tags/${tag}" \
+        --certificate-github-workflow-sha "$commit" \
+        --certificate-github-workflow-trigger workflow_dispatch \
+        "$manifest"; then
+    die "signature does not verify for identity ${identity} at ${commit}"
+  fi
+  echo "signature: ok (${identity} at ${commit})"
+}
+
+# Keyed (--key): the public key committed on the trusted ref, nowhere else.
+KEYFILE=""
+verify_keyed() { # $1 bundle, $2 manifest, $3 git dir, $4 trusted ref name, $5 its commit
+  local bundle=$1 manifest=$2 gitdir=$3 trusted=$4 trusted_sha=$5 first
+  git -C "$gitdir" cat-file -e "${trusted_sha}:${KEY_PATH}" 2>/dev/null \
+    || die "--key: ${KEY_PATH} is not committed on the trusted ref ${trusted} (${trusted_sha}); the key is read from there only, never from the working tree or an argument. Commit it through a reviewed PR"
+  KEYFILE="$(mktemp)"
+  trap 'rm -f "$KEYFILE"' EXIT
+  git -C "$gitdir" show "${trusted_sha}:${KEY_PATH}" > "$KEYFILE" \
+    || die "--key: cannot read ${KEY_PATH} on the trusted ref"
+  first="$(grep -v '^[[:space:]]*$' "$KEYFILE" | head -n 1 | tr -d '\r')"
+  [ "$first" = "-----BEGIN PUBLIC KEY-----" ] \
+    || die "--key: ${KEY_PATH} on the trusted ref is not a PEM public key (its first line is not -----BEGIN PUBLIC KEY-----)"
+  if ! cosign verify-blob \
+        --bundle "$bundle" \
+        --key "$KEYFILE" \
+        "$manifest"; then
+    die "signature does not verify against ${KEY_PATH} on ${trusted} (${trusted_sha:0:12})"
+  fi
+  echo "signature: ok (key ${KEY_PATH} on ${trusted} at ${trusted_sha:0:12})"
+}
+
 verify() {
-  local manifest="" bundle="" repo="" tag="" tree="" gitdir="" trusted=""
+  local manifest="" bundle="" repo="" tag="" tree="" gitdir="" trusted="" keyed=0
   while [ $# -gt 0 ]; do
     case "$1" in
+      # No value: the key is never an argument (TheHub #62072).
+      --key)      keyed=1;           shift ;;
       --manifest) manifest="${2:-}"; shift 2 ;;
       --bundle)   bundle="${2:-}";   shift 2 ;;
       --repo)     repo="${2:-}";     shift 2 ;;
@@ -215,23 +280,13 @@ verify() {
 
   command -v cosign >/dev/null 2>&1 || die "cosign is not installed; cannot verify, so this is not a pass"
 
-  # An exact identity, not a regexp: a signature made by any other workflow,
-  # branch or tag of this repository (or by a fork) does not verify. And the
-  # certificate's own claims: this repository, dispatched (release.yml's only
-  # trigger), on the tag, at the commit checked above.
-  local identity="https://github.com/${repo}/${WORKFLOW_PATH}@refs/tags/${tag}"
-  if ! cosign verify-blob \
-        --bundle "$bundle" \
-        --certificate-identity "$identity" \
-        --certificate-oidc-issuer "$ISSUER" \
-        --certificate-github-workflow-repository "$repo" \
-        --certificate-github-workflow-ref "refs/tags/${tag}" \
-        --certificate-github-workflow-sha "$commit" \
-        --certificate-github-workflow-trigger workflow_dispatch \
-        "$manifest"; then
-    die "signature does not verify for identity ${identity} at ${commit}"
+  # The only step that differs between the modes. Everything above and below
+  # it is shared.
+  if [ "$keyed" -eq 1 ]; then
+    verify_keyed "$bundle" "$manifest" "$gitdir" "$trusted" "$trusted_sha"
+  else
+    verify_keyless "$bundle" "$manifest" "$repo" "$tag" "$commit"
   fi
-  echo "signature: ok (${identity} at ${commit})"
 
   if [ -n "$tree" ]; then
     local fresh
@@ -251,5 +306,5 @@ verify() {
 case "${1:-}" in
   manifest) [ -n "${2:-}" ] || die "usage: $0 manifest <out-file>"; write_manifest "$2" ;;
   verify)   shift; verify "$@" ;;
-  *) die "usage: $0 manifest <out-file> | verify --manifest F --bundle B --repo OWNER/REPO --tag TAG --git DIR --trusted-ref REF [--tree DIR]" ;;
+  *) die "usage: $0 manifest <out-file> | verify [--key] --manifest F --bundle B --repo OWNER/REPO --tag TAG --git DIR --trusted-ref REF [--tree DIR]" ;;
 esac

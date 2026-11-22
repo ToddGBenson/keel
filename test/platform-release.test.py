@@ -20,7 +20,11 @@ PATH, so what is tested is the script's own decisions:
     a commit hard-coded in the script, even when that commit is on main: main's
     own history holds release.yml versions that interpolated a free-text input
     into `run:` while holding `id-token: write` (wave-2 review of #145);
-  * verify --tree refuses a tree whose platform files were changed or added to.
+  * verify --tree refuses a tree whose platform files were changed or added to;
+  * verify --key (TheHub #62072) checks the bundle against the PEM key
+    .github/cosign.pub committed on the trusted ref, with no certificate flags,
+    refuses a wrong key, a key only in the working tree and a key given as an
+    argument, and runs the same tag, floor and tree checks; keyless is unchanged.
 
 PLATFORM-OWNED (platform/MANIFEST.yml), so it reads only platform-owned files.
 The tests of ci/scripts/supply-chain.sh and .github/workflows/release.yml,
@@ -244,6 +248,16 @@ try:
           flag(called, "--certificate-oidc-issuer") == ISSUER, str(called))
     check("verify: the bundle and the manifest are what cosign checks",
           bool(called) and called[-1] == out.as_posix() and bundle.as_posix() in called, str(called))
+    # TheHub #62072: keyless stays the default and is unchanged, flag for flag.
+    check("verify (keyless, the default): cosign's argv is exactly the keyless one, with no --key",
+          called == ["verify-blob", "--bundle", bundle.as_posix(),
+                     "--certificate-identity", want_id,
+                     "--certificate-oidc-issuer", ISSUER,
+                     "--certificate-github-workflow-repository", "owner/keel",
+                     "--certificate-github-workflow-ref", "refs/tags/v1.2.0",
+                     "--certificate-github-workflow-sha", main_sha,
+                     "--certificate-github-workflow-trigger", "workflow_dispatch",
+                     out.as_posix()], str(called))
 
     # ── finding 1: bound to a known-good workflow, not to a tag name ────────
     check("verify: cosign must see the tag's COMMIT as the certificate's workflow sha",
@@ -416,6 +430,125 @@ try:
                        [str(stubs), str(Path(shutil.which("git")).parent), "/usr/bin", "/bin"])})
     check("verify: no cosign installed -> refused, not passed",
           rc == 1 and "cosign is not installed" in log, log)
+
+    # ── TheHub #62072: verify --key, the public key read from the trusted ref ─
+    print("platform-release.sh verify --key")
+    good_pem = "-----BEGIN PUBLIC KEY-----\nR09PRC1LRVktRk9SLVRIRS1URVNU\n-----END PUBLIC KEY-----\n"
+    wrong_pem = "-----BEGIN PUBLIC KEY-----\nV1JPTkctS0VZLUZPUi1USEUtVEVTVA==\n-----END PUBLIC KEY-----\n"
+    good_key = tmp / "good.pub"
+    good_key.write_text(good_pem, encoding="utf-8", newline="\n")
+    key_copy = tmp / "cosign-key-seen.pub"
+    key_path_log = tmp / "cosign-key-path.txt"
+
+    def key_stub():
+        """A cosign that records its argv and the key it was handed, and verifies
+        a --key signature only when that key is good_key (a keyless call passes)."""
+        write_exec(stubs / "cosign",
+                   "#!/usr/bin/env bash\n"
+                   'if [ "${1:-}" = "version" ]; then echo "cosign-stub"; exit 0; fi\n'
+                   f'printf "%s\\n" "$@" > "{argv.as_posix()}"\n'
+                   'key=""; prev=""\n'
+                   'for a in "$@"; do [ "$prev" = "--key" ] && key="$a"; prev="$a"; done\n'
+                   'if [ -n "$key" ]; then\n'
+                   f'  printf "%s" "$key" > "{key_path_log.as_posix()}"\n'
+                   f'  cp "$key" "{key_copy.as_posix()}"\n'
+                   f'  cmp -s "$key" "{good_key.as_posix()}" || exit 1\n'
+                   'fi\n'
+                   "exit 0\n")
+
+    def verify_key(git_dir, tag="v1.2.0", trusted="main", tree_dir=None, key_args=("--key",)):
+        for f in (argv, key_copy, key_path_log):
+            if f.exists():
+                f.unlink()
+        key_stub()
+        args = [script.as_posix(), "verify", *key_args, "--manifest", out.as_posix(),
+                "--bundle", bundle.as_posix(), "--repo", "owner/keel", "--tag", tag,
+                "--git", git_dir.as_posix(), "--trusted-ref", trusted]
+        if tree_dir is not None:
+            args += ["--tree", tree_dir.as_posix()]
+        rc, log = bash(args, cwd=tmp, stubs=stubs)
+        return rc, log, (argv.read_text(encoding="utf-8").splitlines() if argv.exists() else None)
+
+    # A clone whose main carries .github/cosign.pub (the good key), plus branches for the
+    # other cases. All of them hold the fixture's floor (main_sha) and the three tags.
+    keyed = tmp / "keyed"
+    subprocess.run(["git", "clone", "-q", tree.as_posix(), keyed.as_posix()], check=True)
+    kd = git_cmd(keyed)
+    subprocess.run([*kd, "checkout", "-q", "-B", "main", "origin/main"], check=True)
+    subprocess.run([*kd, "fetch", "-q", "origin", "refs/heads/evil:refs/remotes/origin/evil"], check=False)
+    for tg in ("v0.9.0", "v1.2.0", "v6.6.6"):
+        subprocess.run([*kd, "fetch", "-q", "origin", f"refs/tags/{tg}:refs/tags/{tg}"], check=False)
+    pub = keyed / ".github" / "cosign.pub"
+
+    def commit_key(branch, text):
+        subprocess.run([*kd, "checkout", "-q", "-B", branch, "main"], check=True)
+        pub.write_text(text, encoding="utf-8", newline="\n")
+        subprocess.run([*kd, "add", "-A"], check=True)
+        subprocess.run([*kd, "commit", "-q", "-m", f"{branch}: .github/cosign.pub"], check=True)
+        subprocess.run([*kd, "checkout", "-q", "main"], check=True)
+
+    commit_key("rotated", wrong_pem)
+    # A committed private key instead of the public one. The marker is built by
+    # concatenation so this file never holds a full PEM private-key header, which
+    # a secrets scanner would rightly flag (keel #206 review).
+    priv_marker = "ENCRYPTED SIGSTORE " + "PRIVATE" + " KEY"
+    commit_key("privkey", "-----BEGIN " + priv_marker + "-----\nc2VjcmV0\n"
+                          "-----END " + priv_marker + "-----\n")
+    pub.write_text(good_pem, encoding="utf-8", newline="\n")
+    subprocess.run([*kd, "add", "-A"], check=True)
+    subprocess.run([*kd, "commit", "-q", "-m", "main: .github/cosign.pub"], check=True)
+
+    rc, log, called = verify_key(keyed)
+    check("verify --key: a bundle that verifies against the trusted ref's key -> passes",
+          rc == 0 and "signature: ok (key .github/cosign.pub on main" in log, log)
+    called = called or []
+    check("verify --key: cosign verify-blob --key runs, over the bundle and the manifest",
+          called[:1] == ["verify-blob"] and flag(called, "--key") is not None
+          and flag(called, "--bundle") == bundle.as_posix() and called[-1:] == [out.as_posix()], str(called))
+    check("verify --key: cosign is handed the key committed on the trusted ref",
+          key_copy.exists() and key_copy.read_text(encoding="utf-8") == good_pem)
+    check("verify --key: no certificate-identity or issuer flag in keyed mode",
+          not any(a.startswith("--certificate") for a in called), str(called))
+    seen = key_path_log.read_text(encoding="utf-8") if key_path_log.exists() else ""
+    check("verify --key: the key is a temporary copy, removed when the verifier exits",
+          bool(seen) and not Path(seen).exists() and Path(seen) != pub, seen)
+
+    rc, log, called = verify_key(keyed, trusted="rotated")
+    check("verify --key: a WRONG key on the trusted ref -> refused (cosign rejects the signature)",
+          rc == 1 and "does not verify against .github/cosign.pub" in log and called is not None, log)
+
+    # The key exists only in the working tree (written, even staged, never committed on main).
+    wt_key = tree / ".github" / "cosign.pub"
+    wt_key.write_text(good_pem, encoding="utf-8", newline="\n")
+    subprocess.run(["git", "-C", str(tree), "add", ".github/cosign.pub"], check=True)
+    rc, log, called = verify_key(tree)
+    check("verify --key: a key only in the WORKING TREE -> refused (read from the trusted ref only)",
+          rc == 1 and "not committed on the trusted ref" in log, log)
+    check("verify --key: ... refused before cosign", called is None, str(called))
+    subprocess.run(["git", "-C", str(tree), "rm", "-q", "--cached", ".github/cosign.pub"], check=True)
+    wt_key.unlink()
+
+    rc, log, called = verify_key(keyed, key_args=("--key", good_key.as_posix()))
+    check("verify --key PATH: the key cannot be an argument -> refused, cosign never called",
+          rc == 1 and "unknown argument" in log and called is None, log)
+
+    rc, log, called = verify_key(keyed, trusted="privkey")
+    check("verify --key: a trusted-ref .github/cosign.pub that is not a PEM public key -> refused",
+          rc == 1 and "not a PEM public key" in log and called is None, log)
+
+    # The shared path: the tag, trusted-ref and floor checks refuse in keyed mode exactly as keyless.
+    rc, log, called = verify_key(keyed, tag="v6.6.6")
+    check("verify --key: a tag NOT on the trusted ref -> refused before cosign (shared check)",
+          rc == 1 and "not reachable from" in log and evil_sha[:12] in log and called is None, log)
+    rc, log, called = verify_key(keyed, tag="v0.9.0")
+    check("verify --key: a tag BELOW the release floor -> refused before cosign (shared check)",
+          rc == 1 and "release floor" in log and called is None, log)
+    rc, log, called = verify_key(keyed, trusted="refs/tags/v1.2.0")
+    check("verify --key: a tag as the trusted ref -> refused (shared check)",
+          rc == 1 and "not a branch" in log and called is None, log)
+    rc, log, called = verify_key(keyed, tree_dir=tree)
+    check("verify --key --tree: the tree that was signed -> passes (shared check)",
+          rc == 0 and "tree: ok" in log, log)
 
     rc, log, _ = verify(bundle.as_posix(), tree_dir=tree)
     check("verify --tree: the tree that was signed -> passes", rc == 0 and "tree: ok" in log, log)
