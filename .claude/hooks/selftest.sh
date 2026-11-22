@@ -562,6 +562,14 @@ check "on main: git push origin"          block "$(cwpay "$onmain" 'git push ori
 check "on main: git push -u origin HEAD"  block "$(cwpay "$onmain" 'git push -u origin HEAD')"                   guard-bash.sh
 check "elsewhere: git -C <main repo> push" block "$(cwpay "$onfeat" "git -C $onmain push origin HEAD")"          guard-bash.sh
 check "on feat: git push -u origin HEAD"  allow "$(cwpay "$onfeat" 'git push -u origin HEAD')"                   guard-bash.sh
+# TheHub #62258 review (B1): the hook reads the payload cwd and tool name on first use, and that
+# state must start empty. Set in the environment, a cwd marked as already read and pointing at a
+# feature branch hid a push from a checkout on main.
+export guard_cwd_read=1 payload_cwd="$onfeat" tool_name=PowerShell guard_grep_ran=1
+check "env lazy state: on main: git push"          block "$(cwpay "$onmain" 'git push')"                          guard-bash.sh
+check "env lazy state: on main: push origin HEAD"  block "$(cwpay "$onmain" 'git push -u origin HEAD')"           guard-bash.sh
+check "env lazy state: on feat: push origin HEAD"  allow "$(cwpay "$onfeat" 'git push -u origin HEAD')"           guard-bash.sh
+unset guard_cwd_read payload_cwd tool_name guard_grep_ran
 check "on main: git push origin feat"     allow "$(cwpay "$onmain" 'git push origin feat')"                      guard-bash.sh
 # Review round 1 (classes; the exact inputs are in the binnacle review).
 check "feat:main then ;"                  block "$(payload 'git push origin feat:main; echo done')"              guard-bash.sh

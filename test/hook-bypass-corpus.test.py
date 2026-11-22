@@ -68,6 +68,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -395,7 +396,8 @@ def main() -> int:
         return jq_shim(sys.argv[2:])
     verbose = "-v" in sys.argv[1:]
     # Corpus text may be non-ASCII; a Windows console (cp1252) must not crash on it.
-    sys.stdout.reconfigure(errors="replace")
+    # [TheHub #62258] Line-buffered, so each result reaches a CI log (a pipe) as it prints.
+    sys.stdout.reconfigure(errors="replace", line_buffering=True)
 
     entries, errors = load_corpus()
     if errors:
@@ -428,37 +430,41 @@ def main() -> int:
             jq_kind = ("real jq" if shutil.which("jq") else "jq shim") if mode == "jq" else "sed/python fallback"
             print(f"\n-- mode: {mode} ({jq_kind}) " + "-" * max(0, 50 - len(mode) - len(jq_kind)))
             todo = runs(entries)
+            started = time.monotonic()
             with ThreadPoolExecutor(max_workers=8) as pool:
                 copies = Path(td) / f"hooks-{mode}"
                 copies.mkdir(exist_ok=True)
                 hooks = {h: unpinned_copy(HOOKS / h, copies) for h in HOOK_NAMES}
-                results = list(pool.map(lambda r: run_one(r[0], r[1], env, bash, hooks), todo))
-            for (e, tool), (rc, err) in zip(todo, results):
-                ran += 1
-                blocked = rc == 2
-                is_open = mode in (e.get("open_in") or [])
-                tag = f"{e['id']:<8} {tool:<10} {e['class']:<22}"
-                if blocked and not is_open:
-                    print(f"  [ok]   {tag} blocked")
-                elif not blocked and is_open:
-                    print(f"  [OPEN] {tag} allowed (known gap: {e['gap']})")
-                    opened.append(f"{mode}:{tool}:{e['id']}")
-                elif not blocked:
-                    print(f"  [FAIL] {tag} ALLOWED (exit {rc}) -- {e['why']}")
-                    failures.append(f"{mode}:{tool}:{e['id']}")
-                else:
-                    print(f"  [FAIL] {tag} blocked, but the corpus records it as an open gap"
-                          f" in {mode} -- remove '{mode}' from open_in so it stays closed")
-                    failures.append(f"{mode}:{tool}:{e['id']}")
-                wrong = (not blocked and not is_open) or (blocked and is_open)
-                if err.strip() and (wrong or verbose):
-                    # [TheHub #61794] A wrong verdict prints what the hook said, so an
-                    # intermittent one can be diagnosed from the log it happened in.
-                    lines = err.strip().splitlines()
-                    for line in (lines[:12] if wrong else lines[:1]):
-                        print("         | " + line)
-                elif wrong:
-                    print("         | (the hook wrote nothing to stderr)")
+                # [TheHub #62258] Each result prints as it arrives (in corpus order, so the log
+                # reads as before), not after the whole mode: a slow run is visible while it runs.
+                results = pool.map(lambda r: run_one(r[0], r[1], env, bash, hooks), todo)
+                for (e, tool), (rc, err) in zip(todo, results):
+                    ran += 1
+                    blocked = rc == 2
+                    is_open = mode in (e.get("open_in") or [])
+                    tag = f"{e['id']:<8} {tool:<10} {e['class']:<22}"
+                    if blocked and not is_open:
+                        print(f"  [ok]   {tag} blocked")
+                    elif not blocked and is_open:
+                        print(f"  [OPEN] {tag} allowed (known gap: {e['gap']})")
+                        opened.append(f"{mode}:{tool}:{e['id']}")
+                    elif not blocked:
+                        print(f"  [FAIL] {tag} ALLOWED (exit {rc}) -- {e['why']}")
+                        failures.append(f"{mode}:{tool}:{e['id']}")
+                    else:
+                        print(f"  [FAIL] {tag} blocked, but the corpus records it as an open gap"
+                              f" in {mode} -- remove '{mode}' from open_in so it stays closed")
+                        failures.append(f"{mode}:{tool}:{e['id']}")
+                    wrong = (not blocked and not is_open) or (blocked and is_open)
+                    if err.strip() and (wrong or verbose):
+                        # [TheHub #61794] A wrong verdict prints what the hook said, so an
+                        # intermittent one can be diagnosed from the log it happened in.
+                        lines = err.strip().splitlines()
+                        for line in (lines[:12] if wrong else lines[:1]):
+                            print("         | " + line)
+                    elif wrong:
+                        print("         | (the hook wrote nothing to stderr)")
+            print(f"  -- {mode}: {len(todo)} hook runs in {time.monotonic() - started:.0f} s")
 
     print("\n" + "-" * 62)
     print(f"  {len(entries)} corpus entries, {ran} hook runs, "
