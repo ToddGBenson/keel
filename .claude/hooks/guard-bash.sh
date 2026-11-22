@@ -1591,8 +1591,14 @@ END {
 }'
 ctr_depth=0
 ctr_guard() { # $1: one view of the command
-  local toks=() seg=() t bodies=() b
-  mapfile -t toks < <(printf '%s' "$1" | LC_ALL=C awk "$ctr_tok_awk")
+  local toks=() seg=() t bodies=() b src=$1
+  # The tokenizer ends a command at a \001 mark and reads a word starting with \002 as a heredoc
+  # body (\003 ends its lines). One written into the text, as a control character inside a quoted
+  # argument (docker run -l "<\001>" ...), ended the invocation there, so the image and the test
+  # runner after it were never judged. As ? it is a word this hook cannot read, as in tag_guard and
+  # push_guard (review of keel #210, TheHub #61972).
+  src=${src//[$'\001\002\003']/?}
+  mapfile -t toks < <(printf '%s' "$src" | LC_ALL=C awk "$ctr_tok_awk")
   toks+=($'\001')
   for t in "${toks[@]}"; do
     if [ "$t" = $'\001' ]; then
@@ -1602,11 +1608,11 @@ ctr_guard() { # $1: one view of the command
     seg+=("$t")
   done
   # Round 3: the body of every $(...) and backtick, quoted or not, is a command of its own.
-  case "$1" in *'$('*|*'`'*) ;; *) return 0 ;; esac
+  case "$src" in *'$('*|*'`'*) ;; *) return 0 ;; esac
   ctr_depth=$((ctr_depth + 1))
   [ "$ctr_depth" -gt 6 ] && block "a command with substitutions nested more than 6 deep, which this hook does not unfold. Write it flatter; an ordinary command does not nest that far." "AIC-3, SC-6, CP-2"
   if [ "$ctr_depth" -le 6 ]; then
-    mapfile -t bodies < <(printf '%s' "$1" | LC_ALL=C awk "$ctr_subst_awk")
+    mapfile -t bodies < <(printf '%s' "$src" | LC_ALL=C awk "$ctr_subst_awk")
     for b in "${bodies[@]}"; do [ -n "$b" ] && ctr_guard "$b"; done
   fi
   ctr_depth=$((ctr_depth - 1))
