@@ -37,6 +37,17 @@ exit "${CURL_RC:-0}"
 """
 
 
+def rmtree(path, ignore_errors=False):
+    """shutil.rmtree that also removes git's read-only object files (Windows)."""
+    def force(func, p, _exc):
+        try:
+            os.chmod(p, stat.S_IWRITE)
+            func(p)
+        except OSError:
+            pass
+    shutil.rmtree(path, onerror=force if ignore_errors else None)
+
+
 def check(name, cond, detail=""):
     if cond:
         print(f"  [ok]   {name}")
@@ -45,9 +56,12 @@ def check(name, cond, detail=""):
         failures.append(name)
 
 
-def git(*args, cwd):
+def git(*args, cwd, env=None):
     return subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True,
-                          text=True).stdout.strip()
+                          text=True, env=env).stdout.strip()
+
+
+CLOCK = [1_700_000_000]  # fixture commits get distinct, increasing committer times (TheHub #62064)
 
 
 class Origin:
@@ -64,15 +78,22 @@ class Origin:
         git("init", "-q", "--bare", str(self.bare), cwd=tmp)
         git("push", "-q", str(self.bare), "main", cwd=self.work)
 
-    def commit(self, msg):
+    def commit(self, msg, when=None, files=None):
         (self.work / "f.txt").write_text(msg + "\n")
         git("add", "f.txt", cwd=self.work)
-        git("commit", "-q", "-m", msg, cwd=self.work)
+        for rel, text in (files or {}).items():
+            (self.work / rel).parent.mkdir(parents=True, exist_ok=True)
+            (self.work / rel).write_text(text, encoding="utf-8", newline="\n")
+            git("add", "-f", rel, cwd=self.work)
+        CLOCK[0] += 60
+        stamp = f"@{when if when is not None else CLOCK[0]} +0000"
+        git("commit", "-q", "-m", msg, cwd=self.work,
+            env={**os.environ, "GIT_COMMITTER_DATE": stamp, "GIT_AUTHOR_DATE": stamp})
         return git("rev-parse", "HEAD", cwd=self.work)
 
-    def branch(self, name, msg):
+    def branch(self, name, msg, when=None, files=None):
         git("checkout", "-q", "-B", name, "main", cwd=self.work)
-        sha = self.commit(msg)
+        sha = self.commit(msg, when, files)
         git("push", "-q", "-f", str(self.bare), f"{name}:refs/heads/{name}", cwd=self.work)
         git("checkout", "-q", "main", cwd=self.work)
         return sha
@@ -98,12 +119,12 @@ def pick(origin: Origin, tmp: Path, answers=None, **env_extra):
     curl.write_text(CURL_STUB, encoding="utf-8", newline="\n")
     curl.chmod(curl.stat().st_mode | stat.S_IEXEC)
     ans_dir = tmp / "answers"
-    shutil.rmtree(ans_dir, ignore_errors=True)
+    rmtree(ans_dir, ignore_errors=True)
     ans_dir.mkdir()
     for sha, ans in (answers or {}).items():
         (ans_dir / sha).write_text(json.dumps(ans))
     run_dir = tmp / "build"
-    shutil.rmtree(run_dir, ignore_errors=True)
+    rmtree(run_dir, ignore_errors=True)
     run_dir.mkdir()
     capture = tmp / "starts.jsonl"
     capture.write_text("")
@@ -117,6 +138,17 @@ def pick(origin: Origin, tmp: Path, answers=None, **env_extra):
                        text=True, timeout=60)
     starts = [json.loads(line) for line in capture.read_text().splitlines() if line.strip()]
     return r, run_dir / "pr", starts, run_dir / "pr-sha" / "HEAD"
+
+
+def sub(tmp: Path, name: str) -> Path:
+    d = tmp / name
+    d.mkdir()
+    return d
+
+
+def meta_of(pr: Path) -> Path:
+    """The picker's state, beside the checkout and never inside it (TheHub #62015)."""
+    return pr.parent / "pr-meta"
 
 
 def done(status="completed", conclusion="success"):
@@ -146,7 +178,7 @@ def main():
         print("which heads")
         r, pr, starts, sha_file = pick(o, tmp)
         asked = [s["commit_sha"] for s in starts]
-        check("the newest open same-repo head is judged first", r.returncode == 0 and asked == [b],
+        check("the OLDEST open same-repo head is judged first (TheHub #62064)", r.returncode == 0 and asked == [a],
               f"rc={r.returncode} asked={asked}\n{r.stdout}{r.stderr}")
         check("a fork's head is never asked about", fork not in asked)
         check("a closed pull request (no merge ref) is never asked about", closed not in asked)
@@ -155,38 +187,57 @@ def main():
               and starts[0]["phase"] == "start" and starts[0]["conclusion"] is None
               and starts[0]["repo_full_name"] == "ToddGBenson/keel", starts)
         head = (pr / ".git" / "HEAD").read_text().strip() if (pr / ".git" / "HEAD").exists() else ""
-        check("the picked head is checked out detached, so check-run.sh reads its sha", head == b, head)
-        check("pr/.pr names the pull request, sha and branch",
-              (pr / ".pr").exists() and (pr / ".pr").read_text().split() == ["12", b, "feat-b"])
-        check("nothing judged is marked .none", not (pr / ".none").exists())
+        check("the picked head is checked out detached, so check-run.sh reads its sha", head == a, head)
+        check("pr-meta/.pr names the pull request, sha and branch",
+              (meta_of(pr) / ".pr").exists() and (meta_of(pr) / ".pr").read_text().split() == ["11", a, "feat-a"])
+        check("nothing judged is marked .none", not (meta_of(pr) / ".none").exists())
+        check("the picker's state is never written into the pull request's checkout (TheHub #62015)",
+              not (pr / ".pr").exists() and not (pr / ".none").exists())
         check("pr-sha/HEAD holds the head's sha alone, for the end report (review #1)",
-              sha_file.exists() and sha_file.read_text().strip() == b)
+              sha_file.exists() and sha_file.read_text().strip() == a)
 
         print("once per head")
-        r, pr, starts, sha_file = pick(o, tmp, {b: done()})
+        r, pr, starts, sha_file = pick(o, tmp, {a: done()})
         asked = [s["commit_sha"] for s in starts]
         check("a head with a completed check is skipped and the next one judged",
-              r.returncode == 0 and asked == [b, a]
-              and (pr / ".git" / "HEAD").read_text().strip() == a, f"{asked}\n{r.stdout}{r.stderr}")
-        r, pr, starts, sha_file = pick(o, tmp, {b: done("in_progress", None)})
+              r.returncode == 0 and asked == [a, b]
+              and (pr / ".git" / "HEAD").read_text().strip() == b, f"{asked}\n{r.stdout}{r.stderr}")
+        r, pr, starts, sha_file = pick(o, tmp, {a: done("in_progress", None)})
         check("a head whose check is still in progress (a run that died) is judged again",
-              r.returncode == 0 and (pr / ".git" / "HEAD").read_text().strip() == b, r.stdout + r.stderr)
+              r.returncode == 0 and (pr / ".git" / "HEAD").read_text().strip() == a, r.stdout + r.stderr)
         r, pr, starts, sha_file = pick(o, tmp, {b: done(), a: done(conclusion="failure")})
-        check("every head judged: a pass that marks pr/.none and checks nothing out",
-              r.returncode == 0 and (pr / ".none").exists() and not (pr / ".git").exists(),
+        check("every head judged: a pass that marks pr-meta/.none and checks nothing out",
+              r.returncode == 0 and (meta_of(pr) / ".none").exists() and not (pr / ".git").exists(),
               r.stdout + r.stderr)
         check("and writes no pr-sha/HEAD, so the end report posts nothing", not sha_file.exists())
         r, pr, starts, sha_file = pick(o, tmp, {b: done(), a: done()}, PR_PICK_LIMIT="1")
-        check("at most PR_PICK_LIMIT starts per run", len(starts) == 1 and (pr / ".none").exists(),
+        check("at most PR_PICK_LIMIT starts per run", len(starts) == 1 and (meta_of(pr) / ".none").exists(),
               f"{len(starts)} starts")
 
+        print("oldest head first (TheHub #62064)")
+        # A newer push to a higher-numbered pull request does not jump the queue.
+        b2 = o.branch("feat-b", "b, pushed again")
+        o.pull(12, b2)
+        r, pr, starts, sha_file = pick(o, tmp)
+        asked = [s["commit_sha"] for s in starts]
+        check("a newer push to #12 does not jump ahead of #11's older unjudged head",
+              r.returncode == 0 and asked == [a], f"{asked}\n{r.stdout}{r.stderr}")
+        # An old head on a high-numbered pull request beats a newer head on a lower one.
+        old = o.branch("feat-old", "an old head", when=1_600_000_000)
+        o.pull(20, old)
+        r, pr, starts, sha_file = pick(o, tmp)
+        asked = [s["commit_sha"] for s in starts]
+        check("the head that has waited longest is judged first, whatever its PR number",
+              r.returncode == 0 and asked == [old] and (meta_of(pr) / ".pr").read_text().split()[0] == "20",
+              f"{asked}\n{r.stdout}{r.stderr}")
+
         print("refusals")
-        r, pr, _, sha_file = pick(o, tmp, {b: {"detail": "This token is scoped to another repo"}})
+        r, pr, _, sha_file = pick(o, tmp, {old: {"detail": "This token is scoped to another repo"}})  # the head asked first
         check("an answer that is not created/updated/unchanged fails the step",
-              r.returncode != 0 and not (pr / ".pr").exists() and not sha_file.exists(),
+              r.returncode != 0 and not (meta_of(pr) / ".pr").exists() and not sha_file.exists(),
               r.stdout + r.stderr)
         r, pr, _, sha_file = pick(o, tmp, CURL_RC="22")
-        check("a refused report (curl fails) fails the step", r.returncode != 0 and not (pr / ".pr").exists())
+        check("a refused report (curl fails) fails the step", r.returncode != 0 and not (meta_of(pr) / ".pr").exists())
         r, _, _, _ = pick(o, tmp, GIT_URI="git@github.com:ToddGBenson/keel.git")
         check("an SSH uri with no GIT_PRIVATE_KEY is refused before anything is asked",
               r.returncode != 0 and "GIT_PRIVATE_KEY" in r.stderr, r.stderr)
@@ -201,18 +252,72 @@ def main():
         print("pr-checks.sh")
         build = tmp / "checks"
         (build / "pr").mkdir(parents=True)
-        (build / "pr" / ".none").write_text("")
+        (build / "pr-meta").mkdir()
+        (build / "pr-meta" / ".none").write_text("")
         r = subprocess.run(["bash", str(CHECKS)], cwd=build, capture_output=True, text=True, timeout=60)
         check("nothing picked: a pass that runs nothing", r.returncode == 0 and "No pull request head" in r.stdout,
               r.stdout + r.stderr)
-        (build / "pr" / ".none").unlink()
+        (build / "pr-meta" / ".none").unlink()
         r = subprocess.run(["bash", str(CHECKS)], cwd=build, capture_output=True, text=True, timeout=60)
         check("no .pr and no .none: refused, never a vacuous pass", r.returncode != 0)
+        # TheHub #62015: a `.none` committed in the pull request's own tree is content, not state.
+        (build / "pr" / ".none").write_text("")
+        r = subprocess.run(["bash", str(CHECKS)], cwd=build, capture_output=True, text=True, timeout=60)
+        check("a .none inside pr/ is not read as 'nothing to judge' (TheHub #62015)",
+              r.returncode != 0 and "No pull request head" not in r.stdout, r.stdout + r.stderr)
+        (build / "pr-meta" / ".pr").write_text("11 " + "a" * 40 + " feat-a\n")
+        r = subprocess.run(["bash", str(CHECKS)], cwd=build, capture_output=True, text=True, timeout=60)
+        check("a picked head that is not the one checked out in pr/ is refused",
+              r.returncode != 0 and "Unit suites on" not in r.stdout, r.stdout + r.stderr)
         checks_script = CHECKS.read_text(encoding="utf-8")
         check("pr-checks.sh runs the same suites as Actions' unit-suites",
               all(s in checks_script for s in ("test/*.test.py", "test/*.test.js", "SELFTEST", "EVALS")))
+
+        print("a pull request whose tree carries the picker's marker files (TheHub #62015)")
+        o2 = Origin(sub(tmp, "o2"))
+        failing = {".none": "", ".pr": "0 " + "0" * 40 + " forged\n", "ci/requirements.txt": "",
+                   "test/red.test.py": "import sys\nsys.exit(1)\n"}
+        evil = o2.branch("feat-evil", "evil", files=failing)
+        o2.pull(5, evil)
+        r, pr, starts, sha_file = pick(o2, tmp / "o2", {})
+        check("the head is picked and posted as in progress",
+              r.returncode == 0 and [s["commit_sha"] for s in starts] == [evil], r.stdout + r.stderr)
+        check("its committed .none is in the checkout (content) but the state says it is judged",
+              (pr / ".none").exists() and (meta_of(pr) / ".pr").read_text().split() == ["5", evil, "feat-evil"]
+              and not (meta_of(pr) / ".none").exists(), r.stdout + r.stderr)
+        check("and a committed .pr cannot name another head",
+              sha_file.read_text().strip() == evil and (pr / ".pr").read_text().split()[1] == "0" * 40)
+        # pr-checks.sh edits git's global config: keep that out of the developer's.
+        cfg_env = {**os.environ, "GIT_CONFIG_GLOBAL": str(tmp / "gitconfig-global")}
+        r = subprocess.run(["bash", str(CHECKS)], cwd=pr.parent, capture_output=True, text=True,
+                           timeout=300, env=cfg_env)
+        check("pr-checks judges it, and the red suite fails the build rather than passing as 'none'",
+              r.returncode != 0 and "No pull request head" not in r.stdout
+              and f"Unit suites on #5 {evil}" in r.stdout, r.stdout + r.stderr)
+
+        print("the head moves between ls-remote and fetch (TheHub #62015 F2)")
+        o3 = Origin(sub(tmp, "o3"))
+        first = o3.branch("feat-m", "first")
+        o3.pull(7, first)
+        moved = o3.branch("feat-other", "moved to this")
+        wrapper = tmp / "o3" / "git-moving"
+        wrapper.write_text('#!/usr/bin/env bash\ngit "$@"; rc=$?\n'
+                           'if [ "${1:-}" = ls-remote ]; then git -C "$MOVE_BARE" update-ref refs/pull/7/head "$MOVE_TO"; fi\n'
+                           'exit $rc\n', encoding="utf-8", newline="\n")
+        wrapper.chmod(wrapper.stat().st_mode | stat.S_IEXEC)
+        r, pr, starts, sha_file = pick(o3, tmp / "o3", {}, GIT=str(wrapper),
+                                       MOVE_BARE=str(o3.bare), MOVE_TO=moved)
+        check("a head that moved while it was fetched fails the step and says so",
+              r.returncode != 0 and "moved from" in r.stderr and first in r.stderr and moved in r.stderr,
+              r.stdout + r.stderr)
+        check("nothing is recorded for the head that moved: no state, no sha for the report",
+              not (meta_of(pr) / ".pr").exists() and not (meta_of(pr) / ".none").exists()
+              and not sha_file.exists(), r.stdout + r.stderr)
+        r2 = subprocess.run(["bash", str(CHECKS)], cwd=pr.parent, capture_output=True, text=True, timeout=60)
+        check("and pr-checks refuses to judge what the failed pick left", r2.returncode != 0,
+              r2.stdout + r2.stderr)
     finally:
-        shutil.rmtree(tmp, ignore_errors=True)
+        rmtree(tmp, ignore_errors=True)
 
     print()
     if failures:

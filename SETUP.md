@@ -28,6 +28,12 @@ Settings → Branches → Add rule for `main`:
 | Allow force pushes | ❌ | History is the AU-12 audit trail |
 | Allow deletions | ❌ | |
 
+> keel's own `main` does not match this table today (2026-11-18): 0 approvals and no code-owner
+> requirement (solo mode), and signed commits are not required by rule (dropped about 14:36Z: it
+> blocked every PR; GitHub signs each squash merge). `enforce_admins` is on, `keel-main` has no
+> bypass, and `keel-release-tags` has an admin bypass, which the agents' identity holds (TheHub #61039). The table is
+> the setup this template recommends; `docs/13-solo-operation.md` gives the live state and why.
+
 **"Do not allow bypassing" is the difference between a control and a documented
 intention.** With admin bypass enabled, everything above is advisory and an assessor will
 say so. If a genuine emergency needs it, that is the emergency change procedure with its
@@ -35,7 +41,7 @@ own record — not a quiet click.
 
 ## 2. Required status checks
 
-**The merge gate is MyKronos `independent-review`** (TheHub #60978). MyKronos posts it on
+**The intended merge gate is MyKronos `independent-review`** (TheHub #60978; keel's own `main` does not require it today, 2026-11-18). MyKronos posts it on
 each pull request head through its GitHub App and opens the approval request itself, but
 only on a repository whose default branch requires it. Require it **pinned to the App**, so
 a workflow job with the same name cannot satisfy it:

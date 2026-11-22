@@ -21,18 +21,18 @@ which controls are achievable — recorded honestly below rather than marked sat
 | CIS | Control | Status | Implementation |
 |---|---|---|---|
 | 1.1.1 | Any change is tracked and traceable | ✅ | Every commit references an issue — enforced by `commit-msg` hook and `pr-governance.yml` (CM-3) |
-| 1.1.2 | Any change is approved | 🟡 | **Solo: structurally impossible.** `/self-review` artifact required by CI; POAM-008 |
+| 1.1.2 | Any change is approved | 🟡 | **Solo: structurally impossible.** The building agent writes a `/self-review` record; no CI check requires it (`pr-governance.yml` has run on `workflow_dispatch` only since 2026-10-20). POAM-008 |
 | 1.1.3 | Any change is reviewed by two people | ➖ | Solo project. Compensated per POAM-008; closes on a second team member |
 | 1.1.4 | Dismiss stale approvals | ✅ | `dismiss_stale_reviews: true` |
 | 1.1.5 | Code owners are set and approve | 🟡 | CODEOWNERS present and routes; **advisory** in solo mode (cannot self-approve) |
 | 1.1.6 | Inactive branches reviewed and removed | 🟡 | Trunk-based, short-lived branches; no automated pruning yet |
-| 1.1.7 | All checks passed before merge | 🟡 | **Declared, not applied** (TheHub #60978): the required check is MyKronos `independent-review`, App-pinned, set by `configure-github.sh` (App id 4551328 by default). Measured 2026-11-04: `main` requires no checks. POAM-014 |
+| 1.1.7 | All checks passed before merge | 🟡 | Two checks are required (live 2026-11-18, `strict: true`): `Concourse / keel` and `library-allowlist`, both pinned to App 4551328. CodeQL, Gitleaks and unit-suites run but are not required. A green `Concourse / keel` can show without the suites having run (TheHub #62015, open), so it is weaker evidence than it looks. With `enforce_admins` on (since 2026-11-18) an admin merge is held to them too. POAM-014 |
 | 1.1.8 | Open comments resolved before merge | ✅ | `required_conversation_resolution: true` |
-| 1.1.9 | Verify signed commits before merge | 🟡 | Capability probed and found incomplete, so **deliberately not enabled** (L0010). POAM-009 |
+| 1.1.9 | Verify signed commits before merge | ❌ deviation | **Not required by rule** since about 14:36Z on 2026-11-18: the `keel-main` ruleset's signature rule blocked every PR whose branch commits were unsigned, even for a squash merge, so the operator dropped it. Branch protection's `required_signatures` is off. `main` is squash-only and GitHub signs each squash merge, so every commit on `main` is verifiable as GitHub's merge; that attests the merge, not the author (see the 1.1.9 note). POAM-009 |
 | 1.1.10 | Linear history required | ✅ | `required_linear_history: true` |
-| 1.1.11 | Branch protection on the default branch | ✅ | Applied and verified 9/9 by `configure-github.sh` |
-| 1.1.12 | Branch rules enforced on administrators | ✅ | **`enforce_admins: true`** — never relaxed, including in solo mode |
-| 1.1.13 | Pushing/merging restricted to trusted users | ✅ | Single owner; direct push to default branch blocked |
+| 1.1.11 | Branch protection on the default branch | ✅ | Branch protection, plus the `keel-main` ruleset (no bypass: deletion, non-fast-forward, a pull request with squash only) (live 2026-11-18 12:09Z). Release tags have the `keel-release-tags` ruleset, with an admin bypass |
+| 1.1.12 | Branch rules enforced on administrators | 🟡 | **`enforce_admins: true`** since 2026-11-18 (false before; this map said true throughout), and the `keel-main` ruleset has no bypass actors. As an admin the owner, whose identity the agents use (TheHub #61039), can still change the protection, and the `keel-release-tags` ruleset's admin bypass lets it create or move a `v*` tag |
+| 1.1.13 | Pushing/merging restricted to trusted users | 🟡 | Single owner. A direct push to `main` is refused for every identity, the owner's included (`keel-main` ruleset, no bypass; `enforce_admins` on; since 2026-11-18). With 0 approvals required, an identity that can merge can merge any PR whose checks are green |
 | 1.1.14 | Force-push denied | ✅ | `allow_force_pushes: false` |
 | 1.1.15 | Branch deletion denied | ✅ | `allow_deletions: false` |
 | 1.1.16 | Scan for risks in merged code | ✅ | SAST, SCA, secrets, IaC on every PR and on the default branch |
@@ -43,7 +43,7 @@ which controls are achievable — recorded honestly below rather than marked sat
 
 | CIS | Control | Status | Implementation |
 |---|---|---|---|
-| 1.2.1 | Public repositories track their contributions | ✅ | Signed commits, AI-authorship trailers, PR provenance (AIC-6) |
+| 1.2.1 | Public repositories track their contributions | ✅ | AI-authorship trailers, PR provenance (AIC-6); the squash merges on `main` are GitHub-signed (signing is not required by rule since about 14:36Z on 2026-11-18; see 1.1.9), which attests the merge, not the author |
 | 1.2.2 | Repository creation limited | ➖ | Personal account, single owner |
 | 1.2.3 | Repository deletion limited | ✅ | Owner-only by account structure |
 | 1.2.4 | Issue deletion limited | ✅ | Owner-only |
@@ -159,11 +159,18 @@ references), 1.5.x (the five scanners and their no-input honesty), 3.2.1 (AIC-7)
 **The three 🟡 that matter:**
 
 - **1.1.2 / 1.1.3 / 1.1.5 — approval and two-person review.** Structurally impossible solo.
-  Not a configuration failure and not fixable by configuration. POAM-008, with four
-  compensating controls, one mechanically enforced.
-- **1.1.9 — signed commits.** Key generated and git configured, but not registered with
-  GitHub (needs an interactive OAuth scope). The control is correctly *not* enabled rather
-  than falsely claimed. POAM-009.
+  Not a configuration failure and not fixable by configuration. POAM-008, with compensating
+  controls of which **none is mechanically enforced today**: the self-review record is read by
+  reviewers, and no CI check requires it (live 2026-11-18).
+- **1.1.9 — signed commits: a recorded deviation, not a POA&M item.** Not required by rule since about 14:36Z on 2026-11-18 (it
+  blocked every PR with unsigned branch commits). Why not a POA&M entry: nothing unsigned can reach
+  `main`. It accepts only pull requests (no bypass), merged as squash commits that GitHub signs.
+  The author is attributed by the AI-authorship trailers and the PR record, never by a signature.
+  Requiring branch-commit signatures would need every agent host to sign; that belongs with the
+  agent identity (TheHub #61039). POAM-009.
+- **1.1.12 — admins.** `enforce_admins` is true since 2026-11-18 (false before; this map said true
+  throughout until TheHub #62001). The agent gap that remains is the release-tag ruleset's admin
+  bypass, until agents have their own identity (TheHub #61039).
 - **2.4.4 — reproducible builds.** Aspirational per stack; claimed only where true.
 
 **Nothing here is marked satisfied on the strength of a policy document.** Every ✅ traces to

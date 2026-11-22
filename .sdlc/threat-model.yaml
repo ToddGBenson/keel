@@ -99,6 +99,31 @@ entry_points:
         - keel
         - test/**
 
+  - id: pr-code-on-workers
+    name: Pull-request code running on the Concourse workers (pr-checks)
+    description: >-
+      Every ten minutes the pr-checks job runs the unit suites on one open
+      same-repository pull request head, ahead of review. The suites are the
+      head's own, so anyone who can push a branch here (write access, and
+      Dependabot) runs code on a LAN worker that shares the host with
+      production. Forks are never judged. The code gets no credential: the
+      pr-checks task has no params and no outputs, the token-holding steps
+      (pr-pick and the check-run reports) run from main's repo/ and read only
+      the head's sha, and the picker's state lives in pr-meta/, outside the
+      pull request's tree (TheHub #62015: a .none committed in the tree once
+      made pr-checks pass without running). Residual: the code runs with the
+      worker's network, and a head that edits the tests is judged by its own
+      tests, so the check is evidence, not a review.
+    exposure: local
+    evidence_ref: ci/scripts/pr-checks.sh
+    selectors:
+      paths:
+        - ci/scripts/pr-pick.sh
+        - ci/scripts/pr-checks.sh
+        - ci/tasks/pr-pick.yml
+        - ci/tasks/pr-checks.yml
+        - ci/tasks/check-run.yml
+
 trust_boundaries:
   - id: github-repository
     name: GitHub repository settings
@@ -151,10 +176,14 @@ controls:
     kind: authorization
     stride: tampering
     description: >-
-      main requires one approving review before merge (API read 2026-10-18).
-      enforce_admins is false, so the owner can bypass it, and no required
-      status checks appear on the classic protection; the PR governance checks
-      are therefore advisory to an admin. Re-read 2026-11-04 unchanged. The
+      Re-read 2026-11-18 (TheHub #62001): main requires 0 approving reviews
+      (solo mode, POAM-008) and two status checks (Concourse / keel and
+      library-allowlist, App-pinned); enforce_admins is on, and the keel-main
+      ruleset (no bypass) refuses deletion and non-fast-forward pushes and
+      requires a pull request (its signature rule was dropped at about 14:36Z). The owner's identity, which
+      the agents use, can still merge a green PR and bypasses the release-tag
+      ruleset as an admin (TheHub #61039). Before: one approving review and
+      enforce_admins false (2026-10-18, 2026-11-04). The
       intended values are declared in .sdlc/protection.yaml, and the
       protection-drift job compares them with the API every morning (TheHub
       #60979).
@@ -188,3 +217,19 @@ controls:
     evidence_ref: .claude/hooks/guard-bash.sh
     applies_to: process-corpus
     reviewed_at: 2026-10-17
+
+  - id: pr-code-credential-isolation
+    kind: authorization
+    stride: elevation_of_privilege
+    description: >-
+      Pull-request code runs only in the pr-checks task, which holds no param
+      and declares no output, so Concourse discards anything it writes to its
+      copy-on-write inputs (repo/, pr/, pr-meta/). The picker's state is
+      written to pr-meta/ and checked against the checked-out sha, never read
+      from the pull request's tree. The credentialed steps take only repo/ and
+      pr-sha/. test/check-run.test.py enforces the task shapes and
+      test/pr-pick.test.py runs a head whose tree carries the marker files
+      (TheHub #62015).
+    evidence_ref: test/check-run.test.py
+    applies_to: pr-code-on-workers
+    reviewed_at: 2026-11-21

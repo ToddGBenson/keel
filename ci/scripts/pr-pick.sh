@@ -29,8 +29,13 @@
 # the ingestion token. Nothing here runs pull-request code: the head is fetched
 # and checked out, never executed. The task that runs it gets neither credential.
 #
-# No head to judge is a pass with an empty `pr/` (and `pr/.none`), so the later
+# No head to judge is a pass with an empty `pr/` (and `pr-meta/.none`), so the later
 # tasks and the end report do nothing.
+#
+# The picker's own state (`.none`, `.pr`) goes in `pr-meta/`, an output of its own, never
+# in `pr/`. `pr/` is the pull request's tree, and that tree is the author's: a `.none`
+# committed in it, written into the same directory, read as "nothing to judge", so
+# pr-checks passed without running a suite and the check posted green (TheHub #62015).
 set -euo pipefail
 
 : "${REPO_SLUG:?REPO_SLUG is required}"
@@ -43,11 +48,13 @@ OUT="${PR_OUT:-pr}"
 # The head's sha alone, for the end report. A separate output, so the report
 # never needs the pull request's checkout as an input (TheHub #61778 review).
 SHA_OUT="${PR_SHA_OUT:-pr-sha}"
+# The picker's state, beside the checkout and never inside it (TheHub #62015).
+META_OUT="${PR_META_OUT:-pr-meta}"
 GIT="${GIT:-git}"
 CURL="${CURL:-curl}"
 PY="${PY:-python3}"
 
-mkdir -p "$OUT" "$SHA_OUT"
+mkdir -p "$OUT" "$SHA_OUT" "$META_OUT"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
@@ -66,7 +73,7 @@ esac
 
 "$GIT" ls-remote "$GIT_URI" 'refs/heads/*' 'refs/pull/*/head' 'refs/pull/*/merge' > "$work/refs"
 
-# Candidates, newest first: "<number> <sha> <branch>".
+# Candidates: "<number> <sha> <branch>", by pull request number (the order is set below).
 "$PY" - "$work/refs" "$BASE_BRANCH" > "$work/candidates" <<'PY'
 import re, sys
 refs = {}
@@ -90,9 +97,28 @@ for ref, sha in refs.items():
     if not branches:
         continue  # a fork's head, or a head that is only the base branch
     out.append((int(m.group(1)), sha, sorted(branches)[0]))
-for number, sha, branch in sorted(out, reverse=True):
+for number, sha, branch in sorted(out):
     print(number, sha, branch)
 PY
+
+# TheHub #62064: the head that has waited longest is judged first. With one head judged per
+# run, "newest pull request first" let every push to a higher-numbered PR jump ahead of an
+# older head, which starved a merge train (keel #189 waited 30+ minutes on 2026-11-18).
+# Each head's commit is fetched (depth 1, into a scratch repository) for its committer time,
+# and the candidates are ordered oldest first, by pull request number when the times tie.
+# When the times cannot be read, the order stays by pull request number, oldest first.
+"$GIT" -C "$work" init -q dates 2>/dev/null || true
+specs=()
+while read -r number sha branch; do specs+=("refs/pull/${number}/head:refs/c/${number}"); done < "$work/candidates"
+if [ "${#specs[@]}" -gt 0 ] && "$GIT" -C "$work/dates" fetch -q --no-tags --depth=1 "$GIT_URI" "${specs[@]}" 2>/dev/null; then
+  while read -r number sha branch; do
+    ct=$("$GIT" -C "$work/dates" log -1 --format=%ct "$sha" 2>/dev/null) || ct=""
+    printf '%s %s %s %s\n' "${ct:-9999999999}" "$number" "$sha" "$branch"
+  done < "$work/candidates" | sort -n -k1,1 -k2,2 | cut -d' ' -f2- > "$work/ordered"
+  mv "$work/ordered" "$work/candidates"
+else
+  echo "Could not read the heads' commit times; judging by pull request number, oldest first."
+fi
 
 echo "$(wc -l < "$work/candidates" | tr -d ' ') open pull request head(s) on branches of ${REPO_SLUG}."
 
@@ -133,7 +159,7 @@ done < "$work/candidates"
 
 if [ -z "$picked" ]; then
   echo "No pull request head needs a verdict."
-  : > "$OUT/.none"
+  : > "$META_OUT/.none"
   exit 0
 fi
 
@@ -153,7 +179,7 @@ if [ "$got" != "$sha" ]; then
 fi
 "$GIT" -C "$OUT" -c advice.detachedHead=false checkout -q --detach "$sha"
 [ "$(tr -d ' \n' < "$OUT/.git/HEAD")" = "$sha" ]
-printf '%s %s %s\n' "$number" "$sha" "$branch" > "$OUT/.pr"
+printf '%s %s %s\n' "$number" "$sha" "$branch" > "$META_OUT/.pr"
 # check-run.sh reads the sha from here (HEAD_FILE), last, so it exists only
 # once the head is checked out and verified.
 printf '%s\n' "$sha" > "$SHA_OUT/HEAD"
