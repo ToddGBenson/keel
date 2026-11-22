@@ -128,8 +128,13 @@ check("self-review.md does not credit selfreview-check.js with the verdict: line
 # 4. The PR template states the issue-resolution rules exactly as selfreview-check.js reads them.
 check("PR template: Ref or Refs, any case, colon optional",
       "`Ref` or `Refs` (any case, with or without a colon)" in template)
-check("PR template: only Closes, Fixes and Resolves close; Fixed falls to the Refs rule",
-      "`Fixed #<n>`" in template and "falls to the `Refs` rule" in template)
+# TheHub #62001 (review of #193): only Closes, Fixes and Resolves count for the record lookup;
+# GitHub ALSO closes on Fixed and the rest, and the lookup reads those under the Refs rule.
+check("PR template: only Closes, Fixes and Resolves count for the lookup; Fixed falls to the Refs rule",
+      "Only those three count for the record" in template and "`Fixed`" in template
+      and "reads under the `Refs` rule" in template)
+check("PR template: GitHub itself also closes on Fixed (the lookup is not what closes an issue)",
+      "GitHub also closes the issue on merge" in template)
 check("PR template: the body must link the record path",
       "link `evidence/<issue>/g3/self-review.md` in the PR body" in template)
 

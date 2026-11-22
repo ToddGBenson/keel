@@ -101,12 +101,17 @@ and reviewers will not accept the PR without it. The agent that builds the PR ru
 MyKronos `independent-review` does not replace it.
 
 - **Record:** `evidence/<issue>/g3/self-review.md`, and link `evidence/<issue>/g3/self-review.md`
-  in the PR body (the path with the real issue number; a record the body does not link is not
-  found). The record carries a `PR: #<n>` line and a `verdict: pass|fail` line. `<issue>` is
-  resolved in this order:
-  1. `Closes`, `Fixes` or `Resolves #<n>` in the body. Only those three words close. `Fixed #<n>`
-     (or `Closed`, `Resolved`) does not, and falls to the `Refs` rule. A PR that closes more than
-     one issue cannot be resolved: close one issue per PR.
+  in the PR body (the path with the real issue number). The record carries a `PR: #<n>` line
+  and a `verdict: pass|fail` line. The rules below are the shape check
+  `scripts/selfreview-check.js` applies where it runs: in a fork that restores
+  `pr-governance.yml`. Nothing in keel runs it today (it has run on `workflow_dispatch` only since
+  2026-10-20), so a reviewer checks them by eye. Under those rules a record the body does not link
+  is not found, and `<issue>` is resolved in this order:
+  1. `Closes`, `Fixes` or `Resolves #<n>` in the body. Only those three count for the record
+     lookup. GitHub also closes the issue on merge for `Fix`, `Fixed`, `Close`, `Closed`, `Resolve`
+     and `Resolved`, which the lookup ignores and reads under the `Refs` rule, so do not use them
+     to mention an issue you mean to keep open. A PR that closes more than one issue cannot be
+     resolved: close one issue per PR.
   2. With none, the first `Ref` or `Refs` (any case, with or without a colon) `#<n>`.
   3. With none, the first `#<n>` in the title.
 - **Opened / reviewed:** `<timestamp>` → `<timestamp>` (cooling-off: don't merge same session)

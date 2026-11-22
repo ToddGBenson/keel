@@ -52,11 +52,14 @@ G0/G2; a chore skips most of it; only behavior/security/AI changes get the full 
 
 ## Merging
 
-**The merge gate is MyKronos `independent-review`** (TheHub #60978). MyKronos posts it on
-the pull request's head commit through its GitHub App (`mykronos-platform`), and branch
-protection requires it pinned to that App, so a workflow job with the same name cannot
-satisfy it. It goes green only when someone other than the requester approves that exact
-head. A new push needs a new approval.
+**The intended merge gate is MyKronos `independent-review`** (TheHub #60978). MyKronos posts
+it on the pull request's head commit through its GitHub App (`mykronos-platform`); declared
+required and pinned to that App, a workflow job with the same name could not satisfy it. It
+goes green only when someone other than the requester approves that exact head, and a new
+push needs a new approval. **Branch protection does not require it today** (2026-11-18, TheHub
+#62001): the required checks are `Concourse / keel` and `library-allowlist`, 0 approving
+reviews are required, and `enforce_admins` is on (`.sdlc/protection.yaml` declares this and
+the daily drift check compares it with live).
 
 **To request it:** `POST /api/approvals/pull-requests` on the MyKronos API, body `{repo, number, statement}`.
 MyKronos reads the diff, computes the tier and posts the check `in_progress`; the approver
@@ -64,13 +67,14 @@ decides in MyKronos. Once `main` requires the check, MyKronos also opens the req
 for every open pull request. An agent requests with its own MyKronos credential and never
 approves its own work.
 
-**`Concourse / keel` stays main-only.** It is the post-merge verdict on each `main` commit
-and never lands on a pull request head, so it is not, and cannot be, a required check.
+**`Concourse / keel` was main-only.** It was the post-merge verdict on each `main` commit and
+never landed on a pull request head. Since TheHub #61778 Concourse judges PR heads, and on
+2026-11-18 `Concourse / keel` is a required check, with `library-allowlist`, both pinned to App 4551328.
+A green `Concourse / keel` can show without the suites having run (TheHub #62015, open).
 
 **Squash merges only.** `required_linear_history` is on, and a squash produces a single
-commit on `main`. `required_signatures` is **not** enforced on `main` (measured 2026-11-04:
-`required_signatures.enabled` is false). `scripts/configure-github.sh` turns it on only once
-the operator can sign (L0010); until then SI-7/CM-14 are open in the POA&M.
+commit on `main`. Branch protection's `required_signatures` is off (measured 2026-11-04 and
+2026-11-18), and signed commits are not required by rule since about 14:36Z on 2026-11-18 (the `keel-main` ruleset's signature rule blocked every PR with unsigned branch commits, even for a squash merge); `main` is squash-only and GitHub signs each squash merge, which attests the merge, not the author (POAM-009).
 
 ## The rules that never bend
 

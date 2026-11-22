@@ -24,7 +24,7 @@ Four practice groups: **PO** Prepare the Organization · **PS** Protect the Soft
 
 | SSDF | Practice | Here | 800-53 |
 |---|---|---|---|
-| PS.1 | Protect all forms of code from unauthorized access and tampering | Branch protection, signed commits, no admin bypass, CODEOWNERS | CM-5, SI-7, AC-3 |
+| PS.1 | Protect all forms of code from unauthorized access and tampering | Branch protection for non-admin identities, CODEOWNERS (advisory). Since 2026-11-18: `enforce_admins` on, and the `keel-main` ruleset (no bypass) refuses deletion and non-fast-forward pushes and requires a pull request. Release tags: the `keel-release-tags` ruleset, whose admin bypass the agents' identity holds (TheHub #61039) | CM-5, SI-7, AC-3 |
 | PS.2 | Provide a mechanism to verify software release integrity | Cosign keyless signing; **verification enforced at deploy** | CM-14, SI-7, SR-11 |
 | PS.3 | Archive and protect each software release | Immutable artifacts by digest; SBOM and attestation retained | CM-8, SR-4, AU-11 |
 

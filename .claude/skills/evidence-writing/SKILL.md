@@ -62,7 +62,7 @@ evidence/assessments/<quarter>/ assessment-report.md  sample-selection.md  findi
 
 ## Integrity (AU-9)
 
-- **Prefer git-resident** — commit history is tamper-evident and attributable via signed commits.
+- **Prefer git-resident** — commit history is tamper-evident; on `main` the commits are GitHub-signed squash merges, which attest the merge, and the author is attributed by the AI trailers.
 - **Prefer CI-generated** — a workflow run record cannot be hand-authored after the fact,
   which is precisely its value over a written claim.
 - **Never hand-edit generated evidence.** If a scan report or test result is wrong,

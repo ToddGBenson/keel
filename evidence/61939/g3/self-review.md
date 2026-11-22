@@ -41,7 +41,9 @@ awk programs: ps_awk 5.3 s, dequote_awk 5.0 s, json_unescape_awk 3.2 s (no-jq on
   backticks, here-documents, `<<-`, comments, CRLF, `u{..}`, `--%`): 0 byte differences under mawk
   1.3.4, 0 of 1,512 under busybox awk, 0 of 1,512 under gawk 5.3.2. The exit status matched too.
 - **Red first:** the new budget check (every large command decided in under 5 s, still blocked)
-  against main's hook: 16 of 16 timing checks failed; every command was still blocked.
+  against main's hook: 16 of 16 timing checks failed on the runner laptop; every command was
+  still blocked. (Review of #184: on a faster host 12 of 16 failed, and the dense case passed on
+  main, so the red is host-dependent; the fix is not in doubt.)
 - **Green after:** test/hook-fail-closed.test.py 192 passed, 0 failed; slowest large case 0.7 s.
 - **No regressions:** selftest 305 passed / 0 failed; bypass corpus 224 entries, 804 hook runs,
   0 failed (32 open known gaps, unchanged); every test in test/manifest.txt passes in a capped
@@ -51,7 +53,9 @@ awk programs: ps_awk 5.3 s, dequote_awk 5.0 s, json_unescape_awk 3.2 s (no-jq on
 ## Not verified
 
 - Git Bash on Windows (gawk) running the whole hook. The views were fuzzed under gawk, not timed.
-- The remaining ~0.5 s is bash and the rules' sed/grep calls; not profiled further.
+- The remaining ~0.5 s is bash and the rules' sed/grep calls, for comment padding only. The review
+  of #184 found three other paths, outside this diff, that cost seconds per kilobyte for other
+  shapes. TheHub #61973 gives the hook a deadline that blocks, so no shape fails open on time.
 
 ## Residual risk accepted
 
