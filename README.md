@@ -167,8 +167,8 @@ agent be told" but **"what makes the unwanted action impossible."**
 ## The three rules that keep this honest
 
 1. **No self-approval.** The agent that wrote the code does not review it, test it, or
-   authorize its release. This is NIST AC-5 / CM-5, and it is enforced by CODEOWNERS and
-   branch protection, not by good intentions.
+   authorize its release. This is NIST AC-5 / CM-5, and in a team setup it is enforced by
+   CODEOWNERS and branch protection, not by good intentions. In keel's solo setup today (2026-11-18) `main` requires no approving review (POAM-008; `docs/13-solo-operation.md`), so nothing server-side stops the agents' identity, which is the owner's (TheHub #61039), merging a PR whose required checks are green.
 2. **Evidence or it didn't happen.** A gate checklist item is satisfied by a linked
    artifact — a workflow run, a SARIF file, an attestation, a signed approval. Prose
    claiming the work was done is not evidence.
@@ -204,8 +204,11 @@ Written down so nobody discovers them during an assessment:
 - **800-53 coverage is SDLC-scoped.** A full system authorization also needs operational,
   physical, and personnel control families that live outside this repo. The control map
   marks what is partial — read the 🟡 entries as the honest ones.
-- **Prompt-level agent controls are advisory.** Only the tool grants, hooks, and branch
-  protection hold against a confused or adversarial model.
+- **Prompt-level agent controls are advisory, and so are the hooks.** The hooks are
+  best-effort guidance (a denylist over command text) that catches honest mistakes. What holds
+  against a confused or adversarial model is what the agent's credential cannot do, and today
+  the agent's GitHub credential is the owner's: see `docs/11-ai-agent-controls.md` § Read this
+  first.
 - **`bootstrap.sh` and `sync-platform.sh` are now verified end to end** against a real
   clone — nine defects were found and fixed on their first execution (L0011). The remaining
   untested surface is the non-`node` stack profiles and `release.yml`.

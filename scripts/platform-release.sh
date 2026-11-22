@@ -36,13 +36,31 @@
 #       a v* tag are repository rulesets, which the operator owns
 #       (docs/compliance/poam.md, POAM-011).
 #
+#   platform-release.sh verify --key --manifest F --bundle B --repo OWNER/REPO --tag TAG
+#                              --git DIR --trusted-ref REF [--tree DIR]
+#       The same, for a KEYED signature (TheHub #62072, 61779): a release
+#       signed in Concourse with a key held in Vault transit, which has no
+#       OIDC identity for Fulcio to certify. B must verify against the PEM
+#       public key .github/cosign.pub AS COMMITTED ON REF (git show REF:...),
+#       with `cosign verify-blob --key` and no certificate-identity flags: a
+#       key signature carries no certificate to hold them against.
+#       The key is reviewed content on the trusted ref, like
+#       .github/release-floor. It is never taken from the working tree or
+#       from an argument (`--key` takes no value), because whoever runs the
+#       verifier, or whoever pushed the tag, must not choose the key that
+#       checks the signature. No key on REF is a refusal.
+#       The tag, trusted-ref, release-floor and --tree checks are the same
+#       code in both modes; only the signature check differs. Keyless stays
+#       the default.
+#
 #       And "on main" is not enough on its own (wave-2 review of #145): main's
 #       history holds release.yml versions that are unsafe to sign from. Before
 #       af878f1, preflight held `id-token: write` and interpolated the free-text
 #       input inputs.change_record into `run:`, so a tag on an old main commit
 #       could mint release.yml's OIDC identity from injected code. So the tag's
-#       commit must also DESCEND from RELEASE_FLOOR, hard-coded below. A
-#       repository that does not hold the floor commit is refused, not skipped.
+#       commit must also DESCEND from the release floor (TheHub #61432: per
+#       repository, see release_floor() below). A shallow clone is refused, not
+#       skipped, and upstream keel is always held to its own floor.
 #
 # Every refusal exits 1 and says which check refused. There is no warn-only
 # mode: a signature nobody is made to fail on is decoration.
@@ -50,6 +68,8 @@ set -euo pipefail
 
 ISSUER="https://token.actions.githubusercontent.com"
 WORKFLOW_PATH=".github/workflows/release.yml"
+# The keyed mode's public key, read only from the trusted ref (TheHub #62072).
+KEY_PATH=".github/cosign.pub"
 
 # The release floor: af878f1 (#143, TheHub #60935), the first commit on main
 # whose release.yml has authorize-release (G5, refusing a run with no recorded
@@ -60,6 +80,78 @@ WORKFLOW_PATH=".github/workflows/release.yml"
 # HEAD. Not a parameter, and no environment override: whoever runs the
 # verifier must not be able to lower it. Move it forward, never back.
 RELEASE_FLOOR="af878f1517fe8352192e5f5213d3260d914d4a78"
+# The repository whose release.yml the floor above was measured on. A signature from it is
+# always held to RELEASE_FLOOR, whatever the clone holds.
+KEEL_UPSTREAM="ToddGBenson/keel"
+
+# TheHub #61432: the floor is per repository. RELEASE_FLOOR is keel's own commit, and a
+# repository made from keel without its history (a template copy, binnacle) does not hold it,
+# so every one of its releases was refused. The floor that applies:
+#   1. a shallow clone is refused: missing history is not "no keel history";
+#   2. a repository that holds RELEASE_FLOOR (keel, a GitHub fork with keel's history), or
+#      whose signer is KEEL_UPSTREAM, is held to RELEASE_FLOOR;
+#   3. any other repository is held to its own floor: the commit sha in .github/release-floor
+#      as committed on the TRUSTED ref. That is reviewed content, not a parameter, so whoever
+#      runs the verifier cannot lower it. It must be in the repository and reachable from the
+#      trusted ref. It names the first commit whose release.yml has the G5 gate and takes no
+#      workflow input as program text (keel's af878f1 fix). With no such file the release is
+#      refused. There is no implicit default: a repository's first commit may carry the
+#      pre-gate release.yml (binnacle's does), so the root is not a safe floor.
+# A repository holding RELEASE_FLOOR may still configure a floor, but only one that descends
+# from RELEASE_FLOOR: a configured floor can only move the floor forward.
+# The trusted ref names a BRANCH, never a tag (TheHub #61432 review). A short name is looked up
+# only among branches (refs/remotes/<name>, refs/heads/<name>, refs/remotes/origin/<name>), so a
+# tag spelled like a branch cannot stand in for it. HEAD is the caller's own checkout (Concourse's
+# get of main). Anything else, a tag or a sha included, is refused.
+resolve_trusted() { # $1 git dir, $2 ref -> prints its commit
+  local gitdir=$1 ref=$2 full="" c
+  case "$ref" in
+    HEAD) full=HEAD ;;
+    refs/heads/*|refs/remotes/*) full=$ref ;;
+    refs/*) die "trusted ref '${ref}' is not a branch (refs/heads/ or refs/remotes/); a tag cannot be the trusted ref" ;;
+    *)
+      for c in "refs/remotes/${ref}" "refs/heads/${ref}" "refs/remotes/origin/${ref}"; do
+        if git -C "$gitdir" show-ref --verify --quiet "$c"; then full=$c; break; fi
+      done
+      [ -n "$full" ] || die "trusted ref '${ref}' is not a branch in ${gitdir} (looked for refs/remotes/${ref}, refs/heads/${ref} and refs/remotes/origin/${ref}); a tag cannot be the trusted ref" ;;
+  esac
+  git -C "$gitdir" rev-parse --verify --quiet "${full}^{commit}" \
+    || die "trusted ref '${ref}' does not resolve in ${gitdir}"
+}
+release_floor() { # $1 git dir, $2 trusted sha, $3 OWNER/REPO -> prints the floor sha
+  local gitdir=$1 trusted=$2 repo=$3 cfg base=""
+  [ "$(git -C "$gitdir" rev-parse --is-shallow-repository 2>/dev/null)" = "false" ] \
+    || die "the repository at ${gitdir} is a shallow clone (or not a repository); fetch its full history (no --depth) and retry: the release floor cannot be judged on part of it"
+  if git -C "$gitdir" cat-file -e "${RELEASE_FLOOR}^{commit}" 2>/dev/null; then
+    base=$RELEASE_FLOOR
+  elif [ "$(printf '%s' "$repo" | tr 'A-Z' 'a-z')" = "$(printf '%s' "$KEEL_UPSTREAM" | tr 'A-Z' 'a-z')" ]; then
+    die "the release floor ${RELEASE_FLOOR} is not in the repository at ${gitdir}; fetch the full history of ${KEEL_UPSTREAM} and retry"
+  fi
+  # An absent file is "no configured floor"; a file that exists but cannot be read is refused,
+  # never read as absent (review nit: it fell back to keel's floor silently).
+  cfg=""
+  if git -C "$gitdir" cat-file -e "${trusted}:.github/release-floor" 2>/dev/null; then
+    cfg=$(git -C "$gitdir" show "${trusted}:.github/release-floor") \
+      || die "cannot read .github/release-floor on the trusted ref"
+    cfg=$(printf '%s' "$cfg" | tr -d ' \t\r\n')
+    [ -n "$cfg" ] || die ".github/release-floor on the trusted ref is empty"
+  fi
+  if [ -z "$cfg" ]; then
+    [ -n "$base" ] && { printf '%s' "$base"; return 0; }
+    die "${repo} does not hold keel's release floor and its trusted ref has no .github/release-floor; commit that file (through a reviewed PR) naming the first commit whose release.yml has the G5 gate and passes workflow inputs as data"
+  fi
+  printf '%s' "$cfg" | grep -qE '^[0-9a-f]{40}$' \
+    || die ".github/release-floor on the trusted ref is not a 40-character commit sha"
+  git -C "$gitdir" cat-file -e "${cfg}^{commit}" 2>/dev/null \
+    || die ".github/release-floor names ${cfg}, which is not in the repository at ${gitdir}"
+  git -C "$gitdir" merge-base --is-ancestor "$cfg" "$trusted" \
+    || die ".github/release-floor names ${cfg}, which is not reachable from the trusted ref"
+  if [ -n "$base" ]; then
+    git -C "$gitdir" merge-base --is-ancestor "$base" "$cfg" \
+      || die ".github/release-floor names ${cfg}, which does not descend from the floor it would replace (${base:0:12}): a configured floor may only move forward"
+  fi
+  printf '%s' "$cfg"
+}
 
 die() { echo "REFUSED: $*" >&2; exit 1; }
 
@@ -102,10 +194,56 @@ PY
   [ -s "$out" ] || die "no tracked platform-owned files; nothing to sign"
 }
 
+# Keyless (the default): a Fulcio certificate for release.yml on the tag.
+verify_keyless() { # $1 bundle, $2 manifest, $3 OWNER/REPO, $4 tag, $5 tag's commit
+  local bundle=$1 manifest=$2 repo=$3 tag=$4 commit=$5
+  # An exact identity, not a regexp: a signature made by any other workflow,
+  # branch or tag of this repository (or by a fork) does not verify. And the
+  # certificate's own claims: this repository, dispatched (release.yml's only
+  # trigger), on the tag, at the commit checked above.
+  local identity="https://github.com/${repo}/${WORKFLOW_PATH}@refs/tags/${tag}"
+  if ! cosign verify-blob \
+        --bundle "$bundle" \
+        --certificate-identity "$identity" \
+        --certificate-oidc-issuer "$ISSUER" \
+        --certificate-github-workflow-repository "$repo" \
+        --certificate-github-workflow-ref "refs/tags/${tag}" \
+        --certificate-github-workflow-sha "$commit" \
+        --certificate-github-workflow-trigger workflow_dispatch \
+        "$manifest"; then
+    die "signature does not verify for identity ${identity} at ${commit}"
+  fi
+  echo "signature: ok (${identity} at ${commit})"
+}
+
+# Keyed (--key): the public key committed on the trusted ref, nowhere else.
+KEYFILE=""
+verify_keyed() { # $1 bundle, $2 manifest, $3 git dir, $4 trusted ref name, $5 its commit
+  local bundle=$1 manifest=$2 gitdir=$3 trusted=$4 trusted_sha=$5 first
+  git -C "$gitdir" cat-file -e "${trusted_sha}:${KEY_PATH}" 2>/dev/null \
+    || die "--key: ${KEY_PATH} is not committed on the trusted ref ${trusted} (${trusted_sha}); the key is read from there only, never from the working tree or an argument. Commit it through a reviewed PR"
+  KEYFILE="$(mktemp)"
+  trap 'rm -f "$KEYFILE"' EXIT
+  git -C "$gitdir" show "${trusted_sha}:${KEY_PATH}" > "$KEYFILE" \
+    || die "--key: cannot read ${KEY_PATH} on the trusted ref"
+  first="$(grep -v '^[[:space:]]*$' "$KEYFILE" | head -n 1 | tr -d '\r')"
+  [ "$first" = "-----BEGIN PUBLIC KEY-----" ] \
+    || die "--key: ${KEY_PATH} on the trusted ref is not a PEM public key (its first line is not -----BEGIN PUBLIC KEY-----)"
+  if ! cosign verify-blob \
+        --bundle "$bundle" \
+        --key "$KEYFILE" \
+        "$manifest"; then
+    die "signature does not verify against ${KEY_PATH} on ${trusted} (${trusted_sha:0:12})"
+  fi
+  echo "signature: ok (key ${KEY_PATH} on ${trusted} at ${trusted_sha:0:12})"
+}
+
 verify() {
-  local manifest="" bundle="" repo="" tag="" tree="" gitdir="" trusted=""
+  local manifest="" bundle="" repo="" tag="" tree="" gitdir="" trusted="" keyed=0
   while [ $# -gt 0 ]; do
     case "$1" in
+      # No value: the key is never an argument (TheHub #62072).
+      --key)      keyed=1;           shift ;;
       --manifest) manifest="${2:-}"; shift 2 ;;
       --bundle)   bundle="${2:-}";   shift 2 ;;
       --repo)     repo="${2:-}";     shift 2 ;;
@@ -129,37 +267,26 @@ verify() {
   local commit trusted_sha
   commit="$(git -C "$gitdir" rev-parse --verify --quiet "refs/tags/${tag}^{commit}")" \
     || die "tag ${tag} is not in the repository at ${gitdir}; cannot tell which commit signed it"
-  trusted_sha="$(git -C "$gitdir" rev-parse --verify --quiet "${trusted}^{commit}")" \
-    || die "trusted ref '${trusted}' does not resolve in ${gitdir}"
+  trusted_sha="$(resolve_trusted "$gitdir" "$trusted")" || exit 1
   if ! git -C "$gitdir" merge-base --is-ancestor "$commit" "$trusted_sha"; then
     die "tag ${tag} is on commit ${commit}, which is not reachable from ${trusted} (${trusted_sha}): its release.yml was never on ${trusted}, so its signature says nothing about the G5 gate"
   fi
-  git -C "$gitdir" cat-file -e "${RELEASE_FLOOR}^{commit}" 2>/dev/null \
-    || die "the release floor ${RELEASE_FLOOR} is not in the repository at ${gitdir}; fetch the full history of the release repository (no shallow clone) and retry"
-  if ! git -C "$gitdir" merge-base --is-ancestor "$RELEASE_FLOOR" "$commit"; then
-    die "tag ${tag} is on commit ${commit}, which does not descend from the release floor ${RELEASE_FLOOR}: its release.yml predates the G5 gate and could sign from injected input"
+  local floor
+  floor=$(release_floor "$gitdir" "$trusted_sha" "$repo") || exit 1
+  if ! git -C "$gitdir" merge-base --is-ancestor "$floor" "$commit"; then
+    die "tag ${tag} is on commit ${commit}, which does not descend from the release floor ${floor}: its release.yml predates the G5 gate and could sign from injected input"
   fi
-  echo "tag: ${tag} -> ${commit}, on ${trusted}, at or above the release floor ${RELEASE_FLOOR:0:12}"
+  echo "tag: ${tag} -> ${commit}, on ${trusted}, at or above the release floor ${floor:0:12}"
 
   command -v cosign >/dev/null 2>&1 || die "cosign is not installed; cannot verify, so this is not a pass"
 
-  # An exact identity, not a regexp: a signature made by any other workflow,
-  # branch or tag of this repository (or by a fork) does not verify. And the
-  # certificate's own claims: this repository, dispatched (release.yml's only
-  # trigger), on the tag, at the commit checked above.
-  local identity="https://github.com/${repo}/${WORKFLOW_PATH}@refs/tags/${tag}"
-  if ! cosign verify-blob \
-        --bundle "$bundle" \
-        --certificate-identity "$identity" \
-        --certificate-oidc-issuer "$ISSUER" \
-        --certificate-github-workflow-repository "$repo" \
-        --certificate-github-workflow-ref "refs/tags/${tag}" \
-        --certificate-github-workflow-sha "$commit" \
-        --certificate-github-workflow-trigger workflow_dispatch \
-        "$manifest"; then
-    die "signature does not verify for identity ${identity} at ${commit}"
+  # The only step that differs between the modes. Everything above and below
+  # it is shared.
+  if [ "$keyed" -eq 1 ]; then
+    verify_keyed "$bundle" "$manifest" "$gitdir" "$trusted" "$trusted_sha"
+  else
+    verify_keyless "$bundle" "$manifest" "$repo" "$tag" "$commit"
   fi
-  echo "signature: ok (${identity} at ${commit})"
 
   if [ -n "$tree" ]; then
     local fresh
@@ -179,5 +306,5 @@ verify() {
 case "${1:-}" in
   manifest) [ -n "${2:-}" ] || die "usage: $0 manifest <out-file>"; write_manifest "$2" ;;
   verify)   shift; verify "$@" ;;
-  *) die "usage: $0 manifest <out-file> | verify --manifest F --bundle B --repo OWNER/REPO --tag TAG --git DIR --trusted-ref REF [--tree DIR]" ;;
+  *) die "usage: $0 manifest <out-file> | verify [--key] --manifest F --bundle B --repo OWNER/REPO --tag TAG --git DIR --trusted-ref REF [--tree DIR]" ;;
 esac

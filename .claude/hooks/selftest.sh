@@ -127,7 +127,10 @@ check 'push --force first in $(...)' block "$(payload 'x=$(git push --force orig
 check 'push -f first in sh -c'      block "$(payload "sh -c 'git push -f origin feat'")"                   guard-bash.sh
 check 'plain push to feat'          allow "$(payload 'git push origin feat')"                              guard-bash.sh
 check 'push -u to feat'             allow "$(payload 'git push -u origin feat')"                           guard-bash.sh
-check 'push --follow-tags to feat'  allow "$(payload 'git push --follow-tags origin feat')"                guard-bash.sh
+# TheHub #61972: --follow-tags was allowed here (it is not a force flag, #120); it now pushes
+# release tags, so it is blocked by the tag rule. Not being force is still covered below.
+check 'push --follow-tags (a tag push)' block "$(payload 'git push --follow-tags origin feat')"            guard-bash.sh
+check 'push --no-follow-tags to feat' allow "$(payload 'git push --no-follow-tags origin feat')"           guard-bash.sh
 # shellcheck disable=SC2016  # literal $(...) / backticks: the unexpanded command text is the hook input under test
 check 'reset --hard in backticks'   block "$(payload 'x=`git reset --hard HEAD~1`')"                       guard-bash.sh
 # shellcheck disable=SC2016  # literal $(...) / backticks: the unexpanded command text is the hook input under test
@@ -529,6 +532,356 @@ check "read-only exec: pytest.ini"    allow "$(payload 'docker exec thehub-backe
 check "pytest in another container"   allow "$(payload 'docker exec thehub-test-61385 pytest')"                       guard-bash.sh
 check "capped test container"         allow "$(payload 'docker run --rm --cpus 2 --memory 2g python:3.12 pytest')"    guard-bash.sh
 check "exec, then pytest on the host" allow "$(payload 'docker exec thehub-backend cat /proc/meminfo; pytest -q')"    guard-bash.sh
+check "literal \\u0000 text in a command (61978 r2)" allow "$(payload "grep -P '\\u0000' f")" guard-bash.sh
+echo ""
+echo "guard-bash.sh — main through a refspec, a + force push, commit -n (TheHub #62031)"
+# With enforce_admins off and the agents pushing as the owner, a push that names main as its
+# destination lands on main with no check at all.
+check "push feat:main"                    block "$(payload 'git push origin feat:main')"                         guard-bash.sh
+check "push HEAD:refs/heads/main"         block "$(payload 'git push origin HEAD:refs/heads/main')"              guard-bash.sh
+check "push refs/heads/feat:refs/heads/main" block "$(payload 'git push origin refs/heads/feat:refs/heads/main')" guard-bash.sh
+check "push to master by refspec"         block "$(payload 'git push -u origin feat:master')"                    guard-bash.sh
+check "push refs/heads/main"              block "$(payload 'git push origin refs/heads/main')"                   guard-bash.sh
+check "delete main (:main)"               block "$(payload 'git push origin :main')"                             guard-bash.sh
+check "force push by + refspec"           block "$(payload 'git push origin +feat')"                             guard-bash.sh
+check "force push +feat:feat"             block "$(payload 'git push origin +feat:feat')"                        guard-bash.sh
+check "commit -n (no-verify)"             block "$(payload 'git commit -n -m x')"                                guard-bash.sh
+check "commit -an (grouped)"              block "$(payload 'git commit -anm x')"                                 guard-bash.sh
+check "PS: push feat:main"                block "$(pspayload 'git push origin feat:main')"                       guard-bash.sh
+check "push feat:feat"                    allow "$(payload 'git push origin feat:feat')"                         guard-bash.sh
+check "push a branch named main-fix"      allow "$(payload 'git push origin feat:main-fix')"                     guard-bash.sh
+check "push HEAD:feat/main-x"             allow "$(payload 'git push origin HEAD:feat/main-x')"                  guard-bash.sh
+check "commit -m with an n in it"         allow "$(payload 'git commit -m "notes"')"                             guard-bash.sh
+# A push of the current branch while the checkout is on main (the PO's addition to #62031).
+onmain=$(mktemp -d); onfeat=$(mktemp -d)
+git -C "$onmain" init -q -b main 2>/dev/null || { git -C "$onmain" init -q; git -C "$onmain" checkout -q -b main; }
+git -C "$onfeat" init -q -b feat 2>/dev/null || { git -C "$onfeat" init -q; git -C "$onfeat" checkout -q -b feat; }
+cwpay() { printf '{"cwd":"%s","tool_input":{"command":"%s"}}' "$1" "$2"; }
+check "on main: git push"                 block "$(cwpay "$onmain" 'git push')"                                  guard-bash.sh
+check "on main: git push origin"          block "$(cwpay "$onmain" 'git push origin')"                           guard-bash.sh
+check "on main: git push -u origin HEAD"  block "$(cwpay "$onmain" 'git push -u origin HEAD')"                   guard-bash.sh
+check "elsewhere: git -C <main repo> push" block "$(cwpay "$onfeat" "git -C $onmain push origin HEAD")"          guard-bash.sh
+check "on feat: git push -u origin HEAD"  allow "$(cwpay "$onfeat" 'git push -u origin HEAD')"                   guard-bash.sh
+# TheHub #62258 review (B1): the hook reads the payload cwd and tool name on first use, and that
+# state must start empty. Set in the environment, a cwd marked as already read and pointing at a
+# feature branch hid a push from a checkout on main.
+export guard_cwd_read=1 payload_cwd="$onfeat" tool_name=PowerShell guard_grep_ran=1
+check "env lazy state: on main: git push"          block "$(cwpay "$onmain" 'git push')"                          guard-bash.sh
+check "env lazy state: on main: push origin HEAD"  block "$(cwpay "$onmain" 'git push -u origin HEAD')"           guard-bash.sh
+check "env lazy state: on feat: push origin HEAD"  allow "$(cwpay "$onfeat" 'git push -u origin HEAD')"           guard-bash.sh
+unset guard_cwd_read payload_cwd tool_name guard_grep_ran
+check "on main: git push origin feat"     allow "$(cwpay "$onmain" 'git push origin feat')"                      guard-bash.sh
+# Review round 1 (classes; the exact inputs are in the binnacle review).
+check "feat:main then ;"                  block "$(payload 'git push origin feat:main; echo done')"              guard-bash.sh
+check "feat:main then &&"                 block "$(payload 'git push origin feat:main&& echo done')"             guard-bash.sh
+check "feat:main then a redirect"         block "$(payload 'git push origin feat:main>log')"                     guard-bash.sh
+check "push main then |"                  block "$(payload 'git push origin main| cat')"                         guard-bash.sh
+check "feat:heads/main"                   block "$(payload 'git push origin feat:heads/main')"                   guard-bash.sh
+check "push --all"                        block "$(payload 'git push --all origin')"                             guard-bash.sh
+check "push --mirr (prefix of --mirror)"  block "$(payload 'git push --mirr origin')"                            guard-bash.sh
+check "push --branches"                   block "$(payload 'git push --branches origin')"                        guard-bash.sh
+check "push a bare : refspec"             block "$(payload 'git push origin :')"                                 guard-bash.sh
+check "push -c push.default=matching"     block "$(payload 'git -c push.default=matching push origin')"          guard-bash.sh
+check "push -c remote.origin.push"        block "$(payload 'git -c remote.origin.push=feat:main push origin')"   guard-bash.sh
+check "git send-pack"                     block "$(payload 'git send-pack origin feat:main')"                    guard-bash.sh
+check "on main: push @"                   block "$(cwpay "$onmain" 'git push origin @')"                         guard-bash.sh
+check "on main: push head"                block "$(cwpay "$onmain" 'git push origin head')"                      guard-bash.sh
+check "-c k=v -C <main repo> push"        block "$(cwpay "$onfeat" "git -c x.y=1 -C $onmain push")"              guard-bash.sh
+check "cd, then push the current branch"  block "$(cwpay "$onfeat" "cd $onmain && git push")"                    guard-bash.sh
+check "GIT_DIR=..., then push"            block "$(cwpay "$onfeat" "GIT_DIR=$onmain/.git git push")"             guard-bash.sh
+check "checkout main, then push"          block "$(cwpay "$onfeat" 'git checkout main && git push')"             guard-bash.sh
+check "on main: git stash push"           allow "$(cwpay "$onmain" 'git stash push -m wip')"                     guard-bash.sh
+check "on main: log --grep push"          allow "$(cwpay "$onmain" 'git log --grep push')"                       guard-bash.sh
+check "on main: commit -m 'push it'"      allow "$(cwpay "$onmain" "git commit -m 'git push later'")"            guard-bash.sh
+check "on main: push a named feature"     allow "$(cwpay "$onmain" 'git push -u origin feat/x')"                 guard-bash.sh
+check "not a repository: git push"        allow "$(cwpay "/" 'git push')"                                        guard-bash.sh
+check "push --atomic to a feature"        allow "$(payload 'git push --atomic origin feat')"                     guard-bash.sh
+# Review round 2 (classes; the exact inputs are in the binnacle review).
+check "a quoted global value, then force"  block "$(payload "git -c user.name='A B' push --force origin feat")"   guard-bash.sh
+check "-C \"a dir\", then push to main"     block "$(payload 'git -C "my dir" push origin main')"                  guard-bash.sh
+check "an unknown global option, then push" block "$(payload 'git --attr-source HEAD push origin feat:main')"     guard-bash.sh
+check "on main: bash -c 'git push'"        block "$(cwpay "$onmain" "bash -c 'git push origin HEAD'")"            guard-bash.sh
+check "bash -c 'cd <main repo> && push'"   block "$(cwpay "$onfeat" "bash -c 'cd $onmain && git push'")"           guard-bash.sh
+check "on main: eval git push"             block "$(cwpay "$onmain" 'eval git push')"                             guard-bash.sh
+check "on main: git pu\"\"sh"                block "$(cwpay "$onmain" 'git pu\"\"sh')"                               guard-bash.sh
+check "on main: --dry-run ... --no-dry-run" block "$(cwpay "$onmain" 'git push --dry-run origin HEAD --no-dry-run')" guard-bash.sh
+check "-C \$(pwd), then push"               block "$(cwpay "$onfeat" 'git -C $(pwd) push')"                      guard-bash.sh
+check "-C given twice, then push"          block "$(cwpay "$onfeat" 'git -C .. -C x push')"                        guard-bash.sh
+check "a wildcard refspec"                 block "$(payload "git push origin 'refs/heads/*:refs/heads/*'")"       guard-bash.sh
+check "PS: \$env:GIT_DIR, then push"        block "$(cwpay "$onfeat" "\$env:GIT_DIR='$onmain/.git'; git push" | sed 's/^{/{"tool_name":"PowerShell",/')" guard-bash.sh
+check "PS: CD (upper case), then push"     block "$(cwpay "$onfeat" "CD $onmain; git push" | sed 's/^{/{"tool_name":"PowerShell",/')" guard-bash.sh
+check "on main: echo use git push"         allow "$(cwpay "$onmain" 'echo use git push')"                         guard-bash.sh
+check "a notes message naming send-pack"   allow "$(payload 'git notes add -m "git send-pack"')"                  guard-bash.sh
+check "push -o ci.skip:main to a feature"  allow "$(payload 'git push origin feat -o ci.skip:main')"               guard-bash.sh
+check "on main: git push --dry-run"        allow "$(cwpay "$onmain" 'git push --dry-run')"                        guard-bash.sh
+# Hook train review (keel #205): git named another way. normalize() (#61987) keeps the word and
+# appends the bare name, and push_judge read that name as the subcommand. Every word-judged
+# push rule, in each non-plain spelling: the extension, another case, both, a path.
+for gx in git.exe GIT Git.Exe /usr/bin/git; do
+  check "on main: $gx push"                   block "$(cwpay "$onmain" "$gx push")"                           guard-bash.sh
+  check "on main: $gx push origin HEAD"       block "$(cwpay "$onmain" "$gx push origin HEAD")"               guard-bash.sh
+  check "$gx push --all"                      block "$(payload "$gx push --all origin")"                      guard-bash.sh
+  check "$gx push --mirror"                   block "$(payload "$gx push --mirror origin")"                   guard-bash.sh
+  check "$gx push a bare : refspec"           block "$(payload "$gx push origin :")"                          guard-bash.sh
+  check "$gx send-pack"                       block "$(payload "$gx send-pack origin feat:main")"             guard-bash.sh
+  check "$gx push feat:main (a refspec)"      block "$(payload "$gx push origin feat:main")"                  guard-bash.sh
+  check "$gx push +feat (a force refspec)"    block "$(payload "$gx push origin +feat")"                      guard-bash.sh
+  check "$gx push feat:feat"                  allow "$(payload "$gx push origin feat:feat")"                  guard-bash.sh
+  check "on main: $gx push a named feature"   allow "$(cwpay "$onmain" "$gx push -u origin feat/x")"          guard-bash.sh
+  check "on main: $gx status"                 allow "$(cwpay "$onmain" "$gx status")"                         guard-bash.sh
+done
+check "quoted Windows path: push --all"       block "$(payload '"C:\Program Files\Git\cmd\git.exe" push --all origin')" guard-bash.sh
+check "quoted Windows path: send-pack"        block "$(payload '"C:\Program Files\Git\cmd\git.exe" send-pack origin feat:main')" guard-bash.sh
+check "quoted Windows path: feat:main"        block "$(payload '"C:\Program Files\Git\cmd\git.exe" push origin feat:main')" guard-bash.sh
+check "quoted Windows path: +feat"            block "$(payload '"C:\Program Files\Git\cmd\git.exe" push origin +feat')" guard-bash.sh
+check "quoted Windows path: push a feature"   allow "$(payload '"C:\Program Files\Git\cmd\git.exe" push origin feat')" guard-bash.sh
+for sx in bash.exe BASH Bash.Exe; do
+  check "on main: $sx -c 'git push'"          block "$(cwpay "$onmain" "$sx -c 'git push origin HEAD'")"      guard-bash.sh
+done
+check "PS: on main: git.exe push"           block "$(cwpay "$onmain" 'git.exe push' | sed 's/^{/{"tool_name":"PowerShell",/')" guard-bash.sh
+check "PS: on main: GIT push origin HEAD"   block "$(cwpay "$onmain" 'GIT push origin HEAD' | sed 's/^{/{"tool_name":"PowerShell",/')" guard-bash.sh
+rm -rf "$onmain" "$onfeat"
+echo ""
+echo "guard-bash.sh — a binary name is added, never substituted (TheHub #61987)"
+# normalize() rewrote any word whose last path segment is gh, git, curl or docker to the bare
+# name, so an endpoint ending in /gh lost its path and the contents rule never saw it.
+check "contents commit, endpoint ends /gh"   block "$(payload 'gh api -X PUT repos/O/R/contents/bin/gh -f message=x -f content=eA==')" guard-bash.sh
+check "contents commit, quoted .../git"      block "$(payload "gh api -X PUT 'repos/O/R/contents/tools/git' -f message=x -f content=eA==")" guard-bash.sh
+check "curl contents commit, URL ends /curl" block "$(payload "curl -X PUT -H 'Authorization: token t' https://api.github.com/repos/O/R/contents/vendor/curl -d '{\"message\":\"x\",\"content\":\"eA==\"}'")" guard-bash.sh
+check "a wrapper outside any list"           block "$(payload 'timeout 5 /usr/bin/gh pr merge 12')"                         guard-bash.sh
+check "gh.exe by Windows path"               block "$(payload '"C:\Program Files\GitHub CLI\gh.exe" pr merge 12')"          guard-bash.sh
+check "contents read, endpoint ends /gh"     allow "$(payload 'gh api repos/O/R/contents/bin/gh')"                           guard-bash.sh
+echo ""
+echo "guard-bash.sh — compose run and an uncapped docker run (TheHub #61987)"
+check "compose run backend pytest"           block "$(payload 'docker compose run --rm backend pytest')"                    guard-bash.sh
+check "docker-compose run postgres tox"      block "$(payload 'docker-compose run postgres tox')"                           guard-bash.sh
+check "docker run pytest, no caps"           block "$(payload 'docker run --rm python:3.12 pytest')"                        guard-bash.sh
+check "docker run pytest, cpus only"         block "$(payload 'docker run --rm --cpus 2 python:3.12 python -m pytest')"     guard-bash.sh
+check "docker run pytest, capped"            allow "$(payload 'docker run --rm --cpus 2 --memory 2g python:3.12 pytest')"   guard-bash.sh
+check "docker run pytest, capped, -m/="      allow "$(payload 'docker run --rm --cpus=2 -m 2g python:3.12 pytest')"         guard-bash.sh
+check "compose run backend-staging pytest"   allow "$(payload 'docker compose run backend-staging pytest')"                 guard-bash.sh
+check "docker run, no runner"                allow "$(payload 'docker run --rm alpine cat /etc/os-release')"                guard-bash.sh
+# Review of #198, round 1 (classes; the exact inputs are in the binnacle review).
+check "PS: (Get-Command gh.exe).Source"      block "$(pspayload '& (Get-Command gh.exe).Source pr merge 1')"              guard-bash.sh
+check "PS: (gcm GH).Source"                  block "$(pspayload '& (gcm GH).Source pr merge 1')"                          guard-bash.sh
+check "PS: (Get-Command -Name git.exe)"      block "$(pspayload '& (Get-Command -Name git.exe).Source push --force origin feat')" guard-bash.sh
+check "gh alias set Git 'pr merge'"          block "$(payload "gh alias set Git 'pr merge'")"                             guard-bash.sh
+check "compose run --entrypoint pytest"      block "$(payload 'docker compose run --entrypoint pytest backend')"         guard-bash.sh
+check "compose run, service in a variable"   block "$(payload 'docker compose run $SVC pytest')"                         guard-bash.sh
+check "podman compose run backend"           block "$(payload 'podman compose run backend pytest')"                      guard-bash.sh
+check "docker run, caps of 0"                block "$(payload 'docker run --rm --cpus 0 -m 0 python:3.12 pytest')"       guard-bash.sh
+check "docker run, caps above the route"     block "$(payload 'docker run --rm --cpus 64 -m 512g python:3.12 pytest')"   guard-bash.sh
+check "docker run, caps after the image"     block "$(payload 'docker run --rm python:3.12 pytest --cpus 2 --memory 2g')" guard-bash.sh
+check "docker run, the word compose"         block "$(payload 'docker run --rm python:3.12 pytest -k compose tests')"    guard-bash.sh
+check "docker run, caps inside -e"           block "$(payload 'docker run --rm -e X="--cpus 2 -m 2g" python:3.12 pytest')" guard-bash.sh
+check "docker run, caps from variables"      block "$(payload 'docker run --rm --cpus $C --memory $M python:3.12 pytest')" guard-bash.sh
+check "podman run, uncapped"                 block "$(payload 'podman run --rm python:3.12 pytest')"                     guard-bash.sh
+check "docker run, --memory \"2g\" quoted"    allow "$(payload 'docker run --rm --cpus 2 --memory "2g" python:3.12 pytest')" guard-bash.sh
+check "docker run, --cpu-quota cap"          allow "$(payload 'docker run --rm --cpu-quota 200000 -m 2g python:3.12 pytest')" guard-bash.sh
+check "docker run pip install pytest"        allow "$(payload 'docker run --rm python:3.12 pip install pytest')"         guard-bash.sh
+check "docker run -w /opt/tox"               allow "$(payload 'docker run --rm -w /opt/tox alpine ls')"                  guard-bash.sh
+# Review of #198, round 2: the engine by path, a runner after a wrapper or inside sh -c, $(...).
+check "/usr/bin/docker compose exec backend" block "$(payload '/usr/bin/docker compose exec backend pytest')"        guard-bash.sh
+check "compose exec backend sh -c 'pytest'" block "$(payload "docker compose exec backend sh -c 'pytest'")"         guard-bash.sh
+check "compose exec backend timeout pytest" block "$(payload 'docker compose exec backend timeout 600 pytest -q')"  guard-bash.sh
+check "compose exec backend uv run pytest"  block "$(payload 'docker compose exec backend uv run pytest')"          guard-bash.sh
+check "compose exec -w \$(pwd) backend"      block "$(payload 'docker compose exec -w $(pwd) backend pytest')"       guard-bash.sh
+check "docker.exe run, uncapped"            block "$(payload 'docker.exe run --rm python:3.12 pytest')"             guard-bash.sh
+check "docker run sh -c 'pytest', uncapped" block "$(payload "docker run --rm python:3.12 sh -c 'pytest -q'")"     guard-bash.sh
+check "docker run -v \$(pwd), uncapped"      block "$(payload 'docker run --rm -v $(pwd):/app -w /app python:3.12 pytest')" guard-bash.sh
+check "docker run -m 2gb, capped"           allow "$(payload 'docker run --rm --cpus 2 -m 2gb python:3.12 pytest')"  guard-bash.sh
+check "docker build -t pytest"              allow "$(payload 'docker build -t pytest .')"                           guard-bash.sh
+# Review of #198, round 3: main's rule as a backstop, $(...) bodies, every engine word, installs.
+check "x=\$(compose exec backend pytest)"   block "$(payload 'x=$(docker compose exec backend pytest)')"            guard-bash.sh
+check "x=\$(docker run pytest), uncapped"   block "$(payload 'x=$(docker run --rm python:3.12 pytest)')"            guard-bash.sh
+check "compose exec, pip install && pytest" block "$(payload "docker compose exec backend bash --login -c 'pip install pytest && pytest'")" guard-bash.sh
+check "run, pip install; pytest, uncapped"  block "$(payload "docker run --rm python:3.12 bash -euo pipefail -c 'pip install pytest; pytest'")" guard-bash.sh
+check "docker --tlscacert x compose exec"   block "$(payload 'docker --tlscacert /x/ca.pem compose exec backend pytest')" guard-bash.sh
+check "outer docker exec, inner compose"    block "$(payload 'docker exec ci-runner docker compose exec backend pytest')" guard-bash.sh
+check "X=/opt/podman docker compose exec"   block "$(payload 'X=/opt/podman docker compose exec backend pytest')"   guard-bash.sh
+check "run sh -c pip install pytest"        allow "$(payload "docker run --rm python:3.12 sh -c 'pip install pytest'")" guard-bash.sh
+# Hook train review (keel #205): every engine and the heredoc shell in each non-plain spelling.
+for ex in docker.exe DOCKER Docker.Exe podman.exe PODMAN Podman.Exe nerdctl.exe NERDCTL /usr/bin/Podman; do
+  check "$ex run pytest, uncapped"           block "$(payload "$ex run --rm python:3.12 pytest")"                    guard-bash.sh
+  check "$ex run pytest, capped"             allow "$(payload "$ex run --rm --cpus 2 --memory 2g python:3.12 pytest")" guard-bash.sh
+done
+check "quoted Windows path: docker run, uncapped" block "$(payload '"C:\Program Files\Docker\docker.exe" run --rm python:3.12 pytest')" guard-bash.sh
+for sx in bash.exe BASH Bash.Exe; do
+  check "$sx <<EOF, docker run uncapped"     block "$(payload "$sx <<EOF
+docker run --rm python:3.12 pytest
+EOF")" guard-bash.sh
+done
+check "PS: Podman.exe run, uncapped"        block "$(payload 'Podman.exe run --rm python:3.12 pytest' | sed 's/^{/{"tool_name":"PowerShell",/')" guard-bash.sh
+check "docker run -m=2g, capped"            allow "$(payload 'docker run --rm --cpus 2 -m=2g python:3.12 pytest')"  guard-bash.sh
+echo ""
+echo "guard-bash.sh — agents never push a release tag (TheHub #61972)"
+check "push a v* tag by name"         block "$(payload 'git push origin v1.2.3')"                         guard-bash.sh
+check "push tag <name>"               block "$(payload 'git push origin tag v1.2.3')"                     guard-bash.sh
+check "push refs/tags/v*"             block "$(payload 'git push origin refs/tags/v1.2.3')"               guard-bash.sh
+check "push HEAD:refs/tags/v*"        block "$(payload 'git push origin HEAD:refs/tags/v9')"              guard-bash.sh
+check "push +refs/tags/*:refs/tags/*" block "$(payload "git push origin '+refs/tags/*:refs/tags/*'")"     guard-bash.sh
+check "delete a v* tag"               block "$(payload 'git push origin :refs/tags/v1.2.3')"              guard-bash.sh
+check "push --tags"                   block "$(payload 'git push --tags origin')"                         guard-bash.sh
+check "push --follow-tags"            block "$(payload 'git push origin feat --follow-tags')"             guard-bash.sh
+check "push --mirror"                 block "$(payload 'git push --mirror origin')"                       guard-bash.sh
+check "push -c push.followTags=true"  block "$(payload 'git -c push.followTags=true push origin feat')"   guard-bash.sh
+check "config push.followtags"        block "$(payload 'git config --global push.followtags true')"       guard-bash.sh
+check "gh api POST git/refs, a tag"   block "$(payload 'gh api repos/O/R/git/refs -f ref=refs/tags/v9 -f sha=abc')" guard-bash.sh
+check "gh api git/refs, ref unseen"   block "$(payload 'gh api -X POST repos/O/R/git/refs --input ref.json')" guard-bash.sh
+check "gh api PATCH git/refs/tags/v*" block "$(payload 'gh api -X PATCH repos/O/R/git/refs/tags/v9 -f sha=abc')" guard-bash.sh
+check "gh api DELETE git/refs/tags/v*" block "$(payload 'gh api -X DELETE repos/O/R/git/refs/tags/v9')"  guard-bash.sh
+check "gh api POST git/tags"          block "$(payload 'gh api repos/O/R/git/tags -f tag=v9 -f object=abc -f type=commit -f message=x')" guard-bash.sh
+check "GraphQL createRef refs/tags"   block "$(payload "gh api graphql -f query='mutation { createRef(input: {repositoryId: \"X\", name: \"refs/tags/v9\", oid: \"abc\"}) { ref { id } } }'")" guard-bash.sh
+check "PS: push a v* tag"             block "$(pspayload 'git push origin v1.2.3')"                       guard-bash.sh
+check "PS: push --tags"               block "$(pspayload 'git push --tags')"                              guard-bash.sh
+check "plain branch push"             allow "$(payload 'git push -u origin feat/61972-tags')"             guard-bash.sh
+check "branch push, --no-follow-tags" allow "$(payload 'git push --no-follow-tags origin feat')"          guard-bash.sh
+check "list tags"                     allow "$(payload 'git tag -l')"                                     guard-bash.sh
+check "list v* tags"                  allow "$(payload "git tag -l 'v*'")"                                guard-bash.sh
+check "fetch tags"                    allow "$(payload 'git fetch --tags origin')"                        guard-bash.sh
+check "gh api GET git/refs/tags"      allow "$(payload 'gh api repos/O/R/git/refs/tags')"                 guard-bash.sh
+check "gh api POST git/refs, a branch" allow "$(payload 'gh api repos/O/R/git/refs -f ref=refs/heads/feat -f sha=abc')" guard-bash.sh
+check "PS: plain branch push"         allow "$(pspayload 'git push origin feat')"                         guard-bash.sh
+# Review of keel #192 (Fable 5.2, BLOCK): classes, not the exact inputs.
+check "push --tag (prefix of --tags)"  block "$(payload 'git push --tag origin')"                        guard-bash.sh
+check "push --follow-tag (prefix)"     block "$(payload 'git push origin feat --follow-tag')"            guard-bash.sh
+check "push --mirr (prefix)"           block "$(payload 'git push --mirr origin')"                       guard-bash.sh
+check "push --fol (shorter prefix)"    block "$(payload 'git push --fol origin feat')"                   guard-bash.sh
+check "gh api git/refs?query, a tag"   block "$(payload "gh api -X POST 'repos/O/R/git/refs?x=1' -f ref=refs/tags/v9 -f sha=a")" guard-bash.sh
+check "gh api git/refs/, trailing /"   block "$(payload 'gh api repos/O/R/git/refs/ -f ref=refs/tags/v9 -f sha=a')" guard-bash.sh
+check "gh api /repos//git/refs"        block "$(payload 'gh api /repos/O/R//git/refs -f ref=refs/tags/v9 -f sha=a')" guard-bash.sh
+check "gh api git/refs, ref=\$VAR"     block "$(payload 'gh api repos/O/R/git/refs -f ref=$REF -f sha=a')" guard-bash.sh
+check "gh api git/refs, refs/heads/\$X" block "$(payload 'gh api repos/O/R/git/refs -f ref=refs/heads/$X -f sha=a')" guard-bash.sh
+check "gh api git/refs, ref=\$(...)"   block "$(payload 'gh api repos/O/R/git/refs -f ref=$(cat r) -f sha=a')" guard-bash.sh
+check "gh api git/refs, -F ref=@file"  block "$(payload 'gh api repos/O/R/git/refs -F ref=@ref.txt -f sha=a')" guard-bash.sh
+# Review of keel #192, round 2 (rescoped): quoted text is text; the command word is judged.
+check "commit -m naming git push --tags" allow "$(payload 'git commit -m "docs: git push --tags is refused"')" guard-bash.sh
+check "pr create --body naming git tag v1" allow "$(payload 'gh pr create --title "guard: v* tags" --body "refuses git tag v1.2.3"')" guard-bash.sh
+check "echo / grep naming a tag push"  allow "$(payload "echo 'git push origin v1.2.3' && grep -rn 'git tag v' docs/")" guard-bash.sh
+check "commit -F heredoc naming a tag" allow "$(payload "git commit -F - <<'EOF'
+refuse git push origin v1.2.3
+EOF")" guard-bash.sh
+check "a # comment naming a tag push"  allow "$(payload '# git push origin v1.2.3')"                 guard-bash.sh
+check "PS: commit -m naming a tag"     allow "$(pspayload 'git commit -m "it''s git tag v1.2.3"')"   guard-bash.sh
+check "push 2>&1 before a tag"         block "$(payload 'git push origin 2>&1 v1.2.3')"              guard-bash.sh
+check "push the tags/ shorthand"       block "$(payload 'git push origin tags/v1.2.3')"              guard-bash.sh
+check "push a brace-expanded refspec"  block "$(payload 'git push origin refs/t{ags,}/v1.2.3')"      guard-bash.sh
+check "git \$p (not literal) a tag"    block "$(payload 'p=push; git $p origin v1.2.3')"             guard-bash.sh
+check "xargs git push"                 block "$(payload 'echo v1.2.3 | xargs git push origin')"      guard-bash.sh
+check "two levels of shell"            block "$(payload "bash -c 'sh -c \"git push origin v1.2.3\"'")" guard-bash.sh
+check "heredoc fed to bash"            block "$(payload "bash <<'EOF'
+git push origin v1.2.3
+EOF")" guard-bash.sh
+check "tag --sort with a name"         block "$(payload 'git tag --sort=refname v1.2.3')"            guard-bash.sh
+check "update-ref refs/tags"           block "$(payload 'git update-ref refs/tags/v1.2.3 HEAD')"     guard-bash.sh
+check "gh api -iX POST a tag ref"      block "$(payload 'gh api -iX POST repos/O/R/git/refs -f ref=refs/tags/v9 -f sha=a')" guard-bash.sh
+check "gh api by repository id"        block "$(payload 'gh api repositories/1/git/refs -f ref=refs/tags/v9 -f sha=a')" guard-bash.sh
+check "PS: splatted git @a"            block "$(pspayload "\$a=@('push','origin','v1.2.3'); git @a")" guard-bash.sh
+check "PS: Start-Process git tag push" block "$(pspayload "Start-Process git -ArgumentList 'push origin v1.2.3'")" guard-bash.sh
+check "tag --sort, listing"            allow "$(payload 'git tag --sort=-creatordate')"              guard-bash.sh
+# Review of binnacle #87, round 4 (timing): nested text is judged only when it could name a tag
+# write; one that does is still refused at every level.
+check "PS: pwsh -c push a v* tag"      block "$(pspayload "pwsh -NoProfile -c 'git push origin v1.2.3'")" guard-bash.sh
+check "PS: pwsh -c g\"i\"t push --tags" block "$(pspayload "pwsh -c 'g\"i\"t push --tags'")"        guard-bash.sh
+check "PS: cmd /c pwsh -c --follow-tags" block "$(pspayload 'cmd /c pwsh -c git push origin feat --follow-tags')" guard-bash.sh
+check "pwsh -Command, nested 3, a tag"  block "$(payload "bash -c \"pwsh -Command 'cmd /c git push origin v2'\"")" guard-bash.sh
+check "PS: pwsh -EncodedCommand nested" block "$(pspayload 'cmd /c pwsh -EncodedCommand ZwBpAHQA')"  guard-bash.sh
+check "PS: pwsh -c Write-Host hi"      allow "$(pspayload 'pwsh -NoProfile -c Write-Host hi')"        guard-bash.sh
+check "PS: pwsh -c git push a branch"  allow "$(pspayload 'pwsh -c git push -u origin feat')"         guard-bash.sh
+# Review of binnacle #87 / keel #192, round 5 (classes): a line continuation inside nested
+# text, which the shell joins, still names the command to the gate; and the tokenizers' own
+# control marks, written into an argument, neither end the command nor drop a word.
+nl=$'\n'
+check "nested: continuations split git push"  block "$(payload "bash -c 'gi\\${nl}t pu\\${nl}sh origin v0.0.0'")"   guard-bash.sh
+check "nested: continuations split git tag"   block "$(payload "sh -c 'gi\\${nl}t ta\\${nl}g v0.0.0'")"            guard-bash.sh
+check "eval: continuations split a push"      block "$(payload "eval 'gi\\${nl}t pu\\${nl}sh --ta\\${nl}gs'")"       guard-bash.sh
+check "heredoc to sh: continuations split"    block "$(payload "sh <<'EOF'${nl}gi\\${nl}t pu\\${nl}sh origin v0.0.0${nl}EOF")" guard-bash.sh
+check "nested gh api, continuations split"    block "$(payload "bash -c 'g\\${nl}h a\\${nl}pi -X POST repos/O/R/gi\\${nl}t/refs -f ref=refs/ta\\${nl}gs/v0.0.0 -f sha=a'")" guard-bash.sh
+check "PS: nested, continuations split"       block "$(pspayload "bash -c 'gi\\${nl}t pu\\${nl}sh origin v0.0.0'")" guard-bash.sh
+check "nested: ls with a continuation"        allow "$(payload "bash -c 'ls \\${nl}-la'")"                          guard-bash.sh
+check "nested: build && test, continued"      allow "$(payload "bash -c 'echo build \\${nl}&& echo test'")"         guard-bash.sh
+ctl() { local p; p=$(payload "$1"); printf '%s' "${p//CTL/\\u000$2}"; }        # CTL -> \u000N in the JSON
+pctl() { ctl "$1" "$2" | sed 's/^{/{"tool_name":"PowerShell",/'; }
+# Review of keel #210: the container tokenizer had the same split. A \001 written into a flag's
+# value ended the docker invocation there, so the image and the test runner after it were never
+# judged and an uncapped test container ran; a word starting with \002 was read as a heredoc body
+# and dropped. Each mark, in each value-taking flag, must leave the command judged as written.
+for m in 1 2 3; do
+  for f in -l -e --name; do
+    check "docker run $f <mark $m>, uncapped"     block "$(ctl "docker run --rm $f \"CTL\" python:3.12 python -m pytest" "$m")"  guard-bash.sh
+    check "docker run $f <mark $m>x, uncapped"    block "$(ctl "docker run --rm $f \"CTLx\" python:3.12 pytest" "$m")"          guard-bash.sh
+  done
+  check "docker run -l <mark $m>, capped"         allow "$(ctl "docker run --rm --cpus 2 --memory 2g -l \"CTL\" python:3.12 pytest" "$m")" guard-bash.sh
+  check "docker exec -e <mark $m> pytest"         block "$(ctl "docker exec -e \"CTL\" thehub-backend pytest" "$m")"            guard-bash.sh
+  check "compose exec -e <mark $m> pytest"        block "$(ctl "docker compose exec -e \"CTL\" backend pytest" "$m")"           guard-bash.sh
+  check "compose run -l <mark $m> pytest"         block "$(ctl "docker compose run --rm -l \"CTL\" backend pytest" "$m")"       guard-bash.sh
+  check "bash -c docker run -l <mark $m>"         block "$(ctl "bash -c 'docker run --rm -l \"CTL\" python:3.12 pytest'" "$m")" guard-bash.sh
+  check "PS: docker run -l <mark $m>, uncapped"   block "$(pctl "docker run --rm -l \"CTL\" python:3.12 python -m pytest" "$m")" guard-bash.sh
+done
+check "tag -m <mark 1> v*: mark ends nothing" block "$(ctl 'git tag -m "CTL" v0.0.0' 1)"                          guard-bash.sh
+check "push -o <mark 1> a v* tag"             block "$(ctl 'git push -o "CTL" origin v0.0.0' 1)"                  guard-bash.sh
+check "push -o <mark 2>x drops no word"       block "$(ctl 'git push -o "CTLx" origin v0.0.0' 2)"                 guard-bash.sh
+check "tag -m <mark 2>x v*"                   block "$(ctl 'git tag -m "CTLx" v0.0.0' 2)"                         guard-bash.sh
+check "PS: tag -m <mark 1> v*"                block "$(pctl 'git tag -m "CTL" v0.0.0' 1)"                         guard-bash.sh
+check "commit -m with a mark in it"           allow "$(ctl 'git commit -m "aCTLb"' 1)"                            guard-bash.sh
+check "push -o <mark 1> a branch"             allow "$(ctl 'git push -o "CTL" origin feat' 1)"                    guard-bash.sh
+# The same, with the checkout pinned to main (TheHub #61972 follow-up): a mark inside -o's value
+# must not end the command and leave "origin feat" judged as a push of the current branch. The
+# case above takes the cwd of whoever runs the selftest, so it was red only when that was main.
+cctl() { ctl "$2" "$3" | sed "s|^{|{\"cwd\":\"$1\",|"; }
+cmain=$(mktemp -d); cfeat=$(mktemp -d)
+git -C "$cmain" init -q -b main 2>/dev/null || { git -C "$cmain" init -q; git -C "$cmain" checkout -q -b main; }
+git -C "$cfeat" init -q -b feat 2>/dev/null || { git -C "$cfeat" init -q; git -C "$cfeat" checkout -q -b feat; }
+check "on main: push -o <mark 1> a branch"    allow "$(cctl "$cmain" 'git push -o "CTL" origin feat' 1)"        guard-bash.sh
+check "on main: push -o <mark 2>x a branch"   allow "$(cctl "$cmain" 'git push -o "CTLx" origin feat' 2)"       guard-bash.sh
+check "on main: push -o <mark 3> a branch"    allow "$(cctl "$cmain" 'git push -o "CTL" origin feat' 3)"        guard-bash.sh
+check "on main: push -o <mark 1>, no refspec" block "$(cctl "$cmain" 'git push -o "CTL" origin' 1)"            guard-bash.sh
+check "on main: push -o <mark 1> origin main" block "$(cctl "$cmain" 'git push -o "CTL" origin main' 1)"        guard-bash.sh
+check "on main: push -o <mark 1> force"       block "$(cctl "$cmain" 'git push -o "CTL" --force origin feat' 1)" guard-bash.sh
+check "on main: push -o <mark 1> a v* tag"    block "$(cctl "$cmain" 'git push -o "CTL" origin v0.0.0' 1)"      guard-bash.sh
+check "on feat: push -o <mark 1> a branch"    allow "$(cctl "$cfeat" 'git push -o "CTL" origin feat' 1)"        guard-bash.sh
+rm -rf "$cmain" "$cfeat"
+# Review of keel #192, the final round: ordinary work main allows (round 3 false positives).
+check "PS: \$url = git config --get"    allow "$(pspayload '$url = git config --get remote.origin.url')" guard-bash.sh
+check "PS: \$tags = git tag -l"         allow "$(pspayload '$tags = git tag -l')"                     guard-bash.sh
+check "PS: \$r = git push -u origin HEAD" allow "$(pspayload '$r = git push -u origin HEAD 2>&1')"    guard-bash.sh
+check "PS: \$cfg = Get-Content config"  allow "$(pspayload '$cfg = Get-Content config')"              guard-bash.sh
+check "[ -f config ]"                  allow "$(payload '[ -f config ] && cat config')"              guard-bash.sh
+check "[ \"\$1\" = push ]"              allow "$(payload 'if [ "$1" = push ]; then echo x; fi')"      guard-bash.sh
+check "\"\$PYTHON\" -m pip config list" allow "$(payload '"$PYTHON" -m pip config list')"             guard-bash.sh
+check "PS: a here-string with an apostrophe" allow "$(pspayload "git commit -m @'
+fix: don't allow this
+
+git push origin v1.2.3 is refused
+'@")" guard-bash.sh
+check "PS: \$r = git push origin v1.2.3" block "$(pspayload '$r = git push origin v1.2.3')"            guard-bash.sh
+check "\$G push origin v1.2.3"          block "$(payload '$G push origin v1.2.3')"                    guard-bash.sh
+check "gh api git/refs, two refs"      block "$(payload 'gh api repos/O/R/git/refs -f ref=refs/heads/x -f ref=refs/tags/v9 -f sha=a')" guard-bash.sh
+check "push a refs/* glob"             block "$(payload "git push origin 'refs/*'")"                     guard-bash.sh
+check "push a refs/t* glob"            block "$(payload "git push origin 'refs/t*:refs/t*'")"            guard-bash.sh
+check "push -c remote.<n>.push"        block "$(payload 'git -c remote.origin.push=refs/tags/* push origin')" guard-bash.sh
+check "push -c remote.<n>.mirror"      block "$(payload 'git -c remote.origin.mirror=true push origin')" guard-bash.sh
+check "push --config-env followTags"   block "$(payload 'git --config-env=push.followTags=FT push origin feat')" guard-bash.sh
+check "push a tag held in a variable"  block "$(payload 'T=v1.0; git push origin $T')"                   guard-bash.sh
+check "PS: push a \$-string tag"       block "$(pspayload 'git push origin "v$ver"')"                    guard-bash.sh
+check "git send-pack"                  block "$(payload 'git send-pack origin refs/heads/main')"        guard-bash.sh
+check "push a bare vNext"              block "$(payload 'git push origin vNext')"                       guard-bash.sh
+check "create a v* tag"                block "$(payload 'git tag v1.2.3')"                               guard-bash.sh
+check "create an annotated v* tag"     block "$(payload 'git tag -a v1.2.3 -m "release notes"')"        guard-bash.sh
+check "create a v* tag, -m first"      block "$(payload 'git tag -m "notes here" v2')"                   guard-bash.sh
+check "create a tag from a variable"   block "$(payload 'git tag $T')"                                   guard-bash.sh
+check "v-word in a commit message"     allow "$(payload 'git commit -m "release v1.2.3 notes" && git push origin feat')" guard-bash.sh
+check "git config --get followTags"    allow "$(payload 'git config --get push.followTags')"            guard-bash.sh
+check "git config get followtags"      allow "$(payload 'git config get push.followtags')"              guard-bash.sh
+check "git stash push <file>"          allow "$(payload 'git stash push src/a.py')"                      guard-bash.sh
+check "git stash push -m v1"           allow "$(payload 'git stash push -m "v1 work"')"                  guard-bash.sh
+check "push a branch v2-migration"     allow "$(payload 'git push origin v2-migration')"                 guard-bash.sh
+check "push, redirect to v1.log"       allow "$(payload 'git push -u origin feat > v1.log 2>&1')"        guard-bash.sh
+check "git tag --list 'v*'"            allow "$(payload "git tag --list 'v*'")"                          guard-bash.sh
+check "git tag -d v1.0"                allow "$(payload 'git tag -d v1.0')"                              guard-bash.sh
+check "git tag (lists)"                allow "$(payload 'git tag')"                                      guard-bash.sh
+check "create a non-v tag"             allow "$(payload 'git tag rc-1')"                                 guard-bash.sh
+check "gh api GET git/refs/tags?page"  allow "$(payload "gh api 'repos/O/R/git/refs/tags?per_page=100'")" guard-bash.sh
 echo ""
 echo "guard-write.sh — must BLOCK (AU-9, AIC-5)"
 check "hand-edit generated SARIF" block "$(wpayload 'evidence/142/g4/scan.sarif' 'x')"    guard-write.sh
@@ -544,6 +897,104 @@ check "ordinary source file"      allow "$(wpayload 'src/drafts.py' 'def save():
 check "secret-DETECTION code"     allow "$(wpayload 'scripts/scan.sh' 'grep -E aws_secret_access_key .')" guard-write.sh
 # DEFECT 2 — the guard matched its own patterns and blocked its own repair.
 check "editing the guard itself"  allow "$(wpayload '.claude/hooks/guard-write.sh' 'grep -qEi api_key_pattern')" guard-write.sh
+
+echo ""
+echo "guard-write.sh — every write tool (TheHub #61391)"
+# NotebookEdit names its file notebook_path and its text new_source; MultiEdit carries its
+# text in edits[].new_string. guard-write.sh was bound to Write|Edit and read neither.
+nbpayload() { # $1 = notebook path, $2 = cell source
+  esc=$(printf '%s' "$2" | sed 's/\\/\\\\/g; s/"/\\"/g')
+  printf '{"tool_name":"NotebookEdit","tool_input":{"notebook_path":"%s","new_source":"%s","cell_id":"c1"}}' "$1" "$esc"
+}
+mepayload() { # $1 = path, $2 = first edit's text, $3 = second edit's text
+  e1=$(printf '%s' "$2" | sed 's/\\/\\\\/g; s/"/\\"/g'); e2=$(printf '%s' "$3" | sed 's/\\/\\\\/g; s/"/\\"/g')
+  printf '{"tool_name":"MultiEdit","tool_input":{"file_path":"%s","edits":[{"old_string":"a","new_string":"%s"},{"old_string":"b","new_string":"%s"}]}}' "$1" "$e1" "$e2"
+}
+read -r -d '' wbound_py <<'PY'
+import json
+s = json.load(open(".claude/settings.json", encoding="utf-8"))
+print(" ".join(g.get("matcher", "") for g in s.get("hooks", {}).get("PreToolUse", [])
+               if any("guard-write.sh" in h.get("command", "") for h in g.get("hooks", []))))
+PY
+wbound=$(python3 -c "$wbound_py" 2>/dev/null || python -c "$wbound_py" 2>/dev/null)
+for tool in Write Edit MultiEdit NotebookEdit; do
+  if printf '|%s|' "$wbound" | tr ' ' '|' | grep -q "|$tool|"; then
+    printf '  [ok]   %-52s %s\n' "guard-write.sh bound to the $tool tool" "bound"; pass=$((pass+1))
+  else
+    printf '  [FAIL] %-52s %s\n' "guard-write.sh bound to the $tool tool" "NOT BOUND (matchers: ${wbound:-none})"; fail=$((fail+1))
+  fi
+done
+check "NotebookEdit: cloud key in a cell"  block "$(nbpayload 'notebooks/explore.ipynb' "k = '$AKIA_FAKE'")"  guard-write.sh
+check "NotebookEdit: generated evidence"   block "$(nbpayload 'evidence/142/g4/results.ipynb' 'x')"          guard-write.sh
+check "MultiEdit: credential, 2nd edit"    block "$(mepayload 'src/config.py' 'x = 1' "$ASSIGN_FAKE")"      guard-write.sh
+check "MultiEdit: generated evidence"      block "$(mepayload 'evidence/142/g4/scan.sarif' 'x' 'y')"        guard-write.sh
+check "NotebookEdit: an ordinary cell"     allow "$(nbpayload 'notebooks/explore.ipynb' 'df.head()')"       guard-write.sh
+check "MultiEdit: ordinary edits"          allow "$(mepayload 'src/drafts.py' 'def save():' '    pass')"   guard-write.sh
+
+echo ""
+echo "guard-write.sh — an evidence path in any spelling (TheHub #62022)"
+# Windows paths take backslashes and ignore case; the rule matched forward-slash, lower-case only.
+check "evidence, backslashes"            block "$(wpayload 'evidence\\142\\g4\\scan.sarif' 'x')"            guard-write.sh
+check "evidence, a Windows drive path"   block "$(wpayload 'C:\\repo\\evidence\\142\\g4\\results.xml' 'x')" guard-write.sh
+check "Evidence, capitalised"            block "$(wpayload 'Evidence/142/g4/scan.sarif' 'x')"               guard-write.sh
+check "EVIDENCE, upper case"             block "$(wpayload 'C:/repo/EVIDENCE/142/g4/ci-run.json' 'x')"      guard-write.sh
+check "evidence, ./ and // segments"     block "$(wpayload './evidence/./142//g4/scan.sarif' 'x')"          guard-write.sh
+check "evidence\\ narrative (.md)"        allow "$(wpayload 'evidence\\142\\g4\\verify.md' 'Verified.')"     guard-write.sh
+check "Evidence narrative (.MD)"         allow "$(wpayload 'Evidence/142/g4/verify.MD' 'Verified.')"       guard-write.sh
+check "a file merely named evidence"     allow "$(wpayload 'docs/evidence-model.md' 'x')"                    guard-write.sh
+# Review of #197/#91: the spellings the first round still missed, and the payload's cwd.
+cwpayload() { # $1 = path, $2 = content, $3 = cwd
+  esc=$(printf '%s' "$2" | sed 's/\\/\\\\/g; s/"/\\"/g'); p=$(printf '%s' "$1" | sed 's/\\/\\\\/g'); c=$(printf '%s' "$3" | sed 's/\\/\\\\/g')
+  printf '{"cwd":"%s","tool_input":{"file_path":"%s","content":"%s"}}' "$c" "$p" "$esc"
+}
+check "evidence, drive-relative C:evidence\\"  block "$(cwpayload 'C:evidence\142\g4\a.sarif' 'x' 'C:\repo')"        guard-write.sh
+check "evidence, a ::\$INDEX_ALLOCATION stream" block "$(wpayload 'evidence::$INDEX_ALLOCATION/142/g4/a.sarif' 'x')" guard-write.sh
+check "evidence, a :\$I30 stream"             block "$(wpayload 'evidence:$I30:$INDEX_ALLOCATION/142/g4/a.sarif' 'x')" guard-write.sh
+check "evidence, a trailing dot"              block "$(wpayload 'evidence./142/g4/a.sarif' 'x')"                   guard-write.sh
+check "evidence, a trailing space"            block "$(wpayload 'evidence /142/g4/a.sarif' 'x')"                   guard-write.sh
+check "relative, cwd inside evidence/"        block "$(cwpayload '142/g4/a.sarif' 'x' '/repo/evidence')"            guard-write.sh
+check "relative, cwd inside Evidence\\ (Windows)" block "$(cwpayload '142\g4\a.sarif' 'x' 'C:\repo\Evidence')"     guard-write.sh
+check "out of evidence via .., from its cwd"  allow "$(cwpayload '../src/a.py' 'x = 1' '/repo/evidence')"            guard-write.sh
+check "evidence/../src, resolved"             allow "$(wpayload 'evidence/../src/a.py' 'x = 1')"                  guard-write.sh
+check "into evidence via .."                  block "$(wpayload 'src/../evidence/142/a.sarif' 'x')"                guard-write.sh
+# Review round 2: a segment that only becomes ".." after trimming, a line break, a named stream.
+check "a ... segment cannot pop evidence"      block "$(wpayload 'evidence/.../../142/a.sarif' 'x')"               guard-write.sh
+check "a '.. ' segment cannot pop evidence"    block "$(wpayload 'evidence/.. /../142/a.sarif' 'x')"               guard-write.sh
+check "a '..:x' segment cannot pop evidence"   block "$(wpayload 'evidence/..:x/../142/a.sarif' 'x')"              guard-write.sh
+check "a ... segment under evidence"          block "$(wpayload 'evidence/.../a.sarif' 'x')"                      guard-write.sh
+check "a named stream on an evidence .md"      block "$(wpayload 'evidence/142/a.md:x.sarif' 'x')"                guard-write.sh
+check "a line feed in the path"               block "$(printf '{"tool_input":{"file_path":"x\\n/../evidence/142/a.sarif","content":"x"}}')" guard-write.sh
+check "a line feed in the cwd"                block "$(printf '{"cwd":"/repo/evidence/x\\n/..","tool_input":{"file_path":"../142/a.sarif","content":"x"}}')" guard-write.sh
+check "an ordinary relative path, no cwd"      allow "$(wpayload 'src/a.py' 'x = 1')"                             guard-write.sh
+# Review round 3: a named stream that also carries a $, a trailing dot, a line feed in the cwd.
+check "a named stream with :\$DATA"           block "$(wpayload 'evidence/142/a.md:x.sarif:$DATA' 'x')"         guard-write.sh
+check "a named stream, a \$ in its name"       block "$(wpayload 'evidence/142/a.md:$x.sarif' 'x')"              guard-write.sh
+check "a.md::\$DATA under evidence"           block "$(wpayload 'evidence/142/a.md::$DATA' 'x')"                guard-write.sh
+check "evidence:foo, a stream on the dir"     block "$(wpayload 'evidence:foo/142/a.sarif' 'x')"                 guard-write.sh
+check "a trailing dot on the file name"       block "$(wpayload 'evidence/142/a.md.' 'x')"                       guard-write.sh
+check "a line feed in the cwd (truncating)"   block "$(printf '{"cwd":"/repo/evidence\\nx","tool_input":{"file_path":"142/a.sarif","content":"x"}}')" guard-write.sh
+check "a..b.md under evidence"                allow "$(wpayload 'evidence/142/a..b.md' 'x')"                     guard-write.sh
+check "a colon outside evidence"              allow "$(wpayload 'src/x:y.txt' 'x')"                              guard-write.sh
+
+echo ""
+echo "guard-write.sh — the review-round-3 nits (TheHub #62037)"
+# 1. The trailing-dot flag is the last KEPT segment's: a later segment popped by .. must not reset it.
+check "a trailing dot kept, x/.. after it"     block "$(wpayload 'evidence/142/b.md./x/..' 'x')"                 guard-write.sh
+check "a trailing space kept, x/.. after it"   block "$(wpayload 'evidence/142/b.md /x/..' 'x')"                 guard-write.sh
+check "a trailing dot popped by .."            allow "$(wpayload 'evidence/142/x./../b.md' 'x')"                 guard-write.sh
+# 3. The cut reading is popped by .. too, so a ':' in a segment that .. left behind is not evidence.
+check "evidence/.. then a colon file, resolved" allow "$(wpayload 'evidence/../src/a:b.txt' 'x')"                guard-write.sh
+check "out of evidence via .., a ':' in the cwd" allow "$(cwpayload '../../src/a.py' 'x = 1' '/srv/u/my:proj/evidence/142')" guard-write.sh
+check "evidence:foo, then .. inside it"        block "$(wpayload 'evidence:foo/x/../142/a.sarif' 'x')"           guard-write.sh
+# 2. No refusal echoes a control character raw: the "hand-editing" message is cleaned too.
+for guard_raw_case in 'evidence/142/a\u001b[31m.sarif' 'evidence/142/b.md.\u0007'; do
+  guard_err=$(printf '{"tool_input":{"file_path":"%s","content":"x"}}' "$guard_raw_case" | bash .claude/hooks/guard-write.sh 2>&1 >/dev/null); rc=$?
+  case "$guard_err" in
+    *[$'\001'-$'\011'$'\013'-$'\037'$'\177']*) printf '  [FAIL] %-52s %s\n' "no raw control character: $guard_raw_case" "raw in stderr (rc $rc)"; fail=$((fail+1)) ;;
+    *) if [ "$rc" -eq 2 ]; then printf '  [ok]   %-52s %s\n' "no raw control character: $guard_raw_case" "block, cleaned"; pass=$((pass+1))
+       else printf '  [FAIL] %-52s %s\n' "no raw control character: $guard_raw_case" "expected block, got rc $rc"; fail=$((fail+1)); fi ;;
+  esac
+done
 
 echo ""
 echo "──────────────────────────────────────────────────────────────"

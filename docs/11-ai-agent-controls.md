@@ -32,6 +32,56 @@ Naming it precisely is the prerequisite to controlling it:
 
 ## The controls
 
+### Read this first: the hooks are best-effort guidance, not the boundary
+
+Every row below marked "Hook-enforced", and every "Enforced" in the strength column whose
+mechanism includes `guard-bash.sh`, is **best-effort guidance**. A hook is a denylist over
+command text: it refuses the spellings it knows, and a command that is re-worded (another
+quoting, a different tool, an indirection the parser does not follow) can get past it. The
+open entries in `test/hook-bypass-corpus.yml` are those known gaps.
+
+What actually bounds an agent is what its GitHub credential can do and what the server refuses
+it (live 2026-11-18 at 12:09Z):
+
+- **`main` is held server-side for every identity, the owner's included.** `enforce_admins` is
+  on, and the `keel-main` ruleset, with no bypass actors, refuses deletion and non-fast-forward
+  pushes and requires a pull request (squash only). It does not require signed commits: that
+  rule was dropped at about 14:36Z on 2026-11-18 (see AIC-10 below). The required checks are
+  pinned to a GitHub App, so a status posted with the agent's token cannot satisfy them. It does
+  **not** stop an agent merging a PR whose checks are green: no approving review is required,
+  and the agent's `gh` signs in as the repository owner (TheHub #61039). As an admin that
+  identity can also change the protection itself.
+- **Release tags are not held against the agents.** The `keel-release-tags` ruleset protects
+  `v*` (creation, update, deletion, non-fast-forward), but admins bypass it, and the agents'
+  identity is the owner's admin account. Until agents have their own identity (TheHub #61039),
+  the hook is the only control on release tags.
+- **Least-privilege credentials** are the target, not the current state. Until agents have their
+  own GitHub identity without admin rights (TheHub #61039), the agent's `gh` token can do
+  everything the hooks forbid.
+- **A sandbox**, if you run the agent in one. keel does not configure one; `.claude/settings.json`
+  carries permissions and hooks only.
+
+**The evidence, 2026-11-17/18 (TheHub #62000).** Each independent review of a hook change this
+week found commands the hooks allowed that they were meant to refuse: the release-tag guard
+(TheHub #61972, two rounds blocked), the push-to-`main` rules (#62031), the evidence-path rule
+(#62022, three rounds) and the container rules (#61987). Each round closed what it found, and each
+next round found more. That is what a denylist over command text is like, and it is why the hooks
+are guidance, not the boundary. The bypass classes are recorded by class in those PRs and in
+`test/hook-bypass-corpus.yml`; the bypass inputs found in review are not published here.
+
+**The controls that actually bound an agent are server-side.** In force since 2026-11-18:
+`enforce_admins` on, and the `keel-main` ruleset with no bypass. Still to come:
+
+- **A release-tag control the agents cannot bypass:** the tag ruleset's admin bypass covers
+  the agents until they have their own identity (TheHub #61039).
+- **A required check that is real evidence:** a green `Concourse / keel` can show without the
+  suites having run (TheHub #62015).
+- **An agent identity without admin rights** (TheHub #61039).
+
+A rebuild of the hooks as allowlists over a parsed command is planned (TheHub #60944). Until it
+and #61039 land, treat a hook rule as a guard rail that catches honest mistakes, never as a
+security control.
+
 ### AIC-1 — Human accountability is non-delegable
 Every artifact an agent produces has a named accountable human. Agents produce and analyze;
 humans decide and answer for it. The human approval points are enumerated in
@@ -40,11 +90,16 @@ stated.
 *Maps: AI RMF GOVERN 1.3, 2.1, 3.2 · 800-53 AC-5, CM-3, SA-3 · ISO 42001 A.3*
 
 ### AIC-2 — Separation of duties survives automation
-An agent identity that produces an artifact may not approve it. Enforced three ways, in
-increasing order of reliability: role prompt (weakest), **tool grant** (the `developer`
-agent has no approval capability; the `product-owner` agent cannot write source), and
-**GitHub branch protection + Environments** (strongest — a technical control that does not
-depend on the model behaving).
+An agent identity that produces an artifact may not approve it. The layers, from weakest to
+strongest: role prompt (weakest), **tool grant** (it narrows which tools an agent has, for
+example `ux` has no `Bash`, but every other agent here has `Bash`, and `Bash` runs `gh`, so it
+does not stop an agent approving or merging), and **GitHub branch protection + Environments**,
+which is a technical control that, for an identity it binds, does not depend on the model
+behaving. Today the agent's `gh` identity is the repository owner's. Since 2026-11-18
+`enforce_admins` is on and the `keel-main` ruleset has no bypass, so on `main` it is held to the
+required checks and cannot push directly, but no approving review is required; see
+*Read this first* above. The target is a separate agent identity without admin rights
+(TheHub #61039).
 
 Spawn separate agent invocations for produce and review. Asking one agent to "now review
 your own work" produces a review anchored on the reasoning that created the artifact, which
@@ -81,12 +136,14 @@ The columns are not equally strong, and saying so is the point of this control s
 
 | Column | Enforcement | Strength |
 |---|---|---|
-| **May approve** | `guard-bash.sh` blocks `gh pr review --approve`; GitHub branch protection blocks self-approval | **Enforced** |
+| **May approve** | `guard-bash.sh` blocks `gh pr review --approve`. GitHub refuses an approval from a PR's own author, but nothing else backs the hook: `main` requires no approving review, so an approval gates nothing, and the agent's identity can approve any PR it did not open (see *Read this first*) | ⚠️ **Hook-enforced** — a denylist over command text, until agents have their own GitHub identity (TheHub #61039) |
 | **May approve a deployment** (no agent, ever; operator decision 2026-10-26) | `guard-bash.sh` blocks reviewing a waiting run's environment deployment: `POST .../actions/runs/{id}/pending_deployments` or `.../deployment_protection_rule` via `gh api` (any method spelling, or a POST implied by `-f`/`-F`/`--input`) or `curl`, and the GraphQL `approveDeployments`/`rejectDeployments` mutations, also inside `$(...)`, backticks or `sh -c`. The method may be any case or quoted (`gh` upper-cases it), a `|`, `;`, `&` or newline inside quotes does not split the call, continued lines are rejoined, a GraphQL document `curl` sends from a file is read or refused, and `curl.exe`, `/usr/bin/curl`, `\curl`, `gh.exe` and the same names in any case (`GH`, `CURL`) are the same commands. Quotes and backslashes inside a word are read as bash removes them (`-X P""OST`, `pending"_"deployments`, `g''h`), `gh` and `curl` are judged by any write method they are given (`-X GET -iXPOST`, `curl -XGET -XPOST`), curl's dot segments and `{}`/`[]` URL globs are resolved, and a `gh alias set`/`gh alias import` body is judged as the gh command it is. The endpoint named anywhere in the command (`P=...; gh api -X POST $P`, `| xargs gh api`), a variable as the action, a body flag from `$(...)`, and a GraphQL document from `$(cat file)` are caught too. Not read: `wget`, httpie, `Invoke-RestMethod`, a language HTTP client, `curl --config` with the URL only in the file, an endpoint set in an earlier command, `xargs -a`, and a document produced by a command other than `cat` (open entries in `test/hook-bypass-corpus.yml`). Listing pending deployments stays allowed; `gh` 2.86 has no `gh run` subcommand that approves. The agent's `gh` signs in as the environment's required reviewer, so GitHub cannot tell the two apart | ⚠️ **Hook-enforced** — a denylist over command text, until agents have their own GitHub identity (TheHub #61039) |
-| **May push/merge** | `guard-bash.sh` blocks `gh pr merge`, force-push, direct-to-`main`; branch protection backs it. The same actions sent with `curl` and the `gh` token (a PR merge or review, a release, branch protection, a ruleset, a secret, an environment, `refs/heads/main`, a contents commit or a merge into `main`, and the GraphQL mutations for each) are refused on the same terms as `gh api`: any write method spelling, a POST implied by a body, continued lines, `$(...)`/backticks/`sh -c`, dot segments and URL globs; a GET stays allowed (TheHub #61048) | **Enforced** |
+| **May push/merge** | `guard-bash.sh` blocks `gh pr merge`, force-push, direct-to-`main`. Branch protection and the `keel-main` ruleset refuse direct pushes, force-pushes and deletion for every identity, the owner's included (since 2026-11-18), but do not stop an agent merging a PR whose required checks are green (see *Read this first*). The same actions sent with `curl` and the `gh` token (a PR merge or review, a release, branch protection, a ruleset, a secret, an environment, `refs/heads/main`, a contents commit or a merge into `main`, and the GraphQL mutations for each) are refused on the same terms as `gh api`: any write method spelling, a POST implied by a body, continued lines, `$(...)`/backticks/`sh -c`, dot segments and URL globs; a GET stays allowed (TheHub #61048) | ⚠️ **Hook-enforced** — a denylist over command text, until agents have their own GitHub identity (TheHub #61039) |
+| **May create or push a release tag** (no; TheHub #61972) | `guard-bash.sh` splits the command into shell words the way the shell that runs it would (bash for the Bash tool: quotes, a deleted backslash-newline, redirects and their targets, heredocs, `#` comments; PowerShell for the PowerShell tool: backtick escapes, `''` and `""` in quotes, script blocks, `(Get-Command git).Source`) and judges **only the command word of each simple command** and the words that belong to it, after assignments, `env`, `command`, `exec`, `sudo`, `nice`, `timeout` and `xargs`. Quoted text (a `-m` message, a `--body`, an `echo` or `grep` argument), a heredoc fed to anything but a shell, and a comment are never read as a command. A shell `-c` body, a heredoc or here-string fed to a shell, `eval`, `Invoke-Expression`, `cmd /c`, `pwsh -c` and `Start-Process` are judged as the command they run. **git push**: `--tags`, `--follow-tags` and `--mirror` by any unique prefix git accepts; a refspec naming `refs/tags/...` or `tags/...`, a release-shaped bare name (`v1`, `v1.2.3`, `vNext`) or `tag v...`; any refspec it cannot resolve from the text (a variable, `$(...)`, a backtick, a brace expansion, a glob); `push.followTags`, `remote.<name>.push` or `remote.<name>.mirror` given with `-c` or `--config-env`. **git send-pack**, always. **git update-ref** naming a tag ref, or with `--stdin`. **git fetch** whose refspec writes a tag ref. **git tag** creating a `v*` tag or one named by a variable (`--sort`, `--format` and `--column` do not make it a listing). **git config** setting those three keys. **A subcommand or command word that is not written literally**, and **`xargs git`** with a subcommand that can write a tag, are refused. **gh api** writes to `git/tags`, to `git/refs/tags/...`, and to `git/refs` unless the call carries exactly one literal `ref=refs/heads/<name>` and no `--input`; short flags are read as a cluster (`-iX POST`), and the endpoint in any case, with any scheme, host, port, query or fragment, by owner/name or by repository id. **GraphQL** `createRef` naming `refs/tags/`. The refusal says: "A v* tag is the ref a release is cut from, and cutting a release is the operator's decision. Push your branch and open a PR; after merge the operator creates the tag and dispatches release.yml." Allowed: a branch push (including a branch named `v2-migration`), `--no-follow-tags`, `git tag -l`, `--list`, `-d`, `-v`, a non-v tag, `git config --get`/`get`, `git stash push`, `git fetch --tags`, and a v-word or a git command quoted in a message, a body, an `echo`, a `grep` pattern, a heredoc or a comment. **Not read (gaps, closed by an agent identity without admin rights, TheHub #61039):** `GIT_CONFIG_*` environment variables; a `remote.<name>.push` or `.mirror`, a `push.followTags` or an `include.path` set earlier (by `git remote add`, by editing `.git/config`, or by a file) and then a plain `git push`; a git alias; a `v*` destination that is not release-shaped pushed from an existing tag; a GraphQL `createRef` whose name comes from a file; and a REST tag write sent by `curl` (TheHub #61973's curl path). Also not read (the final review round; none is allowed by this change that main refuses): a redirect before the command word, or between `gh` and its subcommand; a refspec built by a PowerShell expression; a here-string piped to a shell or to `Invoke-Expression`; a nest deeper than 8 levels whose tag name is split by an escape; a `git tag` option cluster whose value-taking letter hides the tag name; launchers other than the ones named above; a command name produced by a substitution or a command call; a substitution inside double quotes; a shell `-c` reached after option words this hook does not read. Nested text (a shell `-c` body, `pwsh -c`, `cmd /c`, `eval`, `Invoke-Expression`) is judged only when, with its quotes and escapes removed, it names git, gh, a tag-writing subcommand, an encoded command or a release-shaped word; otherwise it is left to the rest of this hook, as on main. Stricter than main, by the non-literal command word rule: a command name held in a variable, followed by `push` and a release-shaped word, is refused even when it is not git. **The real control is TheHub #61039**, approved by the operator: an agent identity without admin rights, so the `v*` tag ruleset binds the agents. **Server side:** binnacle has no tag ruleset, and keel's `keel-release-tags` ruleset (since 2026-11-18) has an admin bypass, which the agents' identity (the owner's) holds, so for the agents this hook is the only control on release tags until TheHub #61039 | ⚠️ **Hook-enforced only** for the agents' identity |
 | **May run commands** | `settings.json` deny/ask rules + `guard-bash.sh` | **Enforced** |
 | **Which shell tools the guard covers** (TheHub #61064) | `settings.json` binds `guard-bash.sh` to `Bash\|PowerShell`, so every rule in this table runs whichever of Claude Code's shell tools sends the command; bound to `Bash` alone, the same `gh`/`curl` approval, merge, force-push or release sent through the PowerShell tool reached no hook. The command is also read the way PowerShell reads it: the backtick escape and line continuation (`` g`h ``, `` --f`orce ``), `''`/`""` quotes, a script block (`&{gh pr merge 1}`), an argument list and `Start-Process gh -ArgumentList`; a quoted fragment joined to the rest of its word (`` `m"erge" ``), two literals joined by `+`, `` `t ``/`` `n ``/`` `u{..} `` inside a double-quoted string, the stop-parsing token `--%`, and `(Get-Command gh)`/`(gcm gh).Source` (keel#166 review). `Invoke-RestMethod`, `Invoke-WebRequest`, `irm` and `iwr` are judged as `curl` is, by endpoint and by `-Method`/`-CustomMethod` in any case or prefix (`-Me post`, `-Method:POST`); a method that is a variable or a splatted hashtable counts as a write. Because the `Bash(curl:*)` deny rule does not reach the PowerShell tool, `curl` or a cmdlet writing to any endpoint the `gh api` rules protect (merge, review, release, protection, rulesets, secrets, environments, a commit or ref on `main`) is refused by the hook, and such an endpoint is read anywhere in the command (`$u = '.../merge'; irm -Method Put $u`), and a GraphQL document either sends is read (inline, `-InFile`, `(Get-Content FILE)`) or refused. Read-only PowerShell stays allowed (`gh pr view`, `irm` GET, `Get-Content`). `test/hook-bypass-corpus.test.py` runs every corpus entry through both tools and fails if `settings.json` stops binding either; `selftest.sh` checks the binding too. Not covered: the permission deny/ask/allow lists, which are still spelled `Bash(...)`; arguments splatted from an array (`gh @a`); a .NET client (`Net.WebClient`) — open corpus entries | ⚠️ **Hook-enforced** — a denylist over command text (TheHub #61039) |
-| **May run a test suite inside a production container** (no; TheHub #61385) | `guard-bash.sh` refuses `docker exec` or `docker container exec` into `thehub-backend`, `thehub-postgres` or `mykronos-backend`, and `docker compose exec` or `docker-compose exec` into TheHub's compose services `backend` and `postgres` (whose container names those are), when the same exec runs `pytest`, `py.test`, `python -m pytest` (any interpreter or flags), `tox` or `nox`. It also refuses a runner given by path, under `nice`, or inside `sh -c '...'`; docker's global options before the subcommand (`-H ...`, `compose -f ...`); and `docker.exe`, `/usr/bin/docker` or `docker-compose.exe`. `docker exec` runs under none of a test container's caps, and uncapped test runs took TheHub production down on 2026-10-23 (TheHub #61001). The refusal names the route: a capped test container (`--cpus 2 --memory 2g`) through the shared lock, `scripts/docker-test-lock.sh` in TheHub. Read-only exec (`cat /proc/...`) and other services (`backend-staging`, `postgres-staging`) stay allowed. Not caught: a runner fed on stdin or a heredoc (`docker exec -i ... sh < run-tests.sh`); a runner under another name (`pytest-3`, a versioned binary, a script or Makefile target that calls pytest); `python -m unittest`; a container reached by id or renamed | ⚠️ **Hook-enforced**: a denylist over command text |
+| **Which write tools the guard covers** (TheHub #61391) | `settings.json` binds `guard-write.sh` to `Write\|Edit\|MultiEdit\|NotebookEdit`, so its evidence rule (AU-9) and secret rules (AIC-5) run whichever of Claude Code's tools writes the file. It reads each tool's payload: `file_path`, or a NotebookEdit's `notebook_path`; and all new text the call carries, which is `content`, `new_string`, a NotebookEdit's `new_source`, and every `edits[].new_string` of a MultiEdit, never `old_string`. Bound to `Write\|Edit` alone, a notebook cell or a MultiEdit reached no rule, and even once bound the path read empty and the hook allowed the write unread. MultiEdit is not in every Claude Code version; a matcher for a tool that does not exist costs nothing. `test/hook-bypass-corpus.test.py` fails if `settings.json` stops binding any of the four, and `selftest.sh` checks the binding too. Not covered: a write made through the shell (`cat > f`, `tee`, `sed -i`), which is `guard-bash.sh`'s ground, and an MCP tool that writes files | ⚠️ **Hook-enforced**; CI secret scanning is authoritative |
+| **May run a test suite inside a production container** (no; TheHub #61385) | `guard-bash.sh` refuses `docker exec` or `docker container exec` into `thehub-backend`, `thehub-postgres` or `mykronos-backend`, and `docker compose exec` or `docker-compose exec` or `run` into the compose services `backend` and `postgres` (TheHub's thehub-backend and thehub-postgres; MyKronos's `backend` is mykronos-backend, and it has no postgres service), when the same exec runs `pytest`, `py.test`, `python -m pytest` (any interpreter or flags), `tox` or `nox` (`python -m unittest` and `npm test` count too through `compose exec`/`compose run`, but not through a plain `docker exec` into a named container), anywhere among the command's words (after `timeout`, `env`, `uv run`, inside a shell `-c` body); a package being installed (`pip install pytest`) does not count unless a runner follows it. The original #61385 pattern still runs alongside the word judge, so anything it blocks stays blocked: that includes `compose exec backend pip install pytest` (a known false positive). The body of every `$(...)` and backtick is judged as a command, and every engine word in a command is judged (an outer `docker exec <container> docker compose ...`), never a `NAME=value` assignment. It also refuses a runner given by path, under `nice`, or inside `sh -c '...'`; docker's global options before the subcommand (`-H ...`, `compose -f ...`); and `docker.exe`, `/usr/bin/docker` or `docker-compose.exe`. `docker exec` runs under none of a test container's caps, and uncapped test runs took TheHub production down on 2026-10-23 (TheHub #61001). The refusal names the route: a capped test container (`--cpus 2 --memory 2g`) through the shared lock, `scripts/docker-test-lock.sh` in TheHub. Read-only exec (`cat /proc/...`) and other services (`backend-staging`, `postgres-staging`) stay allowed. A `docker run` (or `podman`/`nerdctl run`) of a test runner must carry, before the image, a CPU cap of at most 2 (`--cpus`, or `--cpu-quota`/period) and a memory cap of at most 2g (`--memory`/`-m`); a cap of 0, a larger one, one given by a variable, or caps after the image (which are the command's own arguments) are refused with the same route (TheHub #61987). `podman compose`, `nerdctl compose` and `podman-compose` are read as `docker compose`, and `--entrypoint` counts as the command. The engine (and a shell fed a heredoc) is read in any letter case, with or without `.exe` or a directory (keel #205 review). Also not caught: `docker run -d ... sleep` then `docker exec <it> pytest`, and `docker create` then `docker start`. Not caught: a runner fed on stdin or a heredoc (`docker exec -i ... sh < run-tests.sh`); a runner under another name (`pytest-3`, a versioned binary, a script or Makefile target that calls pytest); a `make test` target; `--memory-swap -1` beside an allowed `--memory`; PowerShell splatting (`docker @a`) and `Start-Process docker -ArgumentList`; `(Get-Command -CommandType Application docker.exe).Source` (a Get-Command parameter before the name); a heredoc fed to a shell through a launcher or form the heredoc rule does not recognise (a redirect, `| tee` or `&&` after `bash <<EOF`; `sudo -u`, `timeout`, `env -i`, `nice`, `wsl bash`, `pwsh`, `xargs sh -c`, `source`/`.`, `docker exec -i sh`; `$(...)` in an unquoted heredoc; `: # <<X`, `<<$'EOF'`, `<<"E F"`), which leaves an uncapped `docker run` or `compose run` in its body unread (follow-up story; main's backstop still refuses `compose exec` and `docker exec` with a runner); more than 6 nested substitutions naming an engine are refused by design; 100 `$(date)` after `docker ps` take about 12 s (main: 2 s); a container reached by id or renamed | ⚠️ **Hook-enforced**: a denylist over command text |
 | **May write source** | The agent's role prompt, only | ⚠️ **Prompt-enforced — advisory** |
 
 **Verified 2026-08-07:** Claude Code's agent `tools:` frontmatter grants tool *types*
@@ -205,7 +262,7 @@ Agents are usually right, which is exactly what makes complacent review dangerou
 Agent activity is reconstructable: which agent, acting on which issue, produced which
 artifact, using which model version, approved by which human.
 
-Sources: signed commits with AI trailers · PR metadata and labels · gate evidence bundles
+Sources: commits with AI trailers (the squash merges on `main` are GitHub-signed, which attests the merge, not the author) · PR metadata and labels · gate evidence bundles
 in `evidence/` · CI run logs · session transcripts retained per the retention schedule.
 
 Sufficient to answer the question an assessor will actually ask: *"Show me how this change
@@ -263,24 +320,28 @@ definitions, fixed through `/learn`. Every AI incident becomes a new seeded case
 | Control | Prompt | Tool grant | Hook / CI | Branch protection |
 |---|---|---|---|---|
 | AIC-1 accountability | ✓ | | | ✓ (Environments) |
-| AIC-2 separation of duties | ✓ | ✓ | ✓ | ✓ |
-| AIC-3 least agency — approve/merge/push | ✓ | ✓ | ✓ | ✓ |
+| AIC-2 separation of duties | ✓ | ✗ (`Bash` runs `gh`) | ✓ | ✓ |
+| AIC-3 least agency — approve/merge/push | ✓ | ✗ (`Bash` runs `gh`) | ✓ | ✓ |
 | AIC-3 least agency — **write scope by role** | ✓ | ✗ | detection only | partial (CODEOWNERS) |
 | AIC-4 injection isolation | ✓ | ✓ (domain allowlist) | | |
 | AIC-5 secrets | ✓ | ✓ (deny rules) | ✓ | |
-| AIC-6 provenance | ✓ | | ✓ | ✓ (required check) |
+| AIC-6 provenance | ✓ | | ✓ | intended as a required check; not required today (2026-11-18) |
 | AIC-7 supply chain | ✓ | | ✓ | ✓ |
 | AIC-8 model change control | | | ✓ | ✓ (CODEOWNERS) |
 | AIC-9 review calibration | ✓ | | ✓ (template check) | ✓ |
-| AIC-10 audit trail | | | ✓ | ✓ (signed commits) |
+| AIC-10 audit trail | | | ✓ | ✓ (GitHub-signed squash merges on `main`; signing is not required by rule since about 14:36Z on 2026-11-18; GitHub's signature on a squash merge attests the merge, not the author) |
 | AIC-11 bounded autonomy | ✓ | ✓ | | ✓ |
 | AIC-12 agent evaluation | | | ✓ (scheduled) | |
 
 **Read the table by column, not by row.** Prompt-only controls are advisory — a sufficiently
-confused model ignores them. The controls that hold under adversarial conditions are the
-ones with a mark in the tool-grant, hook, or branch-protection columns. When you add a new
-control, the design question is not "what should the agent be told" but **"what makes the
-unwanted action impossible."**
+confused model ignores them. A mark in the hook column is best-effort guidance, not a boundary
+(see *Read this first*). A mark in the branch-protection column holds for every identity since
+2026-11-18 (`enforce_admins` on, the `keel-main` ruleset with no bypass), except that no approving
+review is required, so a mark that depends on an approval is the target, not the current state. A tool grant is enforced by the harness, not by matching command
+text, but every agent here except `ux` is granted `Bash`, and `Bash` runs `gh`. So for approve,
+merge and push the tool grant limits nothing the hook does not, and the AIC-2 and AIC-3
+approve/merge/push cells are marked ✗ for that reason. When you add a new control, the design question is not "what should the agent be told"
+but **"what makes the unwanted action impossible."**
 
 ---
 
@@ -333,6 +394,14 @@ saying because it looks like a violation.
 `guard-write.sh` fails open with a stderr warning when neither `jq` nor Python is available,
 because CI secret scanning is authoritative and server-side. `guard-bash.sh` fails closed on
 its command patterns, because those are enforcement.
+
+Both guards also fail closed on their own failures, because a hook that errors is not a hook
+that decided. Claude Code blocks only on exit 2 and lets the call proceed on any other code
+or when the hook runs past its timeout (60 s). So a helper that errors or is killed (including
+by SIGPIPE, TheHub #61973), any other exit code, a catchable signal to the hook, and, for
+`guard-bash.sh`, running past its own 40 s deadline, are each a block that says it was an
+internal error (TheHub #61794, #61844, #61973). `guard-bash.sh` refuses a command over 1 MiB
+without reading it. SIGKILL cannot be caught: a hook killed that way exits 137, which is an allow.
 
 Getting this backwards produces a control that is either useless or removed. Both end at the
 same place.

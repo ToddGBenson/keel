@@ -73,8 +73,8 @@ A human approves **what is deployed in the lower environment**, not a diff. The 
 got there; the environment is what you are accepting.
 
 There is no auto-merge mode, and adding one would falsify every AC-5 claim this repo makes.
-The runner opens a PR and stops. `guard-bash.sh` blocks `gh pr merge`, and branch protection
-backs that up, so this holds even if a future prompt says otherwise.
+The runner opens a PR and stops. `guard-bash.sh` blocks `gh pr merge`. Branch protection
+refuses a direct push and a force push to `main` for every identity since 2026-11-18 (`keel-main` ruleset, `enforce_admins` on), but requires no approval, so the agents' identity, which is the owner's (TheHub #61039), can merge a PR whose checks are green; the hook is what stops that merge if a future prompt says otherwise.
 
 ## P5 — Unit, functional and security tests, all enabled
 

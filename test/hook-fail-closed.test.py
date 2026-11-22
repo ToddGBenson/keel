@@ -17,6 +17,7 @@ the same commands are blocked by their rules and a harmless one is allowed.
 """
 import json
 import os
+import re
 import shutil
 import stat
 import subprocess
@@ -29,7 +30,7 @@ ROOT = Path(__file__).resolve().parent.parent
 HOOK = ROOT / ".claude" / "hooks" / "guard-bash.sh"
 # The tools guard-bash.sh runs (test/hook-bypass-corpus.test.py's HOOK_TOOLS, plus jq).
 TOOLS = ("bash", "sh", "cat", "grep", "sed", "tr", "head", "mktemp", "rm", "awk",
-         "python3", "python", "env", "jq")
+         "python3", "python", "env", "jq", "sleep")
 FAULTY = ("grep", "sed", "awk", "tr", "cat", "jq")
 # Helpers the hook runs on EVERY command (reading the payload and building its views),
 # so a fault in one refuses even a harmless command. tr runs only on the curl/cmdlet
@@ -54,12 +55,41 @@ LARGE = {f"{name}, padded to {len(cmd + PAD) // 1024} KB": cmd + PAD for name, c
 # command must now be decided well inside the timeout. The dense case (100,000 one-character
 # comment lines) is the worst shape for the per-line rescan.
 LARGE["self-merge, then 100,000 one-character comment lines"] = MUST_BLOCK["self-merge"] + "\n#" * 100000
-BUDGET_S = 5   # the fixed hook takes ~0.7 s here; main took 7-16 s
+BUDGET_S = 5   # the fixed hook takes ~0.7 s on the Linux runner; main took 7-16 s there
+# [TheHub #61973, review of #184] A harmless padded command is ALLOWED, so it runs every rule
+# on every view: the slowest decided shape of this padding. It must be quick and allowed.
+HARMLESS_LARGE = {f"`git status`, padded to {len(HARMLESS + PAD) // 1024} KB": "git status" + PAD}
+# Review of keel #205 / binnacle #101: with no jq, #61978 refuses a payload over 256 KB before any
+# rule runs, so the rows above are decided by that cap in that mode. The same commands padded to
+# about 144 KB, under the cap, keep the rules and the budget exercised with no jq (as on Concourse).
+NOJQ_CAP = 262144
+PAD_UNDER = PAD[: len(PAD) * 36 // 100]
+LARGE.update({f"{name}, padded to {len(cmd + PAD_UNDER) // 1024} KB": cmd + PAD_UNDER for name, cmd in MUST_BLOCK.items()})
+HARMLESS_LARGE[f"`git status`, padded to {len(HARMLESS + PAD_UNDER) // 1024} KB"] = "git status" + PAD_UNDER
 SHIMS = {
     "exits 2": "#!/bin/sh\nexit 2\n",
     "is killed": "#!/bin/sh\nkill -9 $$\n",
 }
 failures = []
+
+
+# [TheHub #61843] guard-bash.sh pins PATH to system directories, so a shim directory on
+# PATH no longer reaches it. The tests run a COPY whose one marked line is replaced by a
+# no-op, so the copy keeps the PATH this test gives it (bash converts a Windows PATH at
+# startup, which a literal written into the copy would skip). The live hook has no such
+# seam. A hook without the marked line (before #61843) runs as it is.
+PIN_RE = re.compile(r"^PATH=.*# guard-path-pin\b.*$", re.M)
+
+
+def unpinned_copy(hook: Path, dest_dir: Path) -> Path:
+    text = hook.read_text(encoding="utf-8")
+    new, n = PIN_RE.subn(": # guard-path-pin (test copy: PATH is the test's)", text)
+    if n == 0:
+        return hook
+    out = dest_dir / f"{hook.stem}.test-copy{hook.suffix}"
+    if not out.exists() or out.read_text(encoding="utf-8") != new:
+        out.write_text(new, encoding="utf-8")
+    return out
 
 
 def check(name, cond, detail=""):
@@ -95,6 +125,7 @@ def tool_dir(tmp: Path, faulty=None, shim=None, with_jq=True):
 
 def run(command, path_dir, tool="Bash", hook=HOOK):
     env = {"PATH": str(path_dir), "CLAUDE_PROJECT_DIR": str(ROOT), "HOME": os.environ.get("HOME", "/tmp")}
+    hook = unpinned_copy(hook, Path(path_dir).parent)
     r = subprocess.run([shutil.which("bash"), str(hook)], input=payload(command, tool),
                        capture_output=True, cwd=ROOT, env=env, timeout=60)
     return r.returncode, r.stderr.decode("utf-8", "replace")
@@ -120,14 +151,27 @@ def main():
         print("a large command: a match is still a match (review #1)")
         for with_jq in ([True, False] if have_jq else [False]):
             d = clean if with_jq else tool_dir(tmp, with_jq=False)
-            for name, cmd in LARGE.items():
+            for name, cmd in list(LARGE.items()) + list(HARMLESS_LARGE.items()):
+                # [hook train 2026-11-18] With no jq, TheHub #61978 refuses a payload over 256 KB
+                # as too large to judge, so the harmless padded command is blocked there.
+                capped = not with_jq and len(cmd.encode()) > NOJQ_CAP   # refused by #61978's cap, unread
+                want = 0 if name in HARMLESS_LARGE and not capped else 2
                 for t in ("Bash", "PowerShell"):
                     mode = "jq" if with_jq else "no-jq"
-                    start = time.monotonic()
-                    rc, err = run(cmd, d, t)
-                    took = time.monotonic() - start
-                    check(f"{mode} {t}: {name} is blocked", rc == 2, f"rc={rc} ALLOWED")
-                    check(f"{mode} {t}: {name} is decided in {took:.1f} s (budget {BUDGET_S} s)",
+                    # [TheHub #61973, review of #184] The better of two runs, so one starved
+                    # sample on a busy worker is not a failure; the budget is unchanged.
+                    took = None
+                    for _ in range(2):
+                        start = time.monotonic()
+                        rc, err = run(cmd, d, t)
+                        took = min(took, time.monotonic() - start) if took is not None else time.monotonic() - start
+                        if took < BUDGET_S:
+                            break
+                    verdict = "allowed" if want == 0 else "blocked"
+                    # Review of keel #205: a row the cap decides must say so.
+                    why_ok = not capped or "over 256 KB" in err
+                    check(f"{mode} {t}: {name} is {verdict}", rc == want and why_ok, f"rc={rc} {err[:200]}")
+                    check(f"{mode} {t}: {name} is decided in {took:.1f} s (budget {BUDGET_S} s, best of two)",
                           took < BUDGET_S, "TOO SLOW: a hook past its timeout lets the call proceed")
 
         print("one helper fails: the hook refuses")

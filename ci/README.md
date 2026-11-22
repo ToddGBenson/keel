@@ -10,7 +10,9 @@ approve anything. Gate approval stays a human act recorded in GitHub (PD-2).
 
 ## What runs where, after the port
 
-> ## ⚠️ READ THIS FIRST — the merge gate is MyKronos `independent-review`; PR Governance is retired
+> ## ⚠️ READ THIS FIRST (2026-11-04) — the intended merge gate is MyKronos `independent-review`; PR Governance is retired
+>
+> **Superseded in part on 2026-11-18:** `independent-review` is not required today; see the live reading below.
 >
 > **2026-11-04 (TheHub #60978).** The gate is **`independent-review`**, not `Concourse / keel`.
 > MyKronos posts it on every pull request head through its GitHub App, App-pinned, and opens
@@ -38,10 +40,17 @@ approve anything. Gate approval stays a human act recorded in GitHub (PD-2).
 > `Mykronos atlas`, and `Mykronos oracle` after them. `ci.yml`, `security.yml`,
 > `sbom-and-sign.yml`, `release.yml`, `ai-evaluation.yml` and `compliance-evidence.yml` are
 > `workflow_dispatch` only: they were ported to Concourse, not stopped by billing.
-> `PR Governance` is still `disabled_manually` and retired. Live protection on `main`, read
-> 2026-11-16: one approving review, linear history, resolved conversations, **no required
-> status checks**, `enforce_admins` off. Every "private" or "Actions does not start" statement
-> below is history, superseded by this reading.
+> `PR Governance` is still `disabled_manually` and retired.
+>
+> **Live protection on `main`, read 2026-11-18 (TheHub #62001):** 0 approving reviews; **two required
+> checks**, `Concourse / keel` and `library-allowlist`, both pinned to App 4551328, `strict`;
+> linear history, resolved conversations, no force-push or deletion; `enforce_admins` **on**
+> (since about 11:58Z that day, read at 12:09Z); branch protection's `required_signatures` off, and
+> signing not required by rule since about 14:36Z (GitHub signs each squash merge); the `keel-main` ruleset (no bypass: deletion, non-fast-forward, a pull request
+> with squash only); release tags under the `keel-release-tags` ruleset, which
+> admins bypass. A green `Concourse / keel` can show without the suites
+> having run (TheHub #62015, open). This supersedes the 2026-11-16 reading (one approving review,
+> no required checks) and every "private" or "Actions does not start" statement below.
 >
 > The rest of this box is the earlier reading.
 >
@@ -409,6 +418,26 @@ check run per commit. That is the pattern MyKronos D-136 built for TheHub, reuse
 here under TheHub #60580. It does not reopen the archived-resource-type question
 above: there is no new resource type, and no GitHub credential in the pipeline.
 
+**An unreachable reporter never turns a passing suite red (TheHub #62097).** On
+2026-11-18 binnacle #89 passed every unit suite, then `check-run.sh` got curl exit 6
+three times reaching MyKronos, and the job's `on_failure` hook posted `failure`: a
+passing head was recorded red and a train slot was lost. Now `check-run.sh` retries
+a report five times over about two minutes on curl's transient exits (6, 7, 28, 35,
+52, 56) and on a 408, 429 or 5xx, and never retries a refusal. If every try fails
+after a passing suite it posts nothing more (not `failure`, and not `cancelled`: a
+`cancelled` would complete the check, `pr-pick.sh` skips every completed head, and
+the PR would stay blocked until a new push) and exits non-zero, so the step shows
+red. The two success reports (`verify-artifact`'s last step and `pr-checks`'
+`on_success`) are wrapped in `try:` so that step's failure is not the job's, and the
+job's own `on_failure` does not post `failure` for a suite that passed. Because of
+`try:` the Concourse build itself goes green and only the inner `check-run` step is
+red, so a green build does not mean the report landed. The check stays in progress,
+which blocks the PR, and `pr-pick.sh` re-judges that head on its next ten-minute
+tick and reports again. A suite that
+really failed still posts `failure`, with the same retries, and if that post never
+gets through the step exits non-zero and the build stays red. A `start` report that
+cannot get through still fails its job (follow-up, not changed here).
+
 The scanning lanes `sast`, `secrets`, `sca` and `iac` are part of this verdict
 since TheHub #60850. `build-and-attest` gathers them: its `passed:` names all
 seven verifying lanes, so `verify-artifact` reports success only for a commit
@@ -422,7 +451,9 @@ CodeQL `sast`, which took 12-22 minutes on push builds in October 2026.
 why it is not required.** Verification runs after the merge (POAM-014). `repo`
 tracks `main`, and Concourse never sees a pull request's head. So:
 
-- **A pull request never carries `Concourse / keel` yet.** Requiring it on `main`
+- *(Superseded: since TheHub #61778 Concourse judges PR heads, and on 2026-11-18 `Concourse / keel`
+  is a required check. The rest of this bullet is the earlier reasoning.)*
+  **A pull request never carries `Concourse / keel` yet.** Requiring it on `main`
   today would make every pull request wait for a check that cannot arrive. With
   `enforce_admins` off, the owner's merges would bypass it. Anyone else, and
   Dependabot, could never merge at all. This is what TheHub #60580 has to change
@@ -515,6 +546,16 @@ token:
   pull-request code. `pr-checks` runs the pull request's code and gets **no params**.
   The end reports run main's `check-run.yml` and `check-run.sh` from `repo/` with the
   token, and read only the head's sha, from `pr-sha/HEAD` (`HEAD_FILE`).
+- **The picker's state is never in the pull request's tree (TheHub #62015).** `pr-pick`
+  writes `.pr` (or `.none`, "nothing to judge") to its own output, `pr-meta/`, and
+  `pr-checks` reads it from there and refuses unless `pr/` is checked out at the picked
+  sha. The first version wrote the markers into `pr/`, the author's tree: a `.none`
+  committed in a pull request made `pr-checks` pass without running a suite, and the
+  check posted green on that head. `pr-checks` declares no outputs and no params, so
+  Concourse discards anything pull-request code writes to `repo/`, `pr/`, `pr-meta/` or
+  `pr-sha/`; `test/check-run.test.py` holds that task shape, and `.sdlc/threat-model.yaml`
+  names pull-request code on the workers (`pr-code-on-workers`). A head that moves between
+  `ls-remote` and `fetch` fails the pick and records nothing (`test/pr-pick.test.py`).
 - **Never map pull-request code into a credentialed step.** A task's `run:` path names an
   input, so `input_mapping: { repo: pr }` on a report would run the **pull request's**
   `check-run.sh` with the token. The first version of this job did exactly that (TheHub
@@ -600,11 +641,12 @@ GitHub webhook pointing at:
 ### 5. Branch protection — read it, do not assume it
 
 This section used to say eleven required status checks protect `main`. **Read on
-2026-10-11, 2026-10-20 and again on 2026-11-16, none do:** `required_status_checks`
-is off. They were removed in 2026-08 when Actions could not run on the then-private
-repository, so that anything could merge (POAM-014). keel is public and Actions runs
-now, but no check has been required again yet. Reviews (one approval,
-`enforce_admins` off), linear history and conversation resolution are on. `PR Governance` is
+2026-10-11, 2026-10-20 and again on 2026-11-16, none did:** `required_status_checks`
+was off. **On 2026-11-18 two are required:** `Concourse / keel` and `library-allowlist`, App-pinned
+(TheHub #61778 made Concourse judge PR heads). They were removed in 2026-08 when Actions could not run on the then-private
+repository, so that anything could merge (POAM-014). Reviews: 0 approvals (2026-11-18; one
+until solo mode was recorded), `enforce_admins` on since 2026-11-18; linear history and conversation
+resolution are on. `PR Governance` is
 `disabled_manually` and retired (TheHub #60849).
 
 ```sh
