@@ -2,9 +2,10 @@
 
 Produced by:   builder agent for the PO, per `.claude/commands/release.md`
 Model version: claude-opus-5-5
-Date:          2026-11-21 (Arizona; 2026-11-22 UTC). First written 2026-11-17 against `c7ba09e`,
-               re-measured 2026-11-18 against `7d4c7fb`, and re-measured 2026-11-22 04:15–04:45 UTC
-               against `4c19aca` (this revision, after the review of `28a642c2` blocked it as stale)
+Date:          2026-11-22 (Arizona and UTC). First written 2026-11-17 against `c7ba09e`,
+               re-measured 2026-11-18 against `7d4c7fb`, 2026-11-22 04:15–04:45 UTC against `4c19aca`
+               (after the review of `28a642c2` blocked it as stale), and 2026-11-22 from 16:30 UTC
+               against `0f83e14` (this revision, after #212 merged)
 Approved by:   <operator, at the `production` environment approval of the release run>
 Issue:         TheHub #61006 · POAM-011
 
@@ -16,23 +17,23 @@ claim the release is ready: section 4 shows a G5 checklist item that fails as wr
 approver decides on that basis. It carries no `release-run:` or `attestation:` line yet;
 `/release` step 5 appends one after the run, citing only a run that has been opened.
 
-Every number below was measured on `main` at `4c19aca7acad97b171809f6b9b1b330de5f7c262` unless
-it names another sha. Concourse build numbers are pipeline `keel`, team `main`, and each one is
+Every number below was measured on `main` at `0f83e14e7f502a74d642f2d2c1e7114be29cadf7` unless
+it names another sha. `0f83e14` is `4c19aca` plus #212, which changes three files: `.claude/hooks/guard-bash.sh`,
+`.claude/hooks/selftest.sh` and `test/hook-bypass-corpus.test.py`. Concourse build numbers are pipeline `keel`, team `main`, and each one is
 cited only for a build whose `repo` input is the sha given beside it.
 
 ## Risks and residual exposure — read first
 
-1. **G4 is not cleared for the items in this release.** #188 merged as `4c19aca` (the tip
-   this record is measured on): the first G4 records, for three stories, each with a QA
-   (Part A) and a Security (Part B) record. `scripts/control-liveness.py` on `4c19aca` reports
-   G4 Verified = **3** (Concourse `platform-integrity` build 187 on `4c19aca`, and the same output run locally on this branch; G3: 50, G1: 1, G0/G2/G5: 0). The verdicts, as recorded (QA taken at `c7ba09e`,
+1. **G4 is not cleared for the items in this release.** #188 merged as `4c19aca`: the first G4 records, for three stories, each with a QA
+   (Part A) and a Security (Part B) record. `scripts/control-liveness.py` on `0f83e14` reports
+   G4 Verified = **3** (Concourse `platform-integrity` build 189 on `0f83e14`, the same as build 187 on `4c19aca` and as run locally; G3: 50, G1: 1, G0/G2/G5: 0). The verdicts, as recorded (QA taken at `c7ba09e`,
    Security at `7d4c7fb`):
    - **61237** (#182, a missing gitleaks report fails): QA `pass`, Security `pass` (one Low
      outside the story's criteria: the scanner's exit status is not read).
    - **61778** (#178, Concourse judges PR heads): QA **`fail`**, Security **`fail`**.
    - **61794** (#179, guard-bash.sh fails closed): QA **`fail`**, Security **`fail`**.
 
-   **What those findings are on `4c19aca`.** The records are point-in-time and their verdicts
+   **What those findings are on `0f83e14`.** The records are point-in-time and their verdicts
    stand. Some findings they state have had fixes merged since. A fix is a new item that needs
    its own G4 record; none of these fixes has one, so none is G4-cleared.
    - 61778 Security F1 (a PR could get a green `Concourse / keel` with no suite run), F2 (no
@@ -42,17 +43,18 @@ cited only for a build whose `repo` input is the sha given beside it.
      isolation from PR code assumed, not tested): #208's message says the trusted checkout is
      tested; **not re-verified here.**
    - 61778 QA AC4 (the check's link goes to a repository, not to the build): **still open.**
-     On `4c19aca` the `Concourse / keel` check run's `details_url` is a repository URL
-     (measured 2026-11-22 04:20 UTC). AC3 as written for keel: still not met as written.
+     On `4c19aca` and on `0f83e14` the `Concourse / keel` check run's `details_url` is a
+     repository URL (measured 2026-11-22 04:20 and 16:50 UTC); #212 does not touch `ci/`. AC3 as written for keel: still not met as written.
    - 61794 Security F1 / QA AC3 parse-error half (the no-jq fallback allowed a payload it could
      not read): **fix merged**, #205 (TheHub #61978/#62016, `6c7af3b`). Security F2 (a helper
      that answers wrongly is believed): **fix merged**, #189 (TheHub #61843, `b587289`), helpers
      resolved only from system directories. F3 (Windows time margin): #205 (TheHub #61973) adds
      a 40 s supervisor deadline; not re-measured on Windows here.
    - 61794 QA AC2/AC5 (no regression test runs the no-jq fallback N ≥ 50 times): **still
-     open**; no repeat-count test exists on `4c19aca`.
+     open**; no repeat-count test exists on `0f83e14` (#212 changes how the corpus runner
+     prints and times its two modes, not how often it runs the fallback).
 
-   That leaves 126 of the 129 PR-numbered commits with no G4 record, and two of the three that
+   That leaves 127 of the 130 PR-numbered commits with no G4 record, and two of the three that
    have one recorded a **fail**. G5 checklist item 2 says anything without G4 clearance is
    removed from the release, not waived. keel's release is the whole tree, so it cannot drop
    one item, and applying the rule literally removes everything. Releasing the un-cleared
@@ -60,52 +62,55 @@ cited only for a build whose `repo` input is the sha given beside it.
    can grant (POAM-018). QA holds a veto at this review (`docs/07-release-and-change.md`), and
    has recorded two fails.
 2. **Two POA&M items are overdue; four Highs were re-dated, not closed.** `scripts/poam.py
-   --check --history --today 2026-11-21` on `4c19aca`: exit 0; POAM-011 (Medium) and POAM-013
-   (Low), both due 2026-11-11, are **10 days past due** on 2026-11-21 (Arizona). Concourse
-   reads the UTC date: `platform-integrity` build 187 on `4c19aca` (run 2026-11-22 UTC) prints "11 days" for both, and "ok: no open High/Critical POA&M item is past due". The check gates only High/Critical items, and the
+   --check --history --today 2026-11-22` on `0f83e14`: exit 0; POAM-011 (Medium) and POAM-013
+   (Low), both due 2026-11-11, are **11 days past due** on 2026-11-22 (Arizona and UTC).
+   Concourse `platform-integrity` build 189 on `0f83e14` prints the same "11 days" for both, and "ok: no open High/Critical POA&M item is past due". The check gates only High/Critical items, and the
    release preflight does not run it. POAM-017 and POAM-018 were re-dated to 2026-12-17 by #185
    (operator decision 2026-11-17); POAM-010 and POAM-014 were re-dated from 2026-11-21 to
    **2026-12-17** by #205 (operator decision 2026-11-18), each its second extension.
 3. **Rollback is not rehearsed.** There is no rehearsal record (section 10).
 4. **AI evals are unsatisfied** (section 6). `agent-assurance`'s replay step is an `ADAPT:`
-   stub. Its last build, 16, ran on `c7ba09e` (2026-11-17), not on `4c19aca`, and printed
+   stub. Its last build, 16, ran on `c7ba09e` (2026-11-17), not on `0f83e14`, and printed
    "OVERDUE since 2026-11-12: the behavioral half of AIC-12 is not operating".
 5. **Solo operation (POAM-008).** The one `production` reviewer (`ToddGBenson`) is also the
-   dispatcher and the only identity the `keel-release-tags` ruleset lets create a `v*` tag;
-   `authorize-release` will print the AC-5 warning. Recorded, not refused.
+   dispatcher, and holds the repository admin role, which is the `keel-release-tags` ruleset's
+   only bypass for creating a `v*` tag (a role, not a named identity: it is one person only
+   while the repository has one admin). `authorize-release` will print the AC-5 warning. Recorded, not refused.
 6. **Signature verification is not enforced where forks receive keel.**
    `scripts/sync-platform.sh` syncs from `upstream/main`, not from a tag, and does not call the
    verifier. Only Concourse `verify-artifact` verifies keel's own latest release. The tag
    therefore changes nothing a fork receives; it adds a signed, attested point.
 7. **The guard hooks are best-effort guidance, by keel's own statement** (#191, TheHub #62000,
-   `docs/11-ai-agent-controls.md`), until the allowlist rebuild. Seven of the fourteen commits
-   added since `7d4c7fb` change `.claude/hooks/` (#189, #195, #205, #207, #192, #210, #211).
+   `docs/11-ai-agent-controls.md`), until the allowlist rebuild. Eight of the fifteen commits
+   added since `7d4c7fb` change `.claude/hooks/` (#189, #195, #205, #207, #192, #210, #211,
+   #212).
 8. **No previous release, so no SBOM diff** (section 8).
 
 ## Identifier and scope
 
 - **Version:** `v0.1.0` — the first tag and first GitHub release of ToddGBenson/keel
-  (measured 2026-11-22 UTC: `gh api repos/ToddGBenson/keel/tags` and `/releases` both empty;
+  (measured 2026-11-22 16:40 UTC: `gh api repos/ToddGBenson/keel/tags` and `/releases` both empty;
   `verify-artifact` build 80 on `4c19aca`: "no release yet (HTTP 404)").
 - **Commit range:** `3f92a21a0e4fc1b8f86ed571582f88bf07ab083d` (root, 2026-08-07,
   "feat: keel — a governed SDLC base repo") through
-  `4c19aca7acad97b171809f6b9b1b330de5f7c262` (main, 2026-11-21, #188). **144 commits**
-  (`git rev-list --count 4c19aca7`), 297 files changed, +37,548 / −1,137
-  (`git diff --shortstat 3f92a21 4c19aca7`). The previous revision covered the 130 commits
-  through `7d4c7fb`; the 14 since are #193, #191, #204, #189, #195, #205, #207, #208, #192,
-  #209, #210, #211, #206 and #188, in merge order.
+  `0f83e14e7f502a74d642f2d2c1e7114be29cadf7` (main, 2026-11-22, #212). **145 commits**
+  (`git rev-list --count 0f83e14e`), 297 files changed, +37,619 / −1,139
+  (`git diff --shortstat 3f92a21 0f83e14e`). The 2026-11-18 revision covered the 130 commits
+  through `7d4c7fb`; the 15 since are #193, #191, #204, #189, #195, #205, #207, #208, #192,
+  #209, #210, #211, #206, #188 and #212, in merge order.
 - **The commit tagged** is the squash-merge of the PR that adds this record. Its sha does not
-  exist until merge: `<merge commit of this PR>`. The appendix ends at `4c19aca`, and #188 is
-  already in it. The only commit after it in the tagged tree is this PR's own squash-merge, so
-  the tagged tree is `4c19aca`'s tree plus this one file. If anything else lands on `main`
+  exist until merge: `<merge commit of this PR>`. The appendix ends at `0f83e14`, and #188
+  and #212 are already in it. The only commit after it in the tagged tree is this PR's own
+  squash-merge, so the tagged tree is `0f83e14`'s tree plus this one file. The tag goes on
+  that squash-merge commit, not on whatever `main`'s tip is when the tag is pushed. If anything else lands on `main`
   before this PR merges, the appendix is out of date and this record must be refreshed before
   the tag.
-- **Items:** 129 commits carry a PR number; 15 commits (2026-08-07 to 2026-08-08, before
-  branch protection) were pushed to main without a PR. 14 of the 144 are dependency bumps.
-  The full list is the appendix, generated by `git log --reverse 4c19aca7`. Nothing outside it
+- **Items:** 130 commits carry a PR number; 15 commits (2026-08-07 to 2026-08-08, before
+  branch protection) were pushed to main without a PR. 14 of the 145 are dependency bumps.
+  The full list is the appendix, generated by `git log --reverse 0f83e14e`. Nothing outside it
   is included.
 - **What a keel release is:** a tag. keel ships no artifact or service (ADR-0004). The release
-  signs a manifest of the platform-owned files; `build-and-attest` build 84 on `4c19aca` measured **164 platform-owned files**.
+  signs a manifest of the platform-owned files; `build-and-attest` build 85 on `0f83e14` measured **164 platform-owned files**.
 
 ## Change class
 
@@ -128,21 +133,25 @@ It is not an Emergency. It is release evidence and is **not** low-risk; a human 
   binnacle is named as one in G3 records (`evidence/148/g3/self-review.md`,
   `evidence/61360/g3/self-review.md`) and carries paired PRs for most hook changes below.
   GitHub lists no forks of ToddGBenson/keel (`gh api repos/ToddGBenson/keel/forks` is empty,
-  2026-11-22 UTC); a sync-based consumer does not appear there, so the full list is
+  2026-11-22 16:40 UTC); a sync-based consumer does not appear there, so the full list is
   **unverified**.
-- **Changes since the previous revision (`7d4c7fb..4c19aca`), by what they touch:**
+- **Changes since the 2026-11-18 revision (`7d4c7fb..0f83e14`), by what they touch:**
   - **Release path.** #205 (TheHub #61432) gives `scripts/platform-release.sh` a
     per-repository release floor: keel is held to `RELEASE_FLOOR` (`af878f1`), any other
     repository to a reviewed `.github/release-floor` on the trusted ref, a shallow clone is
     refused, and the trusted ref must be a branch, never a tag. #206 (TheHub #62072) adds
     `verify --key` (keyed cosign verification against `.github/cosign.pub` on the trusted ref);
     keyless stays the default and is what `release.yml` and `verify-artifact` run. Neither
-    `.github/release-floor` nor `.github/cosign.pub` exists on `4c19aca`; both are now in
+    `.github/release-floor` nor `.github/cosign.pub` exists on `0f83e14`; both are now in
     CODEOWNERS. This is the verifier `release.yml`'s sign-and-attest step runs (section 8).
   - **Guard hooks.** `guard-bash.sh`: #189 (helpers from system directories only), #205
     (supervisor deadline and signal handling, TheHub #61973; no-jq parse refusal, #61978/#62016;
     `normalize()` and docker compose/run rules, #61987), #192 (refuses an agent pushing or
-    creating a `v*` tag, TheHub #61972), #210 and #211 (follow-ups to #192). `guard-write.sh`:
+    creating a `v*` tag, TheHub #61972), #210 and #211 (follow-ups to #192), #212 (TheHub
+    #62258: starts about half as many processes per run, with every verdict unchanged; it
+    changes `guard-bash.sh`, `selftest.sh` and `test/hook-bypass-corpus.test.py`. Its PR
+    reports the corpus's sorted per-entry verdicts identical in both modes and selftest
+    unchanged; measured in Concourse, `test` build 192 on `0f83e14`: selftest **737 passed, 0 failed** (734 on `4c19aca`, build 190), corpus 1162 hook runs, 0 failed). `guard-write.sh`:
     #195 (NotebookEdit and MultiEdit, TheHub #61391), #205 (evidence path in any spelling,
     TheHub #62022), #207 (round-3 nits, TheHub #62037). `.claude/settings.json` changed in #195.
   - **CI.** #204 (`pr-pick` judges the longest-waiting head first), #208 (`pr-checks` cannot
@@ -157,14 +166,14 @@ It is not an Emergency. It is release evidence and is **not** low-risk; a human 
   (POAM-018 counts it only after a `release-run:` line is appended). POAM-010 — the first run
   of `authorize-release` (its stated closure). CM-5/AC-5 — #192 moves the tag push from a
   convention to a hook refusal plus the `keel-release-tags` ruleset.
-- **AI system impact:** yes. keel ships agent prompts: 15 agents, 17 commands, 18 skills (`platform-integrity` build 187 on `4c19aca`, "Agent / command / skill definitions"). No model is pinned or
+- **AI system impact:** yes. keel ships agent prompts: 15 agents, 17 commands, 18 skills (`platform-integrity` build 189 on `0f83e14`, "Agent / command / skill definitions"). No model is pinned or
   changed by this release; the prompts are what forks' agents run.
 
 ## Gate evidence (G4 clearance per item)
 
-**Unsatisfied on `main`.** Measured, `platform-integrity` build 187 on `4c19aca` (control-liveness, the same output run locally):
+**Unsatisfied on `main`.** Measured, `platform-integrity` build 189 on `0f83e14` (control-liveness; build 187 on `4c19aca` and a local run give the same table):
 
-| Gate | Records on `main` (`4c19aca`) | Ever fired? |
+| Gate | Records on `main` (`0f83e14`) | Ever fired? |
 |---|---|---|
 | G0 Intake | 0 | never |
 | G1 Ready | 1 | yes |
@@ -180,7 +189,8 @@ TheHub #61778 (#178) the `Concourse / keel` check on PR heads. `main` requires
 `Concourse / keel` and `library-allowlist` (both App-pinned, App 4551328), branches up to date
 (`strict: true`), `enforce_admins: true`, linear history, conversation resolution and 0
 approving reviews; the `keel-main` ruleset additionally requires a pull request with squash
-merges only, with no bypass (measured 2026-11-22 UTC, `gh api
+merges only and `require_extra_approval_for_unattributed_changes: true`, with no bypass
+(measured 2026-11-22 16:40 UTC, `gh api
 repos/ToddGBenson/keel/branches/main/protection` and `/rulesets`). MyKronos
 `independent-review` is **not** required. Since the 2026-11-18 operator decision (#205) it is
 no longer POAM-014's closure condition; POAM-014 closes on the required `Concourse / keel`
@@ -191,30 +201,31 @@ another identity, TheHub #61039). 15 early commits had no PR and no check.
 ## Security posture
 
 - **GitHub code scanning, open:** 0. **Dependabot, open:** 0. **Secret scanning, open:** 0
-  (measured 2026-11-22 UTC via `gh api`).
+  (measured 2026-11-22 16:40 UTC via `gh api`).
 - **MyKronos findings register for keel:** not read for this record — **unverified**. The
   MyKronos lanes are listed in section 7; a green lane is not a count of open findings.
-- **Open POA&M entries** (`docs/compliance/poam.md` at `4c19aca`; `scripts/poam.py --list`):
+- **Open POA&M entries** (`docs/compliance/poam.md` at `0f83e14`, unchanged since `4c19aca`; `scripts/poam.py --list`):
 
 | Entry | Risk | Due | State |
 |---|---|---|---|
 | POAM-001 agent write-scope prompt-enforced | Low | review quarterly | Open, compensating controls |
 | POAM-008 solo operation, AC-5 | **High** | on 2nd team member | Open, accepted |
 | POAM-010 G5 authorization has never run | **High** | 2026-12-17 (was 2026-11-21; re-dated by #205, second extension) | In progress — closes when `authorize-release` runs with a recorded approval at v0.1.0, this release |
-| POAM-011 no provenance for what forks receive | Medium | 2026-11-11 | **Overdue** (10 days on 2026-11-21) — closes on this release's evidence |
-| POAM-013 monthly cadence approximated | Low | 2026-11-11 | **Overdue** (10 days on 2026-11-21) |
+| POAM-011 no provenance for what forks receive | Medium | 2026-11-11 | **Overdue** (11 days on 2026-11-22) — closes on this release's evidence |
+| POAM-013 monthly cadence approximated | Low | 2026-11-11 | **Overdue** (11 days on 2026-11-22) |
 | POAM-014 merge gate verifies process, not code | **High** (gated as Critical by `--history`) | 2026-12-17 (was 2026-11-21; re-dated by #205, second extension) | Open in the register. Closure re-scoped by #205 to the required `Concourse / keel` + `library-allowlist` checks with `enforce_admins` true (all live, above) **and** TheHub #62015 merged. #62015 merged as #208 (`3446761`, 2026-11-21), so the stated condition now reads as met; the register has not been updated and this record does not close it |
 | POAM-017 separation of duties agent-enforced | **High** | 2026-12-17 (re-dated by #185) | Open, accepted (ADR-0005). Closure restated by #205: an approval recorded outside the agents' prompt boundary on the exact head, required on `main`; not met (0 reviews, `independent-review` not required) |
-| POAM-018 controls on gates that never ran | **High** | 2026-12-17 (re-dated by #185) | Open. Its register row still says G3 16 and no G4 record; control-liveness on `4c19aca` counts G3 50 and G4 3 |
+| POAM-018 controls on gates that never ran | **High** | 2026-12-17 (re-dated by #185) | Open. Its register row still says G3 16 and no G4 record; control-liveness on `0f83e14` counts G3 50 and G4 3 |
 
-- **Measured drift (2026-11-22 UTC), live against `.sdlc/protection.yaml` and the register:**
+- **Measured drift (2026-11-22 16:40 UTC), live against `.sdlc/protection.yaml` and the register:**
   - Branch protection on `main`: `enforce_admins` **true**, required checks `Concourse / keel`
     and `library-allowlist` (App 4551328), `strict` true, 0 approving reviews,
     `dismiss_stale_reviews` true, `required_signatures` **false**, linear history true, force
     pushes and deletions false, conversation resolution true. Every field
     `.sdlc/protection.yaml` declares matches live.
   - Ruleset `keel-main` (27545123, branch `refs/heads/main`, active, no bypass actors):
-    deletion, non-fast-forward, pull request (squash only, 0 approvals). It has **no**
+    deletion, non-fast-forward, pull request (squash only, 0 approvals,
+    `require_extra_approval_for_unattributed_changes: true`). It has **no**
     signed-commit rule: that rule was live from about 11:58Z to about 14:36Z on 2026-11-18 and
     was dropped by the operator (TheHub #62001), as POAM-009 and `.sdlc/protection.yaml`'s
     `required_signatures` reason record. **Drift in the declaration's own header:** its comment
@@ -222,10 +233,11 @@ another identity, TheHub #61039). 15 early commits had no PR and no check.
     which is not true live.
   - Ruleset `keel-release-tags` (27545130, tag `refs/tags/v*`, active): creation, update,
     deletion and non-fast-forward are restricted, with one bypass actor, the repository admin
-    role (always). Only an admin can create, move or delete `v0.1.0`.
+    role (`RepositoryRole`, always). Only a holder of the admin role can create, move or delete
+    `v0.1.0`.
   - POAM-009 is closed and records the signing history above as a CIS 1.1.9 deviation, not
     reopened. The last 100 commits on `main` are GitHub-verified (`gh api .../commits`, 0
-    unverified), including `4c19aca`.
+    unverified), including `0f83e14`.
   - The daily `protection-drift` job does not run: builds 6 (on `6c7af3b`) and 7 (on
     `a2907fb`) **errored**, "undefined vars: github_protection_token". The comparison above
     was made by hand for this record.
@@ -233,57 +245,62 @@ another identity, TheHub #61039). 15 early commits had no PR and no check.
 ## AI assurance
 
 - **Evals vs. baseline:** **unsatisfied.** Concourse `agent-assurance` build 16 succeeded on
-  `c7ba09e` (2026-11-17), not on `4c19aca`; the job has not run since. Its replay step prints
+  `c7ba09e` (2026-11-17), not on `0f83e14`; the job has not run since. Its replay step prints
   `ADAPT:` and evaluates nothing. Its behavioral section prints "no behavioral run recorded
   yet" and "OVERDUE since 2026-11-12".
 - **Red-team status:** no red-team record exists for this range — unsatisfied.
-- **Guardrail verification:** Concourse `test` build 190 on `4c19aca` ran the guard-hook corpus and the unit suites: guard selftest **734 passed, 0 failed**; hook bypass corpus 318 entries, 1162 hook runs, 0 failed, 44 open (known gaps); **26 of 27** test files passed, 1 not run there (`test/selfreview-check.test.js`, no node on the worker). That one file is not measured on `4c19aca` in Concourse; its only other runner is the GitHub Actions `unit-suites` workflow, which this record does not cite.
+- **Guardrail verification:** Concourse `test` build 192 on `0f83e14` ran the guard-hook corpus and the unit suites: guard selftest **737 passed, 0 failed** (734 in build 190 on `4c19aca`; #212 adds 3); hook bypass corpus 318 entries, 1162 hook runs, 0 failed, 44 open (known gaps); **26 of 27** test files passed, 1 not run there (`test/selfreview-check.test.js`, no node on the worker). That file runs in the Actions `unit-suites` check (section 7).
 
 ## Test evidence
 
-Concourse, pipeline `keel` (team `main`). The table lists, per job, the build whose `repo`
-input is `4c19aca`, measured 2026-11-22 UTC:
+Concourse, pipeline `keel` (team `main`). The table lists, per job, a build whose `repo`
+input is the sha in its row, measured 2026-11-22 UTC. Where no build on `0f83e14` had finished
+at measurement, the row gives the build on `4c19aca`, whose tree differs only by #212's three
+files:
 
-| Job | Build | Result |
-|---|---|---|
-| set-pipeline | 97 | succeeded |
-| lint | 192 | succeeded (was **failed**, build 188 on `98a0bbb`) |
-| test | 190 | succeeded (26 of 27 test files passed, 1 not run; guard selftest 734 passed, 0 failed) |
-| build | 188 | succeeded |
-| sast | 188 | succeeded |
-| secrets | 186 | succeeded |
-| sca | 187 | succeeded |
-| iac | 185 | succeeded |
-| suppression-audit | 187 | succeeded |
-| mykronos-sast | 108 | succeeded |
-| mykronos-secrets | 110 | succeeded |
-| mykronos-atlas | 111.1 | succeeded |
-| mykronos-sca | 52 | succeeded |
-| build-and-attest | 84 | succeeded |
-| verify-artifact | 80 | succeeded (advisory: no release to verify) |
-| platform-integrity | 187 | succeeded |
+| Job | Build | `repo` input | Result |
+|---|---|---|---|
+| set-pipeline | 98 | `0f83e14` | succeeded |
+| lint | 194 | `0f83e14` | succeeded (was **failed**, build 188 on `98a0bbb`) |
+| test | 192 | `0f83e14` | succeeded (26 of 27 test files passed, 1 not run; guard selftest 737 passed, 0 failed) |
+| build | 190 | `0f83e14` | succeeded |
+| sast | 190 | `0f83e14` | succeeded |
+| secrets | 188 | `0f83e14` | succeeded |
+| sca | 189 | `0f83e14` | succeeded |
+| iac | 187 | `0f83e14` | succeeded |
+| suppression-audit | 189 | `0f83e14` | succeeded |
+| mykronos-secrets | 111 | `0f83e14` | succeeded |
+| build-and-attest | 85 | `0f83e14` | succeeded |
+| platform-integrity | 189 | `0f83e14` | succeeded |
+| mykronos-sast | 108 | `4c19aca` | succeeded (build 109 on `0f83e14` still running when measured (16:55 UTC); row gives `4c19aca`) |
+| mykronos-atlas | 111.1 | `4c19aca` | succeeded (no build on `0f83e14` had started when measured) |
+| mykronos-sca | 52 | `4c19aca` | succeeded (build 53 on `0f83e14` still running when measured (16:55 UTC); row gives `4c19aca`) |
+| verify-artifact | 80 | `4c19aca` | succeeded, advisory: no release to verify (build 81 on `0f83e14` still running when measured (16:55 UTC); row gives `4c19aca`) |
 
-The `Concourse / keel` check run on `4c19aca` completed **success** at 04:34:20 UTC
-(`gh api .../commits/4c19aca7/check-runs`). `main` was red at the review of `28a642c2`
-(`98a0bbb`: lint build 188 failed); #210 fixed it.
+The `Concourse / keel` check run on `0f83e14` was still in progress when measured (16:50 UTC).
+On `4c19aca` it completed **success** at 04:34:20 UTC (`gh api .../commits/<sha>/check-runs`).
+`main` was red at the review of `28a642c2` (`98a0bbb`: lint build 188 failed); #210 fixed it.
 
-`pr-checks` judges open PR heads on a ten-minute timer; build 696 ran on `4c19aca` (04:32 UTC) and found no head needing a verdict (#187 at `28a642c`, #181 and #212 already judged), so it posted nothing. This PR's new head is judged by a later `pr-checks` build.
+`pr-checks` judges open PR heads on a ten-minute timer; build 696 ran on `4c19aca` (04:32 UTC) and found no head needing a verdict, so it posted nothing. This PR's new head is judged by a later `pr-checks` build.
 
-Not on `4c19aca`: `agent-assurance` 16 and `compliance-monthly` 16 (both on `c7ba09e`;
+Not on `0f83e14` or `4c19aca`: `agent-assurance` 16 and `compliance-monthly` 16 (both on `c7ba09e`;
 `compliance-monthly` 16 is a scheduling no-op, "MONTHLY BUNDLE NOT DUE", and is not CA-7
 evidence), `container-scan` 1 (on `114c621`, 2026-10-12), and `protection-drift` 7
 **errored** on `a2907fb` ("undefined vars: github_protection_token", as build 6 did on
 `6c7af3b`).
 
-GitHub Actions runs are not cited as evidence in this revision: Actions has been unreliable on
-this account. The release itself still runs on Actions (deployment plan).
+GitHub Actions run ids are not cited as evidence in this record: Actions has been unreliable on
+this account at times. It is running jobs on this repository now: on `4c19aca` and on
+`0f83e14`, the Actions checks `unit-suites` (which runs `test/selfreview-check.test.js`),
+CodeQL, Checkov, Gitleaks and Supply chain completed success (check runs read 2026-11-22
+16:40 UTC). The release itself runs on Actions (deployment plan).
 
 **Staging, DAST, performance vs. NFR:** not applicable — keel has no service or environment
 to stage, scan or load (ADR-0004). Stated, not passed.
 
 ## Supply chain
 
-- **SBOM:** `build-and-attest` build 84 on `4c19aca` generated an SBOM of **58 components**. **No diff:** there is no previous release, and that job's diff step is
+- **SBOM:** `build-and-attest` build 85 on `0f83e14` generated an SBOM of **58 components**. **No diff:** there is no previous release, and that job's diff step is
   an `ADAPT:` stub.
 - **Signature and provenance:** not produced yet — `release.yml` `sign-and-attest` produces
   them after authorization: keyless `cosign sign-blob` of `platform-manifest.txt` (cosign
@@ -298,36 +315,38 @@ to stage, scan or load (ADR-0004). Stated, not passed.
   `fetch-depth: 0` and passes `--trusted-ref origin/main`, and the release commit will
   descend from `af878f1`, so none of these refuses v0.1.0 as planned. #206 (TheHub #62072):
   `verify --key` exists but is not used by `release.yml` or `verify-artifact`, and there is no
-  `.github/cosign.pub` on `4c19aca`; the release is keyless. `test/platform-release.test.py`
-  covers both changes (`test` build 190 on `4c19aca`: `test/platform-release.test.py` all passed, including the `verify --key` and release-floor cases). No real cosign signature has been verified by either
+  `.github/cosign.pub` on `0f83e14`; the release is keyless. `test/platform-release.test.py`
+  covers both changes (`test` build 192 on `0f83e14`: `test/platform-release.test.py` all passed, including the `verify --key` and release-floor cases). No real cosign signature has been verified by either
   change (their self-reviews say the test stubs cosign).
 
 ## Deployment plan
 
-1. #188 is already merged (`4c19aca`). Merge this PR (squash; the repository allows squash
+1. #188 (`4c19aca`) and #212 (`0f83e14`) are already merged. Merge this PR (squash; the repository allows squash
    merges only). `main` requires a branch to be up to date (`strict: true`) and a green
    `Concourse / keel` and `library-allowlist` on its head. If anything merges first, this
    branch must be updated again, which moves its head and makes this record stale (section 2).
    Approve this PR at the head that results, not before. Its squash-merge commit is the
    release commit.
-2. **The operator** creates and pushes tag `v0.1.0` on that commit. An agent cannot:
+2. **The operator** creates and pushes tag `v0.1.0` on this PR's squash-merge commit, not on
+   whatever `main`'s tip is by then. An agent cannot:
    `guard-bash.sh` refuses an agent pushing or creating a `v*` tag (#192, TheHub #61972), and
    names this path: "Push your branch and open a PR; after merge the operator creates the tag
-   and dispatches release.yml." The `keel-release-tags` ruleset also lets only the admin role
+   and dispatches release.yml." The `keel-release-tags` ruleset also lets only the repository admin role
    create a `v*` tag. POAM-010 records this as the operator's Keel-Rulesets-Release step 4.
    The preflight refuses a commit not on `origin/main`.
 3. The operator: Actions → Release → Run workflow with the **tag** as the ref.
 4. `preflight`: tag check, on-main check, `validate-manifest.py`, `validate-platform.py`,
    `validate-pipeline.py`, this record's 13 sections.
-5. `authorize-release` waits for a `production` reviewer (measured 2026-11-22 UTC:
+5. `authorize-release` waits for a `production` reviewer (measured 2026-11-22 16:40 UTC:
    `required_reviewers` `ToddGBenson`; custom deployment policies, branch `main` and tag `v*`).
 6. `sign-and-attest` signs, attests, verifies (with #205's floor and trusted-ref checks) and
    publishes the release with `platform-manifest.txt` and `platform-manifest.sigstore.json`.
 
-Timing: when the operator is available to approve and to watch step 6, and only once GitHub
-Actions runs jobs on this repository: all three jobs are Actions jobs, and Actions has been
-unreliable on this account. No feature flags. Before step 3: Release run **31770313398**
-(dispatched from `main`, 2026-08-14) is still `queued` (measured 2026-11-22 UTC); if it
+Timing: when the operator is available to approve and to watch step 6. All three jobs are
+GitHub Actions jobs. Actions is running jobs on this repository today (section 7), so it does
+not block the release now; if Actions does not start them at dispatch, the release waits for
+it. No feature flags. Before step 3: Release run **31770313398**
+(dispatched from `main`, 2026-08-14) is still `queued` (measured 2026-11-22 16:40 UTC); if it
 starts it fails at the tag check. Cancelling it is the operator's call.
 
 ## Rollback plan
@@ -380,7 +399,7 @@ environment approval on the release run; `authorize-release` records it.
 
 No agent authorizes this release.
 
-## Appendix — every commit in scope (`git log --reverse 4c19aca7`)
+## Appendix — every commit in scope (`git log --reverse 0f83e14e`)
 
 | Commit | Date | Subject |
 |---|---|---|
@@ -528,3 +547,4 @@ No agent authorizes this release.
 | `162ccda` | 2026-11-21 | fix(hooks): ctr_guard sanitises marks before tokenizing (TheHub #61972) (#211) |
 | `6e4a04f` | 2026-11-21 | feat(release): platform-release.sh verify --key, keyed cosign verification against the trusted ref's public key (TheHub #62072) (#206) |
 | `4c19aca` | 2026-11-21 | evidence(g4): first G4 verification record (TheHub #61006, POAM-018) (#188) |
+| `0f83e14` | 2026-11-22 | perf(hooks): guard-bash.sh starts half as many processes, with every verdict unchanged (TheHub #62258) (#212) |
