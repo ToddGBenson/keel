@@ -305,6 +305,12 @@ END {
 }
 AWK
 
+# TheHub #62258 review (B1): the state the reads below fill in on first use starts empty here.
+# Inherited from the environment, guard_cwd_read=1 with a payload_cwd of the caller's choosing
+# skipped the payload's own cwd, so a push of the current branch from a checkout on main read
+# as a push from a feature branch. Nothing the hook reads lazily may come from outside it.
+guard_cwd_read=""; payload_cwd=""; tool_name=""; guard_grep_ran=0
+
 # Extract the command. Prefer jq; fall back to a tolerant sed for environments without it.
 # `type -P`, not `command -v`: jq() is a wrapper function now (#61794), and `command -v`
 # would report it even where no jq binary exists.
