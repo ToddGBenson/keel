@@ -63,6 +63,9 @@ LARGE["self-merge, then 100,000 one-character comment lines"] = MUST_BLOCK["self
 # may take longer than BUDGET_CEILING_S, however slow its one-line time.
 BUDGET_X = 4
 BUDGET_CEILING_S = 50
+# Never under the old absolute 5 s: on a fast box a padded harmless command (every rule on every
+# view) takes more than 4x a one-line one, and that was never a fault.
+BUDGET_FLOOR_S = 5
 # [TheHub #61973, review of #184] A harmless padded command is ALLOWED, so it runs every rule
 # on every view: the slowest decided shape of this padding. It must be quick and allowed.
 HARMLESS_LARGE = {f"`git status`, padded to {len(HARMLESS + PAD) // 1024} KB": "git status" + PAD}
@@ -161,9 +164,9 @@ def main():
             start = time.monotonic()
             run(HARMLESS, clean)
             base = min(base, time.monotonic() - start) if base is not None else time.monotonic() - start
-        budget = min(BUDGET_X * base + 1.0, BUDGET_CEILING_S)
+        budget = min(max(BUDGET_X * base + 1.0, BUDGET_FLOOR_S), BUDGET_CEILING_S)
         print(f"  timing: base {base:.2f} s (`{HARMLESS}`, best of 3) x {BUDGET_X} + 1 s = {budget:.1f} s budget"
-              f" (ceiling {BUDGET_CEILING_S} s)")
+              f" (floor {BUDGET_FLOOR_S} s, ceiling {BUDGET_CEILING_S} s)")
 
         print("a large command: a match is still a match (review #1)")
         for with_jq in ([True, False] if have_jq else [False]):
@@ -189,7 +192,7 @@ def main():
                     why_ok = not capped or "over 256 KB" in err
                     check(f"{mode} {t}: {name} is {verdict}", rc == want and why_ok, f"rc={rc} {err[:200]}")
                     check(f"{mode} {t}: {name} is decided in {took:.1f} s (budget {budget:.1f} s ="
-                          f" {BUDGET_X} x base {base:.2f} s + 1 s, ceiling {BUDGET_CEILING_S} s; best of two)",
+                          f" {BUDGET_X} x base {base:.2f} s + 1 s, floor {BUDGET_FLOOR_S} s, ceiling {BUDGET_CEILING_S} s; best of two)",
                           took < budget, "TOO SLOW: a hook past its timeout lets the call proceed")
 
         print("one helper fails: the hook refuses")
