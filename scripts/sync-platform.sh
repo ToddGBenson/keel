@@ -118,7 +118,26 @@ while IFS= read -r p; do
   info "$p  ($n file(s) differ)"
   changed=$((changed+n))
   if [ "$CHECK_ONLY" = "0" ]; then
-    git checkout "$UPSTREAM_REF" -- "$p" 2>/dev/null || warn "could not update $p"
+    # TheHub #62264: a guard hook is never rewritten in place. bash reads a hook while it runs
+    # it, so a run that starts during an in-place write can read a cut file. Each changed hook
+    # is written to a temporary file beside it and renamed over it, so a reader sees the old
+    # file or the new one, never part of one (the hooks also block on a cut read).
+    while IFS= read -r f; do
+      mode="" blob=""
+      case "$f" in .claude/hooks/*) ;; *) continue ;; esac
+      tmp="$f.sync-$$"
+      # The blob by id, never "<ref>:<path>": Git Bash rewrites an argument holding ":" and "/".
+      read -r mode _ blob _ < <(git ls-tree "$UPSTREAM_REF" -- "$f" 2>/dev/null) || true
+      [ -n "${blob:-}" ] || continue   # gone upstream: left as it is, as checkout leaves it
+      # cat-file --filters writes what checkout would (line endings, filters).
+      if git cat-file --filters --path="$f" "$blob" > "$tmp" 2>/dev/null \
+         && { [ "$mode" != 100755 ] || chmod +x "$tmp"; } && mv -f "$tmp" "$f"; then :
+      else rm -f "$tmp"; warn "could not update $f"; fi
+    done < <(git diff --name-only HEAD "$UPSTREAM_REF" -- "$p" 2>/dev/null)
+    # Every other changed file under the path, as before.
+    if [ -n "$(git diff --name-only HEAD "$UPSTREAM_REF" -- "$p" ':(exclude).claude/hooks/*' 2>/dev/null)" ]; then
+      git checkout "$UPSTREAM_REF" -- "$p" ':(exclude).claude/hooks/*' 2>/dev/null || warn "could not update $p"
+    fi
   fi
 done <<< "$PLATFORM_PATHS"
 [ "$changed" = "0" ] && info "already current"
