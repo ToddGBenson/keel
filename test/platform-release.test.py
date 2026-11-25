@@ -371,6 +371,42 @@ try:
         "github.event.inputs interpolated into run:": (
             gated.replace("run: echo \"$VERSION\"", "run: echo ${{ github.event.inputs.version }}"), 1),
         "not valid YAML": ("jobs: [\n", 1),
+        # Review of keel #217 (2): a job that needs the production job but runs whatever its result.
+        "a signing job with if: always() behind production": (
+            gated.replace("    needs: [authorize]\n", "    needs: [authorize]\n    if: always()\n"), 1),
+        "a signing job with if: ${{ !cancelled() }} behind production": (
+            gated.replace("    needs: [authorize]\n", "    needs: [authorize]\n    if: ${{ !cancelled() }}\n"), 1),
+        "a job between with if: failure()": (
+            gated.replace("    needs: [authorize]\n", "    needs: [mid]\n")
+            + "  mid:\n    needs: authorize\n    if: failure()\n    runs-on: x\n    steps: [{run: 'true'}]\n", 1),
+        "the production job with continue-on-error": (
+            gated.replace("    environment: {name: production}\n",
+                          "    environment: {name: production}\n    continue-on-error: true\n"), 1),
+        # Review of keel #217 (3): bytes, not the locale (cp1252 on Windows refused this).
+        "gated, with a non-ASCII comment": ("# release \u2190 gate\n" + gated, 0),
+        # Review of keel #217 (4): every expression inside run: is judged, not one regex's shape.
+        "inputs['version'] in run:": (
+            gated.replace("run: echo \"$VERSION\"", "run: echo \"${{ inputs['version'] }}\""), 1),
+        "github.event.inputs['version'] in run:": (
+            gated.replace("run: echo \"$VERSION\"", "run: echo \"${{ github.event.inputs['version'] }}\""), 1),
+        "format('{0}', inputs.version) in run:": (
+            gated.replace("run: echo \"$VERSION\"", "run: echo \"${{ format('{0}', inputs.version) }}\""), 1),
+        "toJSON(inputs) in run:": (
+            gated.replace("run: echo \"$VERSION\"", "run: echo '${{ toJSON(inputs) }}'"), 1),
+        "an input through a job output, then needs.*.outputs in run:": (
+            gated.replace("  authorize:\n", "    outputs: {v: '${{ inputs.version }}'}\n  authorize:\n")
+            .replace("    steps: [{run: 'true'}]\n  sign:", "    steps: [{run: 'echo ${{ needs.preflight.outputs.v }}'}]\n  sign:"), 1),
+        "an input through a matrix value in run:": (
+            gated.replace("  preflight:\n    runs-on: x\n",
+                          "  preflight:\n    runs-on: x\n    strategy: {matrix: {c: ['${{ inputs.version }}']}}\n")
+            .replace("run: echo \"$VERSION\"", "run: echo ${{ matrix.c }}"), 1),
+        "github.ref_name (a tag name) in run:": (
+            gated.replace("run: echo \"$VERSION\"", "run: echo ${{ github.ref_name }}"), 1),
+        "an input in with: script: of a script action": (
+            gated.replace("        run: echo \"$VERSION\"\n",
+                          "        uses: actions/github-script@v7\n        with: {script: 'core.info(\"${{ inputs.version }}\")'}\n"), 1),
+        "allowed expressions in run: (secrets, github.sha, github.repository)": (
+            gated.replace("run: echo \"$VERSION\"", "run: echo ${{ github.sha }} ${{ github.repository }} ${{ secrets.T }}"), 0),
     }
     for i, (what, (body, want)) in enumerate(shapes.items()):
         g = tmp / f"gate{i}"
@@ -388,6 +424,44 @@ try:
         else:
             check(f"verify: release.yml {what} -> refused before cosign",
                   rc == 1 and "lacks the G5 gate" in log and called is None, log)
+
+    # Review of keel #217 (1): a merge that resolves release.yml back to a pre-gate version. With a
+    # path, `git log floor..commit` simplifies history and lists no revision, so the file at the
+    # tagged merge was never read. Every commit's file is read now.
+    m = tmp / "gate-merge"
+    subprocess.run(["git", "clone", "-q", fork.as_posix(), m.as_posix()], check=True)
+    mgit = git_cmd(m)
+    subprocess.run([*mgit, "checkout", "-q", "-B", "side", old_sha], check=True)
+    (m / "side.txt").write_text("side\n", encoding="utf-8")
+    subprocess.run([*mgit, "add", "-A"], check=True)
+    subprocess.run([*mgit, "commit", "-q", "-m", "a side branch from before the gate"], check=True)
+    subprocess.run([*mgit, "checkout", "-q", "-B", "main", "origin/main"], check=True)
+    (m / ".github" / "release-floor").write_text(main_sha + "\n", encoding="utf-8")
+    subprocess.run([*mgit, "commit", "-q", "-am", "floor at main"], check=True)
+    old_yml = subprocess.run([*mgit, "show", f"{old_sha}:.github/workflows/release.yml"],
+                             check=True, capture_output=True).stdout
+    subprocess.run([*mgit, "merge", "-q", "--no-commit", "-s", "ours", "side"], check=True, capture_output=True)
+    (m / ".github" / "workflows" / "release.yml").write_bytes(old_yml)
+    subprocess.run([*mgit, "add", "-A"], check=True)
+    subprocess.run([*mgit, "commit", "-q", "-m", "merge side, release.yml resolved to its version"], check=True)
+    subprocess.run([*mgit, "tag", "-f", "v2.0.0"], check=True, capture_output=True)
+    rc, log, called = verify_as("owner/fork", tag="v2.0.0", git_dir=m)
+    check("verify: a merge that resolves release.yml to a pre-gate version -> refused before cosign",
+          rc == 1 and "lacks the G5 gate" in log and called is None, log)
+
+    # A revision with no release.yml (deleted after the floor) has nothing to sign with: it passes.
+    d = tmp / "gate-deleted"
+    subprocess.run(["git", "clone", "-q", fork.as_posix(), d.as_posix()], check=True)
+    dgit = git_cmd(d)
+    subprocess.run([*dgit, "checkout", "-q", "-B", "main", "origin/main"], check=True)
+    (d / ".github" / "release-floor").write_text(main_sha + "\n", encoding="utf-8")
+    (d / ".github" / "workflows" / "release.yml").unlink()
+    subprocess.run([*dgit, "add", "-A"], check=True)
+    subprocess.run([*dgit, "commit", "-q", "-m", "no release workflow"], check=True)
+    subprocess.run([*dgit, "tag", "-f", "v2.0.0"], check=True, capture_output=True)
+    rc, log, called = verify_as("owner/fork", tag="v2.0.0", git_dir=d)
+    check("verify: a revision with no release.yml after a gated floor -> passes (nothing signs there)",
+          rc == 0 and called is not None, log)
 
     # The floor may only move forward: a configured floor behind the default is refused.
     keelish = tmp / "keelish"
