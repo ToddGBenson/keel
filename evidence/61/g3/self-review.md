@@ -1,7 +1,7 @@
 # Self-review — #61
 
 Mode: solo (POAM-008)
-PR: #62   Author: Todd Benson (claude-opus-5, AI-authored)   Date: 2026-08-14
+PR: #62   Author: the system owner (claude-opus-5, AI-authored)   Date: 2026-08-14
 
 Correcting the register after the repository was made public. Two closures, one refusal to
 close, one new entry.

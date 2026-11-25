@@ -1,7 +1,7 @@
 # Self-review — #70
 
 Mode: solo (POAM-008)
-PR: #71   Author: Todd Benson (claude-opus-5, AI-authored)   Date: 2026-08-15
+PR: #71   Author: the system owner (claude-opus-5, AI-authored)   Date: 2026-08-15
 
 Making the fork path actually work, in response to "get it in a state to start a fork of a new
 app". Two day-one defects, both found by running `scripts/bootstrap.sh` for the first time.

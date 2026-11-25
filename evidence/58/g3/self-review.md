@@ -1,7 +1,7 @@
 # Self-review — #58
 
 Mode: solo (POAM-008)
-PR: #59   Author: Todd Benson (claude-opus-5, AI-authored)   Date: 2026-08-14
+PR: #59   Author: the system owner (claude-opus-5, AI-authored)   Date: 2026-08-14
 
 Restoring the merge gate on a self-hosted Actions runner, after the hosted ones stopped
 starting jobs at all.

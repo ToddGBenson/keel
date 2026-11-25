@@ -65,19 +65,19 @@ def register(*rows):
 
 # Each row is a real shape from docs/compliance/poam.md.
 ROW_REDATED_HIGH = ("| POAM-010 | Release authorization weakened | CM-3, AC-5 | **High** | "
-                    "Todd Benson | ~~2026-09-12~~ **2026-11-21** (extended once, 2026-10-22) | "
+                    "System owner | ~~2026-09-12~~ **2026-11-21** (extended once, 2026-10-22) | "
                     "In progress — the Concourse job is **deleted** |")
 ROW_NODATE_LOW = ("| POAM-001 | Agent write-scope is prompt-enforced | AIC-3 | Low | "
                   "*unassigned* | review quarterly | Open — compensating controls in place |")
-ROW_NODATE_HIGH = ("| POAM-008 | **Solo operation** | AC-5 | **High** | Todd Benson | "
+ROW_NODATE_HIGH = ("| POAM-008 | **Solo operation** | AC-5 | **High** | System owner | "
                    "on 2nd team member | Open — accepted with compensating controls |")
 ROW_OVERDUE_HIGH = ("| POAM-014 | **The merge gate verifies process** | CM-3 | **High** | "
-                    "Todd Benson | 2026-09-14 | Open — measured 2026-10-22 |")
-ROW_OVERDUE_MEDIUM = ("| POAM-011 | No provenance for forks | SR-4(3) | Medium | Todd Benson | "
+                    "System owner | 2026-09-14 | Open — measured 2026-10-22 |")
+ROW_OVERDUE_MEDIUM = ("| POAM-011 | No provenance for forks | SR-4(3) | Medium | System owner | "
                       "2026-09-01 | Open |")
-ROW_CLOSED_LATE = ("| POAM-016 | **Two release paths** | CM-3 | Medium | Todd Benson | 2026-09-14 | "
+ROW_CLOSED_LATE = ("| POAM-016 | **Two release paths** | CM-3 | Medium | System owner | 2026-09-14 | "
                    "**Closed 2026-10-22** (TheHub #60935, 38 days late) — one path |")
-ROW_FUTURE_CRITICAL = ("| POAM-019 | Something critical | SI-7 | **Critical** | Todd Benson | "
+ROW_FUTURE_CRITICAL = ("| POAM-019 | Something critical | SI-7 | **Critical** | System owner | "
                        "2026-12-01 | Open |")
 
 
@@ -271,13 +271,13 @@ check("a file with no register table at all still fails (exit 2)", rc == 2, f"rc
 # Status vocabulary is poam.md's own (Entry format, `Status` row):
 # Open / In progress / Risk accepted / Completed. Completed is closed, as is the
 # `Closed` this register uses in practice. Anything else is not guessed at.
-ROW_COMPLETED_LATE_HIGH = ("| POAM-020 | Done thing | CM-3 | **High** | Todd Benson | "
+ROW_COMPLETED_LATE_HIGH = ("| POAM-020 | Done thing | CM-3 | **High** | System owner | "
                            "2026-09-01 | Completed — evidence in #150 |")
-ROW_COMPLETED_BOLD = ("| POAM-021 | Done thing | CM-3 | Medium | Todd Benson | "
+ROW_COMPLETED_BOLD = ("| POAM-021 | Done thing | CM-3 | Medium | System owner | "
                       "2026-09-01 | **Completed 2026-10-01** — rescan clean |")
-ROW_RISK_ACCEPTED = ("| POAM-022 | Accepted thing | CM-3 | **High** | Todd Benson | "
+ROW_RISK_ACCEPTED = ("| POAM-022 | Accepted thing | CM-3 | **High** | System owner | "
                      "2026-09-01 | Risk accepted — ADR-0009, review 2027-01 |")
-ROW_UNKNOWN_STATUS = ("| POAM-023 | Typo thing | CM-3 | **High** | Todd Benson | "
+ROW_UNKNOWN_STATUS = ("| POAM-023 | Typo thing | CM-3 | **High** | System owner | "
                       "2026-09-01 | Done |")
 rc, out = run_poam(register(ROW_COMPLETED_LATE_HIGH, ROW_COMPLETED_BOLD), "--today", "2026-10-23")
 check("`Completed` counts as closed: `open POA&M findings: 0`",
@@ -360,7 +360,7 @@ check("--history: `High — reason` downgraded to Medium still fails --check",
 # said "16 read". A status the current vocabulary does not know must not hide
 # that version's Risk -- otherwise: add High beside a bad status, fix the
 # status, downgrade.
-ROW_REOPENED = ("| POAM-005 | Repo visibility | AC-3 | Low | Todd Benson | review quarterly | "
+ROW_REOPENED = ("| POAM-005 | Repo visibility | AC-3 | Low | System owner | review quarterly | "
                 "**REOPENED** — repo made private |")
 rc, out = run_history([register(ROW_OVERDUE_HIGH, ROW_REOPENED),
                        register(ROW_DOWNGRADED, ROW_NODATE_LOW)],

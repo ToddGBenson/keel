@@ -1,7 +1,7 @@
 # Self-review — TheHub #60935
 
 Mode: solo (POAM-008)
-PR: #143   Author: Todd Benson (Claude Opus 5.5, AI-authored)   Date: 2026-10-22
+PR: #143   Author: the system owner (Claude Opus 5.5, AI-authored)   Date: 2026-10-22
 
 Close the three overdue POA&M entries (POAM-010, POAM-014, POAM-016), and apply the operator
 decision that `sca` and `container-scan` fail when there is nothing to scan.

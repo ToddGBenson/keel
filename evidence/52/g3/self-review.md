@@ -1,7 +1,7 @@
 # Self-review — #52
 
 Mode: solo (POAM-008)
-PR: #53   Author: Todd Benson (claude-opus-5, AI-authored)   Date: 2026-08-14
+PR: #53   Author: the system owner (claude-opus-5, AI-authored)   Date: 2026-08-14
 
 Follow-on work that was pushed to the #51 branch after #51 had already merged, plus a merge
 of `main` to pick up PR #45.

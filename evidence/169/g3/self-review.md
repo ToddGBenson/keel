@@ -1,7 +1,7 @@
 # Self-review — #169
 
 Mode: solo (POAM-008)
-PR: #170   Author: Todd Benson (Claude Opus 5.5, AI-authored)   Date: 2026-11-05
+PR: #170   Author: the system owner (Claude Opus 5.5, AI-authored)   Date: 2026-11-05
 verdict: pass
 
 `sast` is OOM-killed during CodeQL evaluation (builds 135, 138, 141: exit 137). This PR runs the

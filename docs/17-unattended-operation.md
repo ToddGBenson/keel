@@ -53,7 +53,7 @@ you already pay for it, a local run likely costs nothing extra.
 # Run nightly at 02:00. Adjust the path.
 $action  = New-ScheduledTaskAction -Execute "C:\Program Files\Git\bin\bash.exe" `
            -Argument "-lc './keel sprint --unattended >> sprint/done/nightly.log 2>&1'" `
-           -WorkingDirectory "C:\Users\tgb_\Documents\Projects\Coders"
+           -WorkingDirectory "$env:USERPROFILE\Documents\Projects\Coders"
 
 $trigger = New-ScheduledTaskTrigger -Daily -At 2am
 
