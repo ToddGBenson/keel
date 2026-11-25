@@ -302,4 +302,6 @@ case "$npath" in
 esac
 shopt -u nocasematch
 
-guard_allow   # the verdict, and the last line of this file (TheHub #62264)
+# The verdict, and the last line of this file: a read cut anywhere before or inside it ends
+# with no verdict, or with a command that does not exist, and blocks (TheHub #62264).
+guard_allow
