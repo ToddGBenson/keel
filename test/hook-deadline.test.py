@@ -47,6 +47,12 @@ HARMLESS = "git status"
 # Credential-shaped content built from parts, as selftest.sh's fixtures are.
 AKIA = "AKI" + "A" + "ABCDEFGHIJKLMNOP"
 DEADLINE_S = 2
+# TheHub #62268 / #62098: a harmless command run through a copy with a real deadline. The 2 s copy
+# blocked `git status` on a small worker (2.3 s there), so that case uses a copy whose deadline is
+# RELATIVE: BUDGET_X times the live hook's best-of-3 time for the same command, plus 1 s, never
+# under DEADLINE_S and never over BUDGET_CEILING_S (under Claude Code's 60 s hook timeout).
+BUDGET_X = 4
+BUDGET_CEILING_S = 50
 failures = []
 
 
@@ -70,13 +76,13 @@ def write_payload(path, content):
                        "tool_input": {"file_path": path, "content": content}}).encode()
 
 
-def test_copy(hook: Path, dest: Path) -> Path:
+def test_copy(hook: Path, dest: Path, deadline: int = DEADLINE_S) -> Path:
     """A copy whose marked lines are rewritten: a short deadline, and (once the hook pins
     PATH, TheHub #61843) the pin made a no-op so this test's PATH reaches it."""
     text = hook.read_text(encoding="utf-8")
-    text = re.sub(r"^guard_deadline=\d+(?=\s+# guard-deadline\b)", f"guard_deadline={DEADLINE_S}", text, flags=re.M)
+    text = re.sub(r"^guard_deadline=\d+(?=\s+# guard-deadline\b)", f"guard_deadline={deadline}", text, flags=re.M)
     text = re.sub(r"^PATH=.*# guard-path-pin\b.*$", ": # guard-path-pin (test copy)", text, flags=re.M)
-    out = dest / f"{hook.stem}.test-copy{hook.suffix}"
+    out = dest / f"{hook.stem}.test-copy-{deadline}{hook.suffix}"
     out.write_text(text, encoding="utf-8")
     return out
 
@@ -143,8 +149,14 @@ def main():
             check(f"{name}: blocked at the deadline", rc == 2 and "deadline" in err, f"rc={rc} {err[:200]}")
             check(f"{name}: returned in {took:.1f} s, the hung helper did not hold the pipes",
                   took < DEADLINE_S + 6, f"took {took:.1f} s")
-        rc, err, took = run(bash_copy, bash_payload(HARMLESS), clean)
-        check(f"no hung helper: `{HARMLESS}` is still allowed, in {took:.1f} s", rc == 0, f"rc={rc} {err[:200]}")
+        base = min(run(test_copy(BASH_HOOK, copies, BUDGET_CEILING_S), bash_payload(HARMLESS), clean, timeout=60)[2]
+                   for _ in range(3))
+        relative = max(DEADLINE_S, min(int(BUDGET_X * base + 1.0 + 0.999), BUDGET_CEILING_S))
+        print(f"  timing: base {base:.2f} s (`{HARMLESS}`, best of 3) x {BUDGET_X} + 1 s -> a {relative} s deadline"
+              f" (at least {DEADLINE_S} s, ceiling {BUDGET_CEILING_S} s)")
+        rc, err, took = run(test_copy(BASH_HOOK, copies, relative), bash_payload(HARMLESS), clean, timeout=60)
+        check(f"no hung helper: `{HARMLESS}` is still allowed, in {took:.1f} s (deadline {relative} s)",
+              rc == 0, f"rc={rc} {err[:200]}")
         text = BASH_HOOK.read_text(encoding="utf-8")
         live = re.findall(r"^guard_deadline=(\d+)\s+# guard-deadline\b", text, re.M)
         check("the live hook's deadline is one marked line, under the 60 s hook timeout",
@@ -184,8 +196,11 @@ def main():
         print("size: a command over 1 MiB is refused without being read")
         big = HARMLESS + "".join(f"\n# padding line {i:06d} " + "x" * 57 for i in range(14000))
         rc, err, took = run(BASH_HOOK, bash_payload(big), clean, timeout=60)
-        check(f"a {len(big) // 1024} KB harmless command is refused, in {took:.1f} s",
-              rc == 2 and "1048576 bytes" in err and took < 10, f"rc={rc} took {took:.1f} s {err[:200]}")
+        # TheHub #62098: within BUDGET_X x the one-line time + 1 s (base, above), not an absolute 10 s.
+        limit = min(BUDGET_X * base + 1.0, BUDGET_CEILING_S)
+        check(f"a {len(big) // 1024} KB harmless command is refused, in {took:.1f} s (budget {limit:.1f} s ="
+              f" {BUDGET_X} x base {base:.2f} s + 1 s)",
+              rc == 2 and "1048576 bytes" in err and took < limit, f"rc={rc} took {took:.1f} s {err[:200]}")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 

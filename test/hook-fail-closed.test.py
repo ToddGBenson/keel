@@ -55,7 +55,14 @@ LARGE = {f"{name}, padded to {len(cmd + PAD) // 1024} KB": cmd + PAD for name, c
 # command must now be decided well inside the timeout. The dense case (100,000 one-character
 # comment lines) is the worst shape for the per-line rescan.
 LARGE["self-merge, then 100,000 one-character comment lines"] = MUST_BLOCK["self-merge"] + "\n#" * 100000
-BUDGET_S = 5   # the fixed hook takes ~0.7 s on the Linux runner; main took 7-16 s there
+# TheHub #62098: the budget is RELATIVE, measured on the same box in the same run, as in
+# hook-tag-timing and hook-heredoc-timing: BUDGET_X times the hook's best-of-3 time for a one-line
+# command, plus 1 s. An absolute 5 s flaked on a loaded linux worker (KB-177 padded to 390 KB in
+# 18.8 s, keel #189), while a per-kilobyte cost still shows as a multiple of the one-line time.
+# The ceiling stays absolute: past Claude Code's 60 s hook timeout the call proceeds, so no box
+# may take longer than BUDGET_CEILING_S, however slow its one-line time.
+BUDGET_X = 4
+BUDGET_CEILING_S = 50
 # [TheHub #61973, review of #184] A harmless padded command is ALLOWED, so it runs every rule
 # on every view: the slowest decided shape of this padding. It must be quick and allowed.
 HARMLESS_LARGE = {f"`git status`, padded to {len(HARMLESS + PAD) // 1024} KB": "git status" + PAD}
@@ -148,6 +155,16 @@ def main():
         rc, err = run(HARMLESS, clean)
         check(f"`{HARMLESS}` is allowed", rc == 0, f"rc={rc} {err[:200]}")
 
+        # TheHub #62098: the baseline, the same hook copy and tool directory, best of 3.
+        base = None
+        for _ in range(3):
+            start = time.monotonic()
+            run(HARMLESS, clean)
+            base = min(base, time.monotonic() - start) if base is not None else time.monotonic() - start
+        budget = min(BUDGET_X * base + 1.0, BUDGET_CEILING_S)
+        print(f"  timing: base {base:.2f} s (`{HARMLESS}`, best of 3) x {BUDGET_X} + 1 s = {budget:.1f} s budget"
+              f" (ceiling {BUDGET_CEILING_S} s)")
+
         print("a large command: a match is still a match (review #1)")
         for with_jq in ([True, False] if have_jq else [False]):
             d = clean if with_jq else tool_dir(tmp, with_jq=False)
@@ -165,14 +182,15 @@ def main():
                         start = time.monotonic()
                         rc, err = run(cmd, d, t)
                         took = min(took, time.monotonic() - start) if took is not None else time.monotonic() - start
-                        if took < BUDGET_S:
+                        if took < budget:
                             break
                     verdict = "allowed" if want == 0 else "blocked"
                     # Review of keel #205: a row the cap decides must say so.
                     why_ok = not capped or "over 256 KB" in err
                     check(f"{mode} {t}: {name} is {verdict}", rc == want and why_ok, f"rc={rc} {err[:200]}")
-                    check(f"{mode} {t}: {name} is decided in {took:.1f} s (budget {BUDGET_S} s, best of two)",
-                          took < BUDGET_S, "TOO SLOW: a hook past its timeout lets the call proceed")
+                    check(f"{mode} {t}: {name} is decided in {took:.1f} s (budget {budget:.1f} s ="
+                          f" {BUDGET_X} x base {base:.2f} s + 1 s, ceiling {BUDGET_CEILING_S} s; best of two)",
+                          took < budget, "TOO SLOW: a hook past its timeout lets the call proceed")
 
         print("one helper fails: the hook refuses")
         for tool in FAULTY:
