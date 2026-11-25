@@ -330,6 +330,65 @@ try:
     check("verify: a configured floor that is not in the repository -> refused",
           rc == 1 and "release-floor" in log and called is None, log)
 
+    # TheHub #62061: a fork's floor is held to the G5 gate, not only to "it is on the trusted ref".
+    # Lowered to the root commit, whose release.yml signs from injected input, it is refused, though
+    # no keel floor stands in the way here.
+    (fork / ".github" / "release-floor").write_text(old_sha + "\n", encoding="utf-8")
+    subprocess.run([*fgit, "commit", "-q", "-am", "lower the floor to the root"], check=True)
+    rc, log, called = verify_as("owner/fork", tag="v0.9.0", git_dir=fork)
+    check("verify: a fork floor LOWERED to a commit whose release.yml lacks the G5 gate -> refused",
+          rc == 1 and "lacks the G5 gate" in log and old_sha[:12] in log and called is None, log)
+    rc, log, called = verify_as("owner/fork", tag="v1.2.0", git_dir=fork)
+    check("verify: ... and a tag above it is refused too (the walk starts at the floor)",
+          rc == 1 and "lacks the G5 gate" in log and called is None, log)
+    # The shapes the gate reads, one per fork: each release.yml committed on main after a safe floor.
+    gated = ("permissions: {contents: read}\n"
+             "jobs:\n"
+             "  preflight:\n"
+             "    runs-on: x\n"
+             "    steps:\n"
+             "      - env: {VERSION: '${{ inputs.version }}'}\n"
+             "        run: echo \"$VERSION\"\n"
+             "  authorize:\n"
+             "    needs: preflight\n"
+             "    environment: {name: production}\n"
+             "    runs-on: x\n"
+             "    steps: [{run: 'true'}]\n"
+             "  sign:\n"
+             "    needs: [authorize]\n"
+             "    permissions: {id-token: write}\n"
+             "    runs-on: x\n"
+             "    steps: [{run: 'true'}]\n")
+    shapes = {
+        "gated: inputs through env:, id-token behind production": (gated, 0),
+        "id-token: write at the top level": (gated.replace("{contents: read}", "{id-token: write}"), 1),
+        "write-all at the top level": (gated.replace("{contents: read}", "write-all"), 1),
+        "a signing job that needs no production job": (gated.replace("    needs: [authorize]\n", ""), 1),
+        "a signing job with write-all, outside production": (
+            gated.replace("    needs: [authorize]\n", "").replace("{id-token: write}", "write-all"), 1),
+        "an input interpolated into run:": (
+            gated.replace("run: echo \"$VERSION\"", "run: echo \"${{ inputs.version }}\""), 1),
+        "github.event.inputs interpolated into run:": (
+            gated.replace("run: echo \"$VERSION\"", "run: echo ${{ github.event.inputs.version }}"), 1),
+        "not valid YAML": ("jobs: [\n", 1),
+    }
+    for i, (what, (body, want)) in enumerate(shapes.items()):
+        g = tmp / f"gate{i}"
+        subprocess.run(["git", "clone", "-q", fork.as_posix(), g.as_posix()], check=True)
+        ggit = git_cmd(g)
+        subprocess.run([*ggit, "checkout", "-q", "-B", "main", "origin/main"], check=True)
+        (g / ".github" / "release-floor").write_text(main_sha + "\n", encoding="utf-8")
+        (g / ".github" / "workflows" / "release.yml").write_text(body, encoding="utf-8")
+        subprocess.run([*ggit, "add", "-A"], check=True)
+        subprocess.run([*ggit, "commit", "-q", "-m", what], check=True)
+        subprocess.run([*ggit, "tag", "-f", "v2.0.0"], check=True, capture_output=True)
+        rc, log, called = verify_as("owner/fork", tag="v2.0.0", git_dir=g)
+        if want == 0:
+            check(f"verify: release.yml {what} -> passes", rc == 0 and called is not None, log)
+        else:
+            check(f"verify: release.yml {what} -> refused before cosign",
+                  rc == 1 and "lacks the G5 gate" in log and called is None, log)
+
     # The floor may only move forward: a configured floor behind the default is refused.
     keelish = tmp / "keelish"
     subprocess.run(["git", "clone", "-q", tree.as_posix(), keelish.as_posix()], check=True)
