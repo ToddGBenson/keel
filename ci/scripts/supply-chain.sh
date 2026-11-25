@@ -26,6 +26,45 @@ install_cosign() {
   cosign version
 }
 
+# The commit a release tag names, from GitHub's git refs API, dereferencing an
+# annotated tag. Prints the 40-hex sha, or nothing (and returns 1) when the API
+# does not answer 200 or the answer is not a commit. TheHub #62323.
+resolve_tag_commit() {
+  local tag="$1" dir="$2" hdr code body sha type
+  case "$tag" in
+    *[!A-Za-z0-9._-]*|'') return 1 ;;
+  esac
+  hdr="${dir}/ref-headers"
+  ( umask 077; printf 'Accept: application/vnd.github+json\n' > "$hdr" )
+  if [ -n "${GITHUB_API_TOKEN:-}" ]; then
+    ( umask 077; printf 'Authorization: Bearer %s\n' "$GITHUB_API_TOKEN" >> "$hdr" )
+  fi
+  body="${dir}/tag-ref.json"
+  code="$(curl -sSL -H "@${hdr}" -o "$body" -w '%{http_code}' \
+            "https://api.github.com/repos/${REPO_SLUG}/git/ref/tags/${tag}")" || code="000"
+  for _ in 1 2 3; do
+    [ "$code" = "200" ] || { rm -f "$hdr"; return 1; }
+    read -r type sha < <(python - "$body" <<'PY'
+import json, re, sys
+o = (json.load(open(sys.argv[1], encoding="utf-8")) or {}).get("object") or {}
+t, s = str(o.get("type") or ""), str(o.get("sha") or "")
+print(t if t in ("commit", "tag") else "-", s if re.fullmatch(r"[0-9a-f]{40}", s) else "-")
+PY
+) || { rm -f "$hdr"; return 1; }
+    [ "$sha" != "-" ] || { rm -f "$hdr"; return 1; }
+    case "$type" in
+      commit) rm -f "$hdr"; printf '%s\n' "$sha"; return 0 ;;
+      tag)
+        code="$(curl -sSL -H "@${hdr}" -o "$body" -w '%{http_code}' \
+                  "https://api.github.com/repos/${REPO_SLUG}/git/tags/${sha}")" || code="000"
+        ;;
+      *) rm -f "$hdr"; return 1 ;;
+    esac
+  done
+  rm -f "$hdr"
+  return 1
+}
+
 case "${STAGE}" in
 
   build-and-attest)
@@ -156,6 +195,28 @@ PY
     fi
     curl -sSfL -o "${rel}/platform-manifest.txt" "$manifest_url"
     curl -sSfL -o "${rel}/platform-manifest.sigstore.json" "$bundle_url"
+
+    # [TheHub #62323] A release tag this checkout does not have. Concourse
+    # reuses the resource cache of a commit it fetched before the tag was
+    # pushed (`fetch_tags` acts at clone time only), so after a release the
+    # checkout of main holds the tagged commit but not the tag: build 82 was
+    # refused for v0.1.0 that way. Ask GitHub's refs API for the tag's commit,
+    # and tag it locally ONLY when that commit is already in this checkout.
+    # Nothing else is relaxed: the verifier still requires the commit on main
+    # at or above the release floor, and keyless verification pins the
+    # certificate to that commit, so a wrong answer here is refused there.
+    # When the API cannot answer, the tag stays missing and the verifier
+    # refuses it by name, as before.
+    if ! git -C repo rev-parse --verify --quiet "refs/tags/${tag}^{commit}" >/dev/null; then
+      echo "tag ${tag} is not in this checkout (a resource cache cloned before it was pushed); asking the refs API"
+      resolved="$(resolve_tag_commit "$tag" "$rel")" || resolved=""
+      if [ -n "$resolved" ] && git -C repo cat-file -e "${resolved}^{commit}" 2>/dev/null; then
+        git -C repo tag "$tag" "$resolved"
+        echo "tag ${tag} -> ${resolved} (refs API), a commit this checkout already holds"
+      else
+        echo "the refs API did not put ${tag} on a commit in this checkout; the verifier decides" >&2
+      fi
+    fi
 
     # --tree: the signed manifest must also be what the tag actually holds,
     # byte for byte. Checked against a detached checkout of the TAG, not of
