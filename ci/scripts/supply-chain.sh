@@ -48,7 +48,9 @@ resolve_tag_commit() {
 import json, re, sys
 o = (json.load(open(sys.argv[1], encoding="utf-8")) or {}).get("object") or {}
 t, s = str(o.get("type") or ""), str(o.get("sha") or "")
-print(t if t in ("commit", "tag") else "-", s if re.fullmatch(r"[0-9a-f]{40}", s) else "-")
+# Bytes and a bare \n: a Windows Python's text stdout would end the line \r\n.
+sys.stdout.buffer.write(("%s %s\n" % (t if t in ("commit", "tag") else "-",
+                                      s if re.fullmatch(r"[0-9a-f]{40}", s) else "-")).encode())
 PY
 ) || { rm -f "$hdr"; return 1; }
     [ "$sha" != "-" ] || { rm -f "$hdr"; return 1; }
