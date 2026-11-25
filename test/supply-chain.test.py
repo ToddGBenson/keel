@@ -105,8 +105,13 @@ print("supply-chain.sh STAGE=verify")
 FLOOR_LINE = re.compile(r'^RELEASE_FLOOR="[0-9a-f]{40}"$', re.M)
 
 
-def run_verify_stage(release, cosign_rc=0, status=None, env_extra=None, manifest_text=None):
+def run_verify_stage(release, cosign_rc=0, status=None, env_extra=None, manifest_text=None,
+                     drop_tag=None, tag_ref=None):
     """`release`: None = no body; else the latest-release JSON body.
+    `drop_tag`: a tag deleted from repo/ before the stage runs, the shape of a
+    Concourse resource cache cloned before the release tag was pushed (TheHub
+    #62323). `tag_ref`: what the GitHub git refs API answers for it, as
+    {"ref": <git/ref/tags body or None for a 404>, "tags": {sha: body}}.
     `status`: the releases API's HTTP status (default 200 with a body, else 404).
     `manifest_text`: the release's platform-manifest.txt asset; by default the
     true manifest of v1.2.0's tree (what release.yml would have signed).
@@ -157,6 +162,9 @@ def run_verify_stage(release, cosign_rc=0, status=None, env_extra=None, manifest
         git(repo, "commit", "-q", "-m", "a later main commit")
         shas = {t: git(repo, "rev-parse", f"{t}^{{commit}}", capture=True)
                 for t in ("v0.9.0", "v1.2.0", "v6.6.6")}
+        shas["v1.2.0-tag-object"] = git(repo, "rev-parse", "v1.2.0", capture=True)
+        if drop_tag:
+            git(repo, "tag", "-d", drop_tag)
         (tmp / "artifact").mkdir()
         fixtures = tmp / "fixtures"
         fixtures.mkdir()
@@ -282,6 +290,52 @@ check("verify-artifact: a release tagged on main BELOW the release floor -> FAIL
 rc, log, called, clog, _ = run_verify_stage(signed("v6.6.6"), cosign_rc=0)
 check("verify-artifact: a release tagged on a commit NOT on main -> FAILS, even with a valid signature",
       rc != 0 and "not reachable from" in log and called is None, log)
+
+# TheHub #62323 (keel verify-artifact build 82): Concourse reuses the resource
+# cache of a commit it fetched BEFORE the release tag was pushed, so the
+# checkout has the tagged commit but not the tag. The stage asks GitHub's refs
+# API for the tag's commit and tags it locally, only when that commit is
+# already in the checkout; every check after that is unchanged.
+def lightweight(shas):
+    return {"ref": {"ref": "refs/tags/v1.2.0", "object": {"type": "commit", "sha": shas["v1.2.0"]}}}
+
+
+def annotated(shas):
+    obj = shas["v1.2.0-tag-object"]
+    return {"ref": {"ref": "refs/tags/v1.2.0", "object": {"type": "tag", "sha": obj}},
+            "tags": {obj: {"object": {"type": "commit", "sha": shas["v1.2.0"]}}}}
+
+
+rc, log, called, clog, shas = run_verify_stage(signed(), cosign_rc=0, drop_tag="v1.2.0",
+                                               tag_ref=lightweight)
+check("verify-artifact: the checkout lacks the release tag (a cache cloned before it) -> "
+      "resolved through the refs API, verified, passes (TheHub #62323)",
+      rc == 0 and "verified:" in log and "tree: ok" in log, log)
+check("verify-artifact: ... the certificate is still pinned to the tag's commit",
+      flag(called, "--certificate-github-workflow-sha") == shas["v1.2.0"], str(called))
+check("verify-artifact: ... and the log says the tag came from the API, not the checkout",
+      "not in this checkout" in log, log)
+
+rc, log, called, clog, shas = run_verify_stage(signed(), cosign_rc=0, drop_tag="v1.2.0",
+                                               tag_ref=annotated)
+check("verify-artifact: a missing ANNOTATED release tag is dereferenced to its commit -> passes",
+      rc == 0 and "verified:" in log
+      and flag(called, "--certificate-github-workflow-sha") == shas["v1.2.0"], log)
+
+rc, log, called, clog, _ = run_verify_stage(signed(), cosign_rc=0, drop_tag="v1.2.0",
+                                            tag_ref={"ref": None})
+check("verify-artifact: a missing tag the refs API cannot resolve -> still REFUSED by name, before cosign",
+      rc != 0 and "is not in the repository" in log and called is None, log)
+
+rc, log, called, clog, _ = run_verify_stage(
+    signed(), cosign_rc=0, drop_tag="v1.2.0",
+    tag_ref={"ref": {"ref": "refs/tags/v1.2.0", "object": {"type": "commit", "sha": "e" * 40}}})
+check("verify-artifact: a missing tag the API puts on a commit NOT in the checkout -> REFUSED, before cosign",
+      rc != 0 and "is not in the repository" in log and called is None, log)
+
+rc, log, called, clog, _ = run_verify_stage(signed(), cosign_rc=0)
+check("verify-artifact: a tag already in the checkout -> the refs API is never asked",
+      "/git/ref/" not in clog, clog)
 
 rc, log = bash([SUPPLY_SH.as_posix()], cwd=ROOT,
                env_extra={"STAGE": "verify", "COSIGN_VERSION": "x", "COSIGN_SHA256": "y", "REPO_SLUG": ""})
