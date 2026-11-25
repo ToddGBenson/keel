@@ -997,6 +997,20 @@ for guard_raw_case in 'evidence/142/a\u001b[31m.sarif' 'evidence/142/b.md.\u0007
 done
 
 echo ""
+echo "guard-write.sh — a drive prefix read as a POSIX host reads it (TheHub #62217)"
+# On Linux and macOS a drive prefix is part of a relative path: C:/142/a.sarif from a cwd inside
+# evidence/ is evidence/C:/142/a.sarif. Both readings are judged on every host.
+check "C:/ path from a cwd inside evidence/"        block "$(cwpayload 'C:/142/g4/a.sarif' 'x' '/repo/evidence')"      guard-write.sh
+check "c:/ path, lower case drive"                  block "$(cwpayload 'c:/142/a.sarif' 'x' '/repo/evidence')"         guard-write.sh
+check "C:\ path, backslashes"                      block "$(cwpayload 'C:\142\a.sarif' 'x' '/repo/evidence')"         guard-write.sh
+check "C:/.. popped, from inside evidence/"         block "$(cwpayload 'C:/../142/a.sarif' 'x' '/repo/evidence')"      guard-write.sh
+check "C:/x/../.. back into evidence/"              block "$(cwpayload 'C:/x/../../evidence/142/a.sarif' 'x' '/repo/src')" guard-write.sh
+check "C: drive-relative from inside evidence/"     block "$(cwpayload 'C:142/a.sarif' 'x' '/repo/evidence')"          guard-write.sh
+check "C:/ path from a cwd outside evidence/"       allow "$(cwpayload 'C:/src/a.py' 'x = 1' '/repo')"                 guard-write.sh
+check "a Windows absolute path, Windows cwd"        allow "$(cwpayload 'C:/repo/src/a.py' 'x = 1' 'C:/repo')"          guard-write.sh
+check "C:/ path, no cwd"                            allow "$(wpayload 'C:/repo/src/a.py' 'x = 1')"                    guard-write.sh
+check "C:/ evidence path, no cwd"                   block "$(wpayload 'C:/repo/evidence/142/a.sarif' 'x')"           guard-write.sh
+echo ""
 echo "──────────────────────────────────────────────────────────────"
 printf '  %d passed, %d failed\n' "$pass" "$fail"
 if [ "$fail" -ne 0 ]; then

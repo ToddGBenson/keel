@@ -171,7 +171,13 @@ guard_unread() { # the path cannot be judged: refuse it (review of #197, rounds 
 # A line feed or carriage return in the path or the cwd would split it below; no real file
 # name an agent writes has one.
 case "$path${pcwd:-}" in *$'\n'*|*$'\r'*) guard_unread "with a line break" "it contains a line feed or carriage return" ;; esac
-npath=$(guard_slash "$path")
+# TheHub #62217: the path is judged by guard_judge_path below, once as written and, for a path
+# with a drive prefix (C:/x, C:x), once more as a POSIX host reads it: there a drive prefix is not
+# a drive but the first segment's name, so C:/142/a.sarif from a cwd inside evidence/ is
+# evidence/C:/142/a.sarif. The hook cannot know which host the write lands on (the same checkout
+# is used from Git Bash and from Linux), so either reading inside evidence/ is refused.
+guard_judge_path() { # $1: the path to resolve and judge; sets npath and cpath
+npath=$(guard_slash "$1")
 pcwd=$(guard_slash "${pcwd:-}")
 case "$npath" in
   /*|[A-Za-z]:/*) ;;                                     # absolute
@@ -248,6 +254,13 @@ case "$npath" in
     esac
     ;;
 esac
+shopt -u nocasematch
+}
+case "$path" in
+  [A-Za-z]:*) [ -n "${pcwd:-}" ] && guard_judge_path "${pcwd}/${path}" ;;   # the POSIX reading (TheHub #62217)
+esac
+guard_judge_path "$path"   # as written, last: npath is this reading for the notices below
+shopt -s nocasematch
 
 # ── Secrets never enter source (AIC-5, IA-5) ────────────────────────────────
 # Coarse on purpose — the CI secret scan is authoritative. This catches the obvious case
