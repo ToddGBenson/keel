@@ -176,6 +176,14 @@ def run_verify_stage(release, cosign_rc=0, status=None, env_extra=None, manifest
         (fixtures / "platform-manifest.txt").write_bytes(
             manifest_text.encode("utf-8") if manifest_text is not None else true_manifest.read_bytes())
         (fixtures / "platform-manifest.sigstore.json").write_text('{"stub": 1}\n', encoding="utf-8")
+        tr = tag_ref(shas) if callable(tag_ref) else (tag_ref or {})
+        ref_code = 200 if tr.get("ref") is not None else 404
+        (fixtures / "tagref.json").write_text(json.dumps(tr.get("ref") or {"message": "Not Found"}),
+                                              encoding="utf-8")
+        tagobj = fixtures / "tagobj"
+        tagobj.mkdir()
+        for sha, body in (tr.get("tags") or {}).items():
+            (tagobj / sha).write_text(json.dumps(body), encoding="utf-8")
         stubs = tmp / "stubs"
         stubs.mkdir()
         argv = tmp / "cosign-argv.txt"
@@ -201,6 +209,11 @@ def run_verify_stage(release, cosign_rc=0, status=None, env_extra=None, manifest
                    '  */sigstore/cosign/*) exit 0 ;;\n'
                    f'  */releases/latest) cp "{fixtures.as_posix()}/latest.json" "$out";'
                    f' [ -n "$wfmt" ] && printf "%s" "{code}"; exit 0 ;;\n'
+                   f'  */git/ref/tags/*) cp "{fixtures.as_posix()}/tagref.json" "$out";'
+                   f' [ -n "$wfmt" ] && printf "%s" "{ref_code}"; exit 0 ;;\n'
+                   f'  */git/tags/*) if [ -f "{tagobj.as_posix()}/${{url##*/}}" ]; then'
+                   f' cp "{tagobj.as_posix()}/${{url##*/}}" "$out"; c=200; else echo "{{}}" > "$out"; c=404; fi;'
+                   ' [ -n "$wfmt" ] && printf "%s" "$c"; exit 0 ;;\n'
                    f'  https://assets.invalid/*) cp "{fixtures.as_posix()}/${{url##*/}}" "$out" ;;\n'
                    '  *) echo "unexpected url $url" >&2; exit 99 ;;\n'
                    'esac\n')
