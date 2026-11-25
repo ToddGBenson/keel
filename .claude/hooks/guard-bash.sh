@@ -75,7 +75,10 @@ if [ "${1:-}" != "--guard-worker" ]; then
   }
   guard_err="$(command mktemp 2>/dev/null)" || { guard_block "it cannot create its output file"; exit 2; }
   set -m
-  "$BASH" "${BASH_SOURCE[0]}" --guard-worker <&0 >/dev/null 2>"$guard_err" &
+  # TheHub #62264: the guard proves it reached its verdict by writing this line, which no command
+  # can predict, as the last line of its stderr; an exit 0 without it is a block.
+  guard_nonce="guard-bash.sh verdict: allow $$.$RANDOM.$RANDOM"
+  guard_nonce=$guard_nonce "$BASH" "${BASH_SOURCE[0]}" --guard-worker <&0 >/dev/null 2>"$guard_err" &
   guard_wpid=$!
   # The timer: USR1 at the deadline, USR2 at once if it cannot sleep (no timer, no verdict).
   ( if command sleep "$guard_deadline"; then kill -USR1 "$$"; else kill -USR2 "$$"; fi ) </dev/null >/dev/null 2>&1 &
@@ -87,11 +90,19 @@ if [ "${1:-}" != "--guard-worker" ]; then
     guard_stop "$guard_tpid"
     [ -n "${2:-}" ] && guard_stop "$guard_wpid"
     # Builtins only: a broken cat must not hide the guard's own message.
+    local guard_seen=0
     while IFS= read -r guard_line || [ -n "$guard_line" ]; do
+      [ "$guard_line" = "$guard_nonce" ] && { guard_seen=1; continue; }
       printf '%s\n' "$guard_line" >&3
     done < "$guard_err"
     command rm -f "$guard_err" 2>/dev/null
     if [ -n "${2:-}" ]; then guard_block "$2"; exit 2; fi
+    if [ "$1" -eq 0 ]; then
+      [ "$guard_seen" -eq 1 ] || { guard_block "the guard ended without reaching its verdict (its file may have been rewritten while it started, TheHub #62264)"; exit 2; }
+      # The settings entry allows only when this line is the hook's whole stdout (TheHub #62264), so a
+      # run of this file that bash cut short, before this point, is a block too.
+      printf '%s\n' "guard-verdict: allow"
+    fi
     exit "$1"
   }
   trap 'guard_done 2 "it ran past its own deadline of ${guard_deadline} s"' USR1
@@ -226,6 +237,11 @@ guard_exit() { # builtins only: a broken helper must not be able to hide its own
       why="a helper it reads the command with failed (${lines[*]:1:3})"
     elif [ "$rc" -ne 0 ]; then
       why="it stopped with exit $rc before reaching a verdict"
+    elif [ "$guard_verdict" != 1 ]; then
+      # TheHub #62264: bash reads a script as it runs it. A hook file rewritten in place while a run
+      # starts (a branch switch, a platform sync) can end early, and bash then exits 0 at the cut:
+      # an allow nobody decided. An allow now comes only from guard_allow, which the rules end in.
+      why="it reached the end of what it read without a verdict (its file may have been rewritten while it ran)"
     fi
   fi
   command rm -f "$guard_faults" 2>/dev/null
@@ -238,8 +254,15 @@ guard_exit() { # builtins only: a broken helper must not be able to hide its own
     } >&2
     exit 2
   fi
+  [ "$rc" -eq 0 ] && [ -n "${guard_nonce:-}" ] && printf '%s\n' "$guard_nonce" >&2
   exit "$rc"
 }
+# TheHub #62264: guard_allow is the only allow. It is called where a verdict is reached (the last
+# line of this file, and an empty command or path), so a run whose file was cut short ends without
+# one, and guard_exit turns that into a block. The verdict starts empty here: nothing inherited
+# from the environment may stand in for it.
+guard_verdict=""
+guard_allow() { guard_verdict=1; exit 0; }
 trap guard_exit EXIT
 # TheHub #61973: a catchable signal ends the shell with 128+N, which Claude Code reads as
 # an allow. Each one is recorded as a fault and turned into a block by the EXIT trap.
@@ -381,7 +404,7 @@ else
   fi
 fi
 
-[ -z "$cmd" ] && exit 0
+[ -z "$cmd" ] && guard_allow
 
 # TheHub #61038 review: a backslash-newline continues the command, for every command.
 # This was done for curl only, so `gh api --method POST \<newline> .../pending_deployments`
@@ -2223,4 +2246,4 @@ if [[ $raw_cmd =~ $ctr_eng_re ]] || [[ $ps_cmd =~ $ctr_eng_re ]]; then
   [ "$ps_cmd" != "$raw_cmd" ] && ctr_guard "$ps_cmd"
 fi
 
-exit 0
+guard_allow   # the verdict, and the last line of this file (TheHub #62264)
