@@ -1992,6 +1992,420 @@ entries:
     command: "bash -c 'docker run --rm -l \"\x01\" python:3.12 pytest'"
     expect: block
     why: "an uncapped test container inside nested text, a command mark in a label"
+  # The push tokenizer, ported to keel from binnacle #107 (the review of keel #211): a mark in -o's
+  # value ended the push there, and what was left read as a push of the current branch.
+  - id: KB-331
+    hook: guard-bash.sh
+    class: quoted-separator
+    source: TheHub#61972
+    command: "git push -o \"\x01\" origin feat:main"
+    expect: block
+    why: "move main through a refspec, the refspec cut off by a command mark in a push option"
+  - id: KB-332
+    hook: guard-bash.sh
+    class: quoted-separator
+    source: TheHub#61972
+    command: "git push -o \"\x01\" origin +main"
+    expect: block
+    why: "force push main, the refspec cut off by a command mark in a push option"
+  # TheHub #62239: three bypasses the review of binnacle #107 / keel #211 found outside #62237.
+  # The push tokenizer kept a $(...) inside its word, so a push the substitution runs was never
+  # judged; a shell -c body was read one level down only (by the PowerShell view's quote removal);
+  # and the container tokenizer split a word at a newline inside its quotes.
+  - id: KB-333
+    hook: guard-bash.sh
+    class: substitution-wrapper
+    source: TheHub#62239
+    command: "echo $(git push origin +main)"
+    expect: block
+    why: "force push main, the push run by a $(...) substitution"
+  - id: KB-334
+    hook: guard-bash.sh
+    class: substitution-wrapper
+    source: TheHub#62239
+    command: "x=$(git push origin feat:main)"
+    expect: block
+    why: "move main through a refspec, the push run by a $(...) substitution"
+  - id: KB-335
+    hook: guard-bash.sh
+    class: substitution-wrapper
+    source: TheHub#62239
+    command: "bash -c 'bash -c \"docker run --rm python:3.12 pytest\"'"
+    expect: block
+    why: "an uncapped test container, two shells deep"
+  - id: KB-336
+    hook: guard-bash.sh
+    class: quoted-separator
+    source: TheHub#62239
+    command: "docker run --rm -l \"a\n--cpus=2\n--memory=2g\" python:3.12 pytest"
+    expect: block
+    why: "an uncapped test container, a label whose lines read as the caps"
+  # TheHub #62071: a heredoc body was a command only when the segment's first word was literally a
+  # shell, so every other launcher, and a redirect or pipe after <<EOF, left the body unread.
+  - id: KB-337
+    hook: guard-bash.sh
+    class: container
+    source: TheHub#62071
+    command: "bash <<EOF > run.log\ndocker run --rm python:3.12 pytest\nEOF"
+    expect: block
+    why: "an uncapped test container, fed through a redirect after <<EOF"
+  - id: KB-338
+    hook: guard-bash.sh
+    class: container
+    source: TheHub#62071
+    command: "bash <<EOF > run.log\ndocker compose run --rm backend pytest\nEOF"
+    expect: block
+    why: "a test suite in the production service, fed through a redirect after <<EOF"
+  - id: KB-339
+    hook: guard-bash.sh
+    class: container
+    source: TheHub#62071
+    command: "bash <<EOF | tee run.log\ndocker run --rm python:3.12 pytest\nEOF"
+    expect: block
+    why: "an uncapped test container, fed through a pipeline after <<EOF"
+  - id: KB-340
+    hook: guard-bash.sh
+    class: container
+    source: TheHub#62071
+    command: "bash <<EOF | tee run.log\ndocker compose run --rm backend pytest\nEOF"
+    expect: block
+    why: "a test suite in the production service, fed through a pipeline after <<EOF"
+  - id: KB-341
+    hook: guard-bash.sh
+    class: container
+    source: TheHub#62071
+    command: "bash <<EOF && echo done\ndocker run --rm python:3.12 pytest\nEOF"
+    expect: block
+    why: "an uncapped test container, fed through && after <<EOF"
+  - id: KB-342
+    hook: guard-bash.sh
+    class: container
+    source: TheHub#62071
+    command: "bash <<EOF && echo done\ndocker compose run --rm backend pytest\nEOF"
+    expect: block
+    why: "a test suite in the production service, fed through && after <<EOF"
+  - id: KB-343
+    hook: guard-bash.sh
+    class: container
+    source: TheHub#62071
+    command: "BASH.EXE <<EOF\ndocker run --rm python:3.12 pytest\nEOF"
+    expect: block
+    why: "an uncapped test container, fed through a shell named BASH.EXE"
+  - id: KB-344
+    hook: guard-bash.sh
+    class: container
+    source: TheHub#62071
+    command: "BASH.EXE <<EOF\ndocker compose run --rm backend pytest\nEOF"
+    expect: block
+    why: "a test suite in the production service, fed through a shell named BASH.EXE"
+  - id: KB-345
+    hook: guard-bash.sh
+    class: container
+    source: TheHub#62071
+    command: "/usr/bin/bash <<EOF\ndocker run --rm python:3.12 pytest\nEOF"
+    expect: block
+    why: "an uncapped test container, fed through a shell by its path"
+  - id: KB-346
+    hook: guard-bash.sh
+    class: container
+    source: TheHub#62071
+    command: "/usr/bin/bash <<EOF\ndocker compose run --rm backend pytest\nEOF"
+    expect: block
+    why: "a test suite in the production service, fed through a shell by its path"
+  - id: KB-347
+    hook: guard-bash.sh
+    class: container
+    source: TheHub#62071
+    command: "sudo -u ci bash <<EOF\ndocker run --rm python:3.12 pytest\nEOF"
+    expect: block
+    why: "an uncapped test container, fed through sudo -u x bash"
+  - id: KB-348
+    hook: guard-bash.sh
+    class: container
+    source: TheHub#62071
+    command: "sudo -u ci bash <<EOF\ndocker compose run --rm backend pytest\nEOF"
+    expect: block
+    why: "a test suite in the production service, fed through sudo -u x bash"
+  - id: KB-349
+    hook: guard-bash.sh
+    class: container
+    source: TheHub#62071
+    command: "env -i bash <<EOF\ndocker run --rm python:3.12 pytest\nEOF"
+    expect: block
+    why: "an uncapped test container, fed through env -i bash"
+  - id: KB-350
+    hook: guard-bash.sh
+    class: container
+    source: TheHub#62071
+    command: "env -i bash <<EOF\ndocker compose run --rm backend pytest\nEOF"
+    expect: block
+    why: "a test suite in the production service, fed through env -i bash"
+  - id: KB-351
+    hook: guard-bash.sh
+    class: container
+    source: TheHub#62071
+    command: "nice -n 5 sh <<EOF\ndocker run --rm python:3.12 pytest\nEOF"
+    expect: block
+    why: "an uncapped test container, fed through nice -n 5 sh"
+  - id: KB-352
+    hook: guard-bash.sh
+    class: container
+    source: TheHub#62071
+    command: "nice -n 5 sh <<EOF\ndocker compose run --rm backend pytest\nEOF"
+    expect: block
+    why: "a test suite in the production service, fed through nice -n 5 sh"
+  - id: KB-353
+    hook: guard-bash.sh
+    class: container
+    source: TheHub#62071
+    command: "timeout 600 bash <<EOF\ndocker run --rm python:3.12 pytest\nEOF"
+    expect: block
+    why: "an uncapped test container, fed through timeout 600 bash"
+  - id: KB-354
+    hook: guard-bash.sh
+    class: container
+    source: TheHub#62071
+    command: "timeout 600 bash <<EOF\ndocker compose run --rm backend pytest\nEOF"
+    expect: block
+    why: "a test suite in the production service, fed through timeout 600 bash"
+  - id: KB-355
+    hook: guard-bash.sh
+    class: container
+    source: TheHub#62071
+    command: "wsl bash <<EOF\ndocker run --rm python:3.12 pytest\nEOF"
+    expect: block
+    why: "an uncapped test container, fed through wsl bash"
+  - id: KB-356
+    hook: guard-bash.sh
+    class: container
+    source: TheHub#62071
+    command: "wsl bash <<EOF\ndocker compose run --rm backend pytest\nEOF"
+    expect: block
+    why: "a test suite in the production service, fed through wsl bash"
+  - id: KB-357
+    hook: guard-bash.sh
+    class: container
+    source: TheHub#62071
+    command: "wsl <<EOF\ndocker run --rm python:3.12 pytest\nEOF"
+    expect: block
+    why: "an uncapped test container, fed through wsl alone"
+  - id: KB-358
+    hook: guard-bash.sh
+    class: container
+    source: TheHub#62071
+    command: "wsl <<EOF\ndocker compose run --rm backend pytest\nEOF"
+    expect: block
+    why: "a test suite in the production service, fed through wsl alone"
+  - id: KB-359
+    hook: guard-bash.sh
+    class: container
+    source: TheHub#62071
+    command: "pwsh -NoProfile <<EOF\ndocker run --rm python:3.12 pytest\nEOF"
+    expect: block
+    why: "an uncapped test container, fed through pwsh"
+  - id: KB-360
+    hook: guard-bash.sh
+    class: container
+    source: TheHub#62071
+    command: "pwsh -NoProfile <<EOF\ndocker compose run --rm backend pytest\nEOF"
+    expect: block
+    why: "a test suite in the production service, fed through pwsh"
+  - id: KB-361
+    hook: guard-bash.sh
+    class: container
+    source: TheHub#62071
+    command: "powershell.exe <<EOF\ndocker run --rm python:3.12 pytest\nEOF"
+    expect: block
+    why: "an uncapped test container, fed through powershell.exe"
+  - id: KB-362
+    hook: guard-bash.sh
+    class: container
+    source: TheHub#62071
+    command: "powershell.exe <<EOF\ndocker compose run --rm backend pytest\nEOF"
+    expect: block
+    why: "a test suite in the production service, fed through powershell.exe"
+  - id: KB-363
+    hook: guard-bash.sh
+    class: container
+    source: TheHub#62071
+    command: "source /dev/stdin <<EOF\ndocker run --rm python:3.12 pytest\nEOF"
+    expect: block
+    why: "an uncapped test container, fed through source /dev/stdin"
+  - id: KB-364
+    hook: guard-bash.sh
+    class: container
+    source: TheHub#62071
+    command: "source /dev/stdin <<EOF\ndocker compose run --rm backend pytest\nEOF"
+    expect: block
+    why: "a test suite in the production service, fed through source /dev/stdin"
+  - id: KB-365
+    hook: guard-bash.sh
+    class: container
+    source: TheHub#62071
+    command: ". /dev/stdin <<EOF\ndocker run --rm python:3.12 pytest\nEOF"
+    expect: block
+    why: "an uncapped test container, fed through . /dev/stdin"
+  - id: KB-366
+    hook: guard-bash.sh
+    class: container
+    source: TheHub#62071
+    command: ". /dev/stdin <<EOF\ndocker compose run --rm backend pytest\nEOF"
+    expect: block
+    why: "a test suite in the production service, fed through . /dev/stdin"
+  - id: KB-367
+    hook: guard-bash.sh
+    class: container
+    source: TheHub#62071
+    command: "docker exec -i scratch sh <<EOF\ndocker run --rm python:3.12 pytest\nEOF"
+    expect: block
+    why: "an uncapped test container, fed through docker exec -i <ctr> sh"
+  - id: KB-368
+    hook: guard-bash.sh
+    class: container
+    source: TheHub#62071
+    command: "docker exec -i scratch sh <<EOF\ndocker compose run --rm backend pytest\nEOF"
+    expect: block
+    why: "a test suite in the production service, fed through docker exec -i <ctr> sh"
+  - id: KB-369
+    hook: guard-bash.sh
+    class: container
+    source: TheHub#62071
+    command: "xargs -I{} sh -c '{}' <<EOF\ndocker run --rm python:3.12 pytest\nEOF"
+    expect: block
+    why: "an uncapped test container, fed through xargs sh -c"
+  - id: KB-370
+    hook: guard-bash.sh
+    class: container
+    source: TheHub#62071
+    command: "xargs -I{} sh -c '{}' <<EOF\ndocker compose run --rm backend pytest\nEOF"
+    expect: block
+    why: "a test suite in the production service, fed through xargs sh -c"
+  - id: KB-371
+    hook: guard-bash.sh
+    class: container
+    source: TheHub#62071
+    command: "cat <<EOF | bash\ndocker run --rm python:3.12 pytest\nEOF"
+    expect: block
+    why: "an uncapped test container, fed through cat <<EOF | bash"
+  - id: KB-372
+    hook: guard-bash.sh
+    class: container
+    source: TheHub#62071
+    command: "cat <<EOF | bash\ndocker compose run --rm backend pytest\nEOF"
+    expect: block
+    why: "a test suite in the production service, fed through cat <<EOF | bash"
+  - id: KB-373
+    hook: guard-bash.sh
+    class: container
+    source: TheHub#62071
+    command: "bash <<< 'docker run --rm python:3.12 pytest'"
+    expect: block
+    why: "an uncapped test container, fed through a here-string to bash"
+  - id: KB-374
+    hook: guard-bash.sh
+    class: container
+    source: TheHub#62071
+    command: "bash <<< 'docker compose run --rm backend pytest'"
+    expect: block
+    why: "a test suite in the production service, fed through a here-string to bash"
+  - id: KB-375
+    hook: guard-bash.sh
+    class: container
+    source: TheHub#62071
+    command: "cat <<EOF\nx $(docker run --rm python:3.12 pytest)\nEOF"
+    expect: block
+    why: "an uncapped test container, fed through $() in an unquoted heredoc to cat"
+  - id: KB-376
+    hook: guard-bash.sh
+    class: container
+    source: TheHub#62071
+    command: "cat <<EOF\nx $(docker compose run --rm backend pytest)\nEOF"
+    expect: block
+    why: "a test suite in the production service, fed through $() in an unquoted heredoc to cat"
+  - id: KB-377
+    hook: guard-bash.sh
+    class: container
+    source: TheHub#62071
+    command: "git commit -F - <<EOF\nx `docker run --rm python:3.12 pytest`\nEOF"
+    expect: block
+    why: "an uncapped test container, fed through a backtick in an unquoted heredoc to git"
+  - id: KB-378
+    hook: guard-bash.sh
+    class: container
+    source: TheHub#62071
+    command: "git commit -F - <<EOF\nx `docker compose run --rm backend pytest`\nEOF"
+    expect: block
+    why: "a test suite in the production service, fed through a backtick in an unquoted heredoc to git"
+  - id: KB-379
+    hook: guard-bash.sh
+    class: container
+    source: TheHub#62071
+    command: "bash <<$'EOF'\ndocker run --rm python:3.12 pytest\nEOF"
+    expect: block
+    why: "an uncapped test container, fed through <<$'EOF'"
+  - id: KB-380
+    hook: guard-bash.sh
+    class: container
+    source: TheHub#62071
+    command: "bash <<$'EOF'\ndocker compose run --rm backend pytest\nEOF"
+    expect: block
+    why: "a test suite in the production service, fed through <<$'EOF'"
+  - id: KB-381
+    hook: guard-bash.sh
+    class: container
+    source: TheHub#62071
+    command: "bash <<\"E F\"\ndocker run --rm python:3.12 pytest\nE F"
+    expect: block
+    why: "an uncapped test container, fed through <<\"E F\""
+  - id: KB-382
+    hook: guard-bash.sh
+    class: container
+    source: TheHub#62071
+    command: "bash <<\"E F\"\ndocker compose run --rm backend pytest\nE F"
+    expect: block
+    why: "a test suite in the production service, fed through <<\"E F\""
+  - id: KB-383
+    hook: guard-bash.sh
+    class: container
+    source: TheHub#62071
+    command: "bash <<\\EOF\ndocker run --rm python:3.12 pytest\nEOF"
+    expect: block
+    why: "an uncapped test container, fed through <<\\EOF"
+  - id: KB-384
+    hook: guard-bash.sh
+    class: container
+    source: TheHub#62071
+    command: "bash <<\\EOF\ndocker compose run --rm backend pytest\nEOF"
+    expect: block
+    why: "a test suite in the production service, fed through <<\\EOF"
+  - id: KB-385
+    hook: guard-bash.sh
+    class: container
+    source: TheHub#62071
+    command: ": # <<X\ndocker run --rm python:3.12 pytest\nX"
+    expect: block
+    why: "an uncapped test container, fed through : # <<X is a comment"
+  - id: KB-386
+    hook: guard-bash.sh
+    class: container
+    source: TheHub#62071
+    command: ": # <<X\ndocker compose run --rm backend pytest\nX"
+    expect: block
+    why: "a test suite in the production service, fed through : # <<X is a comment"
+  - id: KB-387
+    hook: guard-bash.sh
+    class: container
+    source: TheHub#62071
+    command: "cat <<$'E\\x46'\ndocker run --rm python:3.12 pytest\nEF"
+    expect: block
+    why: "an uncapped test container, fed through an unreadable delimiter"
+  - id: KB-388
+    hook: guard-bash.sh
+    class: container
+    source: TheHub#62071
+    command: "cat <<$'E\\x46'\ndocker compose run --rm backend pytest\nEF"
+    expect: block
+    why: "a test suite in the production service, fed through an unreadable delimiter"
 
   # ── TheHub #61391: guard-write.sh on every write tool ─────────────────────────
   # guard-write.sh was bound to Write|Edit and read only file_path and content /

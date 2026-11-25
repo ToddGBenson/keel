@@ -1161,7 +1161,8 @@ esac
 # and `docker-compose exec postgres` reach the same containers. Docker's global options
 # may stand before the subcommand (docker --context x exec, docker compose -f f.yml exec).
 # backend-staging and postgres-staging are other services and stay allowed.
-# Not read: a runner fed on stdin or a heredoc (docker exec -i ... sh < run-tests.sh), a
+# Not read: a runner fed on stdin from a file (docker exec -i ... sh < run-tests.sh; a heredoc
+# fed to a shell is read since TheHub #62071), a
 # runner under another name (pytest-3, a script or Makefile target), python -m unittest,
 # and a container reached by id or renamed (docs/11-ai-agent-controls.md lists them).
 prod_ctr='(thehub-backend|thehub-postgres|mykronos-backend)'
@@ -1194,7 +1195,7 @@ ctr_route="Run it in a capped test container through the shared lock: bash scrip
 ctr_unq() { local v=$1; v=${v//\"/}; v=${v//\'/}; printf '%s' "$v"; }
 # Review of #198, round 4 (timing): the same, in-process, into $_cu. A subshell per word made a
 # 300-line heredoc fork thousands of times.
-ctr_u() { _cu=${1//\"/}; _cu=${_cu//\'/}; }
+ctr_u() { _cu=${1//\"/}; _cu=${_cu//\'/}; _cu=${_cu//$'\004'/ }; }   # \004: a newline inside the word (TheHub #62239)
 ctr_is_runner() { # $1: the command line (entrypoint and arguments), quotes removed
   local c ws
   read -r -a ws <<< "$1"                                    # one space between words, none at the ends
@@ -1343,6 +1344,7 @@ read -r -d '' push_tok_awk <<'AWK'
 # The test mirrors push_judge's own reading of the words before the command (assignments and
 # the same wrappers), so a dropped segment is one push_judge would have returned from unread.
 function emit(x, lx) {
+  gsub(/\n/, "\004", x)   # TheHub #62239: a newline inside a quoted word stays in it (\004 until judged)
   seg = seg x "\n"
   if (decided) return
   lx = tolower(x)
@@ -1422,11 +1424,11 @@ push_judge() { # $@: the words of one invocation
       # A shell -c body is a command of its own: judge it the same way (review round 2).
       local k=$((i + 1))
       while [ "$k" -lt "$n" ]; do
-        case "${w[k]}" in -*c*) [ $((k + 1)) -lt "$n" ] && push_guard "${w[k+1]}"; return 0 ;; -*) ;; *) return 0 ;; esac
+        case "${w[k]}" in -*c*) [ $((k + 1)) -lt "$n" ] && push_guard "${w[k+1]//$'\004'/$'\n'}"; return 0 ;; -*) ;; *) return 0 ;; esac
         k=$((k + 1))
       done
       return 0 ;;
-    eval) push_guard "${w[*]:i+1}"; return 0 ;;
+    eval) a="${w[*]:i+1}"; push_guard "${a//$'\004'/$'\n'}"; return 0 ;;
   esac
   [ "$isgit" -eq 1 ] || return 0
   i=$((i + 1))
@@ -1520,13 +1522,15 @@ push_judge() { # $@: the words of one invocation
   esac
   return 0
 }
+push_depth=0
 push_guard() { # $1: one view of the command
-  local toks=() seg=() t src=$1
+  local toks=() seg=() t bodies=() b src=$1
   # The tokenizer ends a command at a \001 mark (heredoc bodies use \002 and \003). One written into
   # the text, as a control character inside a quoted argument, would end the command there and leave
   # the rest judged as a push with no refspec, which on main reads as a push of main. As ? it is a
-  # word this hook cannot read, as in tag_guard (TheHub #61972).
-  src=${src//[$'\001\002\003']/?}
+  # word this hook cannot read, as in tag_guard (TheHub #61972). \004 holds a newline inside a word
+  # (TheHub #62239), so one written into the text is a ? too.
+  src=${src//[$'\001\002\003\004']/?}
   mapfile -t toks < <(printf '%s' "$src" | LC_ALL=C awk "$push_tok_awk")
   toks+=($'\001')
   for t in "${toks[@]}"; do
@@ -1536,65 +1540,124 @@ push_guard() { # $1: one view of the command
     fi
     seg+=("$t")
   done
+  # TheHub #62239: the tokenizer keeps a $(...) inside the word it stands in, so a push the
+  # substitution runs (echo $(git push origin +main)) was never judged. The body of every $(...)
+  # and backtick is a command of its own, as in ctr_guard; a newline in a body ends a command
+  # there (nl=";"), so `$(cd x<newline>git push ...)` is two commands, not a cd with arguments.
+  case "$src" in *'$('*|*'`'*) ;; *) return 0 ;; esac
+  push_depth=$((push_depth + 1))
+  [ "$push_depth" -gt 6 ] && block "a command with substitutions nested more than 6 deep, which this hook does not unfold. Write it flatter; an ordinary command does not nest that far." "AC-5, CM-5"
+  mapfile -t bodies < <(printf '%s' "$src" | LC_ALL=C awk -v nl=';' -v hdsub="$guard_hdsub" "$ctr_subst_awk")
+  for b in "${bodies[@]}"; do [ -n "$b" ] && push_guard "$b"; done
+  push_depth=$((push_depth - 1))
 }
+# TheHub #62071: the heredoc reader the container tokenizer and the substitution reader share.
+# The delimiter is read as bash reads it: quotes and a backslash removed ("E F" is one word with a
+# space), $'...' as '...'. A form this hook cannot read the same way (a $'...' with an escape, a
+# quote left open, an unquoted $ or backtick, a newline) opens no heredoc: what follows is then
+# read as commands, which can only block more (fail closed). hquo[k] says whether any part was
+# quoted: bash expands $(...) and backticks in the body of an unquoted heredoc only.
+read -r -d '' HD_AWK <<'AWK' || true
+function hd_open(   i0, dash, dl, e, x, qd, ansi) {   # i on the first "<" of "<<"; 1 when a heredoc opens
+  i0 = i; i++; dash = 0; if (substr(s, i + 1, 1) == "-") { dash = 1; i++ }
+  while (substr(s, i + 1, 1) ~ /[ \t]/) i++
+  dl = ""; qd = 0
+  while (i < n) {
+    e = substr(s, i + 1, 1)
+    if (e ~ /[ \t\n;|&<>()]/) break
+    i++; ansi = 0
+    if (e == "$" && substr(s, i + 1, 1) == "'") { i++; e = "'"; ansi = 1 }   # $'...': its escapes are decoded
+    if (e == "'" || e == "\"") {
+      qd = 1; x = ""
+      while (i < n && substr(s, i + 1, 1) != e) { i++; x = x substr(s, i, 1) }
+      if (i >= n || ((ansi || e == "\"") && x ~ /[\\$`]/)) { i = i0 + 1; return 0 }
+      i++; dl = dl x; continue
+    }
+    if (e == "\\") { qd = 1; if (i < n) { i++; dl = dl substr(s, i, 1) }; continue }
+    if (e == "$" || e == "`") { i = i0 + 1; return 0 }
+    dl = dl e
+  }
+  if (dl == "" || index(dl, "\n")) { i = i0 + 1; return 0 }
+  nhd++; hdelim[nhd] = dl; hdash[nhd] = dash; hquo[nhd] = qd
+  return 1
+}
+function hd_body(k,   line, body, j, dl) {   # at a newline: consume heredoc k's body; \003 ends each line
+  body = ""
+  while (i < n) {
+    j = index(substr(s, i + 1), "\n"); if (j == 0) j = n - i + 1
+    line = substr(s, i + 1, j - 1); i += j
+    dl = line; if (hdash[k]) sub(/^\t+/, "", dl)
+    if (dl == hdelim[k]) break
+    body = body line "\003"
+  }
+  return body
+}
+AWK
 # Review of #198 (round 1): the container rules read shell words with quotes honoured, so
 # --entrypoint "python -m pytest" is one word and -e X="--cpus 2 -m 2g" is not a cap. Run on
 # the masked view (a separator inside quotes is already a space) and the PowerShell view.
-read -r -d '' ctr_tok_awk <<'AWK'
-function hd_open(   dash, dl, e) {   # after "<<": read the delimiter; the body starts at the next newline
-  i++; dash = 0; if (substr(s, i + 1, 1) == "-") { dash = 1; i++ }
-  while (substr(s, i + 1, 1) ~ /[ \t]/) i++
-  dl = ""
-  while (i < n) { e = substr(s, i + 1, 1); if (e ~ /[ \t\n;|&<>()]/) break; i++; if (e != "'" && e != "\"" && e != "\\") dl = dl e }
-  nhd++; hdelim[nhd] = dl; hdash[nhd] = dash
-}
-function hd_bodies(emit,   k, line, body, j, dl) {   # at a newline: consume the pending bodies
-  for (k = 1; k <= nhd; k++) {
-    body = ""
-    while (i < n) {
-      j = index(substr(s, i + 1), "\n"); if (j == 0) j = n - i + 1
-      line = substr(s, i + 1, j - 1); i += j
-      dl = line; if (hdash[k]) sub(/^\t+/, "", dl)
-      if (dl == hdelim[k]) break
-      body = body line "\003"
-    }
-    if (emit) print "\002" body
-  }
-  nhd = 0
-}
-function flush() { if (have) { print tok; tok = ""; have = 0 } }
+# TheHub #62239: one word per line, so a newline inside a quoted word ("a<newline>--cpus=2") split
+# it and its lines were read as words of their own (the label's text read as the caps). It is
+# printed as \004, which ctr_u reads as a space and a shell body turns back into a newline.
+# TheHub #62071: a heredoc body (\002) is printed where its << stands, so it stays with the command
+# it is fed to whatever follows on the line (a redirect, | tee, &&); a here-string's word (<<<) is a
+# body too; a # at the start of a word is a comment to the end of the line, so `: # <<X` opens no
+# heredoc; and a pipe is printed as \001| so a body can follow the pipeline (cat <<EOF | bash).
+ctr_tok_awk="$HD_AWK"'
+function o(x) { out[++no] = x }
+function flush() { if (have) { gsub(/\n/, "\004", tok); o(hs ? "\002" tok : tok); tok = ""; have = 0; hs = 0 } }
 { s = (NR > 1) ? s "\n" $0 : $0 }
 END {
-  n = length(s); q = ""
+  n = length(s); q = ""; no = 0
   for (i = 1; i <= n; i++) {
     c = substr(s, i, 1)
     if (q != "") { if (c == q) q = ""; else if (c == "\\" && q == "\"" && i < n) tok = tok substr(s, ++i, 1); else tok = tok c; continue }
-    if (c == "'" || c == "\"") { q = c; have = 1; continue }
+    if (c == "'"'"'" || c == "\"") { q = c; have = 1; continue }
     if (c == "\\" && i < n) { tok = tok substr(s, ++i, 1); have = 1; continue }
     if (c == "$" && substr(s, i + 1, 1) == "(") {           # $(...) stays inside its word (round 2)
       d = 0
       for (; i <= n; i++) { c = substr(s, i, 1); tok = tok c; if (c == "(") d++; else if (c == ")" && --d == 0) break }
       have = 1; continue
     }
-    if (c == "<" && substr(s, i + 1, 1) == "<" && substr(s, i + 2, 1) != "<") { flush(); hd_open(); continue }   # round 4: a heredoc
+    if (c == "#" && !have) { while (i < n && substr(s, i + 1, 1) != "\n") i++; continue }
+    if (c == "<" && substr(s, i + 1, 2) == "<<") { flush(); i += 2; hs = 1; continue }
+    if (c == "<" && substr(s, i + 1, 1) == "<") { flush(); if (hd_open()) { o("\002"); hph[nhd] = no }; continue }
     if (c == " " || c == "\t") { flush(); continue }
-    if (c == "\n") { flush(); if (nhd) hd_bodies(1); print "\001"; continue }
-    if (c == ";" || c == "|" || c == "&" || c == "(" || c == ")" || c == "`") { flush(); print "\001"; continue }
+    if (c == "\n") {
+      flush()
+      for (k = 1; k <= nhd; k++) out[hph[k]] = "\002" hd_body(k)
+      nhd = 0; o("\001"); continue
+    }
+    if (c == "|" && substr(s, i + 1, 1) != "|" && substr(s, i - 1, 1) != "|") { flush(); if (substr(s, i + 1, 1) == "&") i++; o("\001|"); continue }
+    if (c == ";" || c == "|" || c == "&" || c == "(" || c == ")" || c == "`") { flush(); o("\001"); continue }
     tok = tok c; have = 1
   }
   flush()
-}
-AWK
+  for (k = 1; k <= no; k++) print out[k]
+}'
+# TheHub #62071: a heredoc body is a command when anything in its command can run it: a shell (any
+# case, a path, .exe), pwsh or powershell, wsl, or source, as any word of the command, so that
+# wrappers (sudo -u x, env -i, nice -n 5, timeout 5, xargs, docker exec -i <ctr>) cannot hide it;
+# or `.` as the command itself. A body fed to anything else (git commit -F -, cat > file) is text.
+ctr_launch_re='^(sh|bash|dash|zsh|ash|ksh|mksh|yash|fish|csh|tcsh|busybox|pwsh|powershell|wsl|source)$'
 ctr_seg() { # $@: one segment. Round 3: judged from EVERY engine word (an outer docker exec
   # <container> docker compose ... is two invocations), and a NAME=value word is never an engine.
   # Round 4: a heredoc body (one \002 word) is a command only when a shell is fed it
   # (bash <<EOF ...); fed to anything else (git commit -F -, cat > file) it is text.
-  local w=() k a first="" bodies=()
+  local w=() k a li=-1 first=1 bodies=()
   for a in "$@"; do case "$a" in $'\002'*) bodies+=("${a#?}") ;; *) w+=("$a") ;; esac; done
-  for a in "${w[@]}"; do case "$a" in [A-Za-z_]*=*|env|sudo|command|exec|nice|nohup|timeout) ;; *) ctr_u "$a"; first=${_cu##*[/\\]}; first=${first,,}; first=${first%.exe}; break ;; esac; done
-  case "$first" in
-    sh|bash|dash|zsh|ash|ksh) for a in "${bodies[@]}"; do ctr_guard "${a//$'\003'/$'\n'}"; done ;;
-  esac
+  for ((k = 0; k < ${#w[@]}; k++)); do
+    case "${w[k]}" in [A-Za-z_]*=*) continue ;; esac
+    ctr_u "${w[k]}"; a=${_cu##*[/\\]}; a=${a,,}; a=${a%.exe}
+    if [[ $a =~ $ctr_launch_re ]] || { [ "$first" -eq 1 ] && [ "$a" = . ]; }; then li=$k; break; fi
+    case "$a" in env|sudo|doas|command|builtin|exec|nice|nohup|timeout|time|xargs|setsid|stdbuf) ;; *) first=0 ;; esac
+  done
+  if [ "$li" -ge 0 ]; then
+    for a in "${bodies[@]}"; do a=${a//$'\003'/$'\n'}; ctr_nest "${a//$'\004'/$'\n'}"; done
+    # TheHub #62239: a word after the shell that names an engine (its -c body) is a command of
+    # its own, judged at any depth. Only the PowerShell view's quote removal read one level.
+    for a in "${w[@]:li+1}"; do [[ $a =~ $ctr_eng_re ]] && ctr_nest "${a//$'\004'/$'\n'}"; done
+  fi
   set -- "${w[@]}"
   for ((k = 0; k < $#; k++)); do
     case "${w[k]}" in [A-Za-z_]*=*) continue ;; *[Dd][Oo][Cc][Kk][Ee][Rr]*|*[Pp][Oo][Dd][Mm][Aa][Nn]*|*[Nn][Ee][Rr][Dd][Cc][Tt][Ll]*) ;; *) continue ;; esac
@@ -1602,63 +1665,72 @@ ctr_seg() { # $@: one segment. Round 3: judged from EVERY engine word (an outer 
     case "$a" in docker|podman|nerdctl|docker-compose|podman-compose) ctr_judge "${w[@]:k}" ;; esac
   done
 }
-read -r -d '' HD_AWK <<'AWK' || true
-function hd_open(   dash, dl, e) {   # after "<<": read the delimiter; the body starts at the next newline
-  i++; dash = 0; if (substr(s, i + 1, 1) == "-") { dash = 1; i++ }
-  while (substr(s, i + 1, 1) ~ /[ \t]/) i++
-  dl = ""
-  while (i < n) { e = substr(s, i + 1, 1); if (e ~ /[ \t\n;|&<>()]/) break; i++; if (e != "'" && e != "\"" && e != "\\") dl = dl e }
-  nhd++; hdelim[nhd] = dl; hdash[nhd] = dash
-}
-function hd_bodies(emit,   k, line, body, j, dl) {   # at a newline: consume the pending bodies
-  for (k = 1; k <= nhd; k++) {
-    body = ""
-    while (i < n) {
-      j = index(substr(s, i + 1), "\n"); if (j == 0) j = n - i + 1
-      line = substr(s, i + 1, j - 1); i += j
-      dl = line; if (hdash[k]) sub(/^\t+/, "", dl)
-      if (dl == hdelim[k]) break
-      body = body line "\003"
-    }
-    if (emit) print "\002" body
-  }
-  nhd = 0
-}
-AWK
+# The body of every $(...) and backtick, one per line. TheHub #62071: in the body of an UNQUOTED
+# heredoc too, whatever it is fed to, since bash runs those before the command sees the text; a
+# quoted heredoc's body is skipped. A here-string (<<<) is not a heredoc. Only on the views bash reads
+# (hdsub=1): the PowerShell view removes the quotes around a delimiter, and PowerShell has no heredoc.
 ctr_subst_awk="$HD_AWK"'
+function scan(t, m,   k, c, d, b, j, e) {   # print the body of every $(...) and backtick in t[1..m]
+  for (k = 1; k <= m; k++) {
+    c = substr(t, k, 1)
+    if (c == "$" && substr(t, k + 1, 1) == "(") {
+      d = 0; b = ""
+      for (j = k + 1; j <= m; j++) { e = substr(t, j, 1); if (e == "(") d++; else if (e == ")" && --d == 0) break; if (j > k + 1) b = b e }
+      gsub(/\n/, nl, b); print b; k = j   # past the body: a nested one is found by the recursion, once (round 4)
+    } else if (c == "`") {
+      j = index(substr(t, k + 1), "`"); if (j == 0) j = m - k + 1
+      b = substr(t, k + 1, j - 1); gsub(/\n/, nl, b); print b; k += j
+    }
+  }
+}
 { s = (NR > 1) ? s "\n" $0 : $0 }
 END {
-  n = length(s)
+  n = length(s); if (nl == "") nl = " "   # what a newline in a body becomes (push_guard: ";")
   for (i = 1; i <= n; i++) {
     c = substr(s, i, 1)
-    if (c == "<" && substr(s, i + 1, 1) == "<" && substr(s, i + 2, 1) != "<") { hd_open(); continue }
-    if (c == "\n") { if (nhd) hd_bodies(0); continue }
+    if (c == "<" && substr(s, i + 1, 2) == "<<") { i += 2; continue }
+    if (c == "<" && substr(s, i + 1, 1) == "<") { hd_open(); continue }
+    if (c == "\n") {
+      for (k = 1; k <= nhd; k++) { b = hd_body(k); if (hdsub && !hquo[k]) { gsub(/\003/, "\n", b); scan(b, length(b)) } }
+      nhd = 0; continue
+    }
     if (c == "$" && substr(s, i + 1, 1) == "(") {
       d = 0; b = ""
       for (j = i + 1; j <= n; j++) { e = substr(s, j, 1); if (e == "(") d++; else if (e == ")" && --d == 0) break; if (j > i + 1) b = b e }
-      gsub(/\n/, " ", b); print b; i = j   # past the body: a nested one is found by the recursion, once (round 4)
+      gsub(/\n/, nl, b); print b; i = j   # past the body: a nested one is found by the recursion, once (round 4)
     } else if (c == "`") {
       j = index(substr(s, i + 1), "`"); if (j == 0) j = n - i + 1
-      b = substr(s, i + 1, j - 1); gsub(/\n/, " ", b); print b; i += j
+      b = substr(s, i + 1, j - 1); gsub(/\n/, nl, b); print b; i += j
     }
   }
 }'
 ctr_depth=0
+guard_hdsub=1   # TheHub #62071: 1 while a view bash reads is judged, 0 for the PowerShell view
+ctr_nest() { # $1: a shell body, judged one level down (TheHub #62239)
+  ctr_depth=$((ctr_depth + 1))
+  [ "$ctr_depth" -gt 6 ] && block "a command with shells or substitutions nested more than 6 deep, which this hook does not unfold. Write it flatter; an ordinary command does not nest that far." "AIC-3, SC-6, CP-2"
+  ctr_guard "$1"
+  ctr_depth=$((ctr_depth - 1))
+}
 ctr_guard() { # $1: one view of the command
-  local toks=() seg=() t bodies=() b src=$1
+  local toks=() seg=() carry=() t a bodies=() b src=$1
   # The tokenizer ends a command at a \001 mark and reads a word starting with \002 as a heredoc
   # body (\003 ends its lines). One written into the text, as a control character inside a quoted
   # argument (docker run -l "<\001>" ...), ended the invocation there, so the image and the test
   # runner after it were never judged. As ? it is a word this hook cannot read, as in tag_guard and
-  # push_guard (review of keel #210, TheHub #61972).
-  src=${src//[$'\001\002\003']/?}
+  # push_guard (review of keel #210, TheHub #61972). \004 holds a newline inside a word (TheHub #62239).
+  src=${src//[$'\001\002\003\004']/?}
   mapfile -t toks < <(printf '%s' "$src" | LC_ALL=C awk "$ctr_tok_awk")
   toks+=($'\001')
   for t in "${toks[@]}"; do
-    if [ "$t" = $'\001' ]; then
-      [ "${#seg[@]}" -gt 0 ] && ctr_seg "${seg[@]}"
-      seg=(); continue
-    fi
+    case "$t" in
+      $'\001'|$'\001|')
+        [ "${#seg[@]}" -gt 0 ] && ctr_seg "${seg[@]}"
+        # TheHub #62071: across a pipe the bodies go on to the next command (cat <<EOF | bash).
+        carry=()
+        if [ "$t" = $'\001|' ]; then for a in "${seg[@]}"; do [[ $a == $'\002'* ]] && carry+=("$a"); done; fi
+        seg=("${carry[@]}"); continue ;;
+    esac
     seg+=("$t")
   done
   # Round 3: the body of every $(...) and backtick, quoted or not, is a command of its own.
@@ -1666,7 +1738,7 @@ ctr_guard() { # $1: one view of the command
   ctr_depth=$((ctr_depth + 1))
   [ "$ctr_depth" -gt 6 ] && block "a command with substitutions nested more than 6 deep, which this hook does not unfold. Write it flatter; an ordinary command does not nest that far." "AIC-3, SC-6, CP-2"
   if [ "$ctr_depth" -le 6 ]; then
-    mapfile -t bodies < <(printf '%s' "$src" | LC_ALL=C awk "$ctr_subst_awk")
+    mapfile -t bodies < <(printf '%s' "$src" | LC_ALL=C awk -v hdsub="$guard_hdsub" "$ctr_subst_awk")
     for b in "${bodies[@]}"; do [ -n "$b" ] && ctr_guard "$b"; done
   fi
   ctr_depth=$((ctr_depth - 1))
@@ -2212,15 +2284,15 @@ if [ "$ps_cmd" != "$raw_cmd" ] && [ "$ps_cmd" != "$word_cmd" ]; then cmd="$ps_cm
 # tokenizer once, never a process per word.
 push_gate='(^|[][[:space:];&|(){}`"'"'"'/\\=!])[Gg][Ii][Tt]([.][Ee][Xx][Ee])?([[:space:];&|()`"'"'"']|$)'
 if [[ $raw_cmd =~ $push_gate ]] || { [ "$ps_cmd" != "$raw_cmd" ] && [[ $ps_cmd =~ $push_gate ]]; }; then
-  push_moves=0; push_guard "$raw_cmd"
-  if [ "$ps_cmd" != "$raw_cmd" ]; then push_moves=0; push_guard "$ps_cmd"; fi
+  guard_hdsub=1; push_moves=0; push_guard "$raw_cmd"
+  if [ "$ps_cmd" != "$raw_cmd" ]; then guard_hdsub=0; push_moves=0; push_guard "$ps_cmd"; fi
 fi
 # Round 4 (timing): the word judge runs only when a view names a container engine at all,
 # tested in-process. It used to run whenever the PowerShell view differed, which is most commands.
 ctr_eng_re='[Dd][Oo][Cc][Kk][Ee][Rr]|[Pp][Oo][Dd][Mm][Aa][Nn]|[Nn][Ee][Rr][Dd][Cc][Tt][Ll]'
 if [[ $raw_cmd =~ $ctr_eng_re ]] || [[ $ps_cmd =~ $ctr_eng_re ]]; then
-  ctr_guard "$raw_cmd"   # round 3: the quote-aware tokenizer reads the raw text; the masked view turns a quoted && into spaces
-  [ "$ps_cmd" != "$raw_cmd" ] && ctr_guard "$ps_cmd"
+  guard_hdsub=1; ctr_guard "$raw_cmd"   # round 3: the quote-aware tokenizer reads the raw text; the masked view turns a quoted && into spaces
+  [ "$ps_cmd" != "$raw_cmd" ] && { guard_hdsub=0; ctr_guard "$ps_cmd"; }
 fi
 
 exit 0

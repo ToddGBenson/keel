@@ -883,6 +883,121 @@ check "git tag (lists)"                allow "$(payload 'git tag')"             
 check "create a non-v tag"             allow "$(payload 'git tag rc-1')"                                 guard-bash.sh
 check "gh api GET git/refs/tags?page"  allow "$(payload "gh api 'repos/O/R/git/refs/tags?per_page=100'")" guard-bash.sh
 echo ""
+echo "guard-bash.sh — a push inside \$( ), a shell nested two deep, a newline in a quoted value (TheHub #62239)"
+# 1. The push tokenizer kept a $(...) inside the word it stands in, so a push run by the
+# substitution was never judged: allowed on main and on a detached checkout alike. Each body is
+# now judged as a command of its own, as the container rule already did.
+smain=$(mktemp -d); sfeat=$(mktemp -d); sdet=$(mktemp -d)
+git -C "$smain" init -q -b main 2>/dev/null || { git -C "$smain" init -q; git -C "$smain" checkout -q -b main; }
+git -C "$sfeat" init -q -b feat 2>/dev/null || { git -C "$sfeat" init -q; git -C "$sfeat" checkout -q -b feat; }
+git -C "$sdet" init -q 2>/dev/null; printf '%040d\n' 0 > "$sdet/.git/HEAD"   # a detached HEAD
+spay() { payload "$2" | sed "s|^{|{\"cwd\":\"$1\",|"; }
+for s in main det; do
+  sd=$smain; [ "$s" = det ] && sd=$sdet
+  check "on $s: echo \$(push +main)"                block "$(spay "$sd" 'echo $(git push origin +main)')"              guard-bash.sh
+  check "on $s: x=\$(push feat:main)"               block "$(spay "$sd" 'x=$(git push origin feat:main)')"             guard-bash.sh
+  check "on $s: \"\$(push +main)\" in quotes"       block "$(spay "$sd" 'echo "$(git push origin +main)"')"            guard-bash.sh
+  check "on $s: \$(\$(push feat:main)), nested"     block "$(spay "$sd" 'echo $(echo $(git push origin feat:main))')"  guard-bash.sh
+  check "on $s: \$(cd, newline, push +main)"        block "$(spay "$sd" "x=\$(cd /${nl}git push origin +main)")"     guard-bash.sh
+  check "on $s: \${x:-\$(push +main)}"              block "$(spay "$sd" 'echo ${x:-$(git push origin +main)}')"        guard-bash.sh
+  check "on $s: PS \$(push feat:main)"              block "$(spay "$sd" 'echo $(git push origin feat:main)' | sed 's/^{/{"tool_name":"PowerShell",/')" guard-bash.sh
+  check "on $s: echo \$(git rev-parse HEAD)"        allow "$(spay "$sd" 'echo $(git rev-parse HEAD)')"                 guard-bash.sh
+  check "on $s: x=\$(push origin feat)"             allow "$(spay "$sd" 'x=$(git push origin feat)')"                  guard-bash.sh
+done
+check "on main: x=\$(git push), the current branch" block "$(spay "$smain" 'x=$(git push 2>&1)')"                     guard-bash.sh
+check "on feat: x=\$(git push), the current branch" allow "$(spay "$sfeat" 'x=$(git push 2>&1)')"                     guard-bash.sh
+check "detached: x=\$(git push)"                    allow "$(spay "$sdet" 'x=$(git push 2>&1)')"                      guard-bash.sh
+# The same class in the push tokenizer: a newline inside a quoted option value split the word,
+# so its second line read as the repository and the real one as a refspec.
+check "on main: push -o \"a<NL>b\" origin"          block "$(spay "$smain" "git push -o \"a${nl}b\" origin")"         guard-bash.sh
+check "on feat: push -o \"a<NL>b\" origin"          allow "$(spay "$sfeat" "git push -o \"a${nl}b\" origin")"         guard-bash.sh
+check "on main: commit -m \"a<NL>b\""               allow "$(spay "$smain" "git commit -m \"a${nl}b\"")"              guard-bash.sh
+rm -rf "$smain" "$sfeat" "$sdet"
+# 2. A shell -c body was judged only through the PowerShell view's quote removal, which reaches
+# one level down. Every word after a shell that names an engine is now judged as a command.
+check "bash -c 'bash -c \"docker run\"', uncapped"   block "$(payload "bash -c 'bash -c \"docker run --rm python:3.12 pytest\"'")"   guard-bash.sh
+check "sh -c \"bash -c 'docker run'\", uncapped"     block "$(payload "sh -c \"bash -c 'docker run --rm python:3.12 pytest'\"")"     guard-bash.sh
+check "three shells deep, uncapped"                 block "$(payload "bash -c 'sh -c \"bash -c \\\"docker run --rm python:3.12 pytest\\\"\"'")" guard-bash.sh
+check "bash -lc 'bash -c \"compose run backend\"'"  block "$(payload "bash -lc 'bash -c \"docker compose run --rm backend pytest\"'")" guard-bash.sh
+check "PS: bash -c 'bash -c \"docker run\"'"        block "$(pspayload "bash -c 'bash -c \"docker run --rm python:3.12 pytest\"'")" guard-bash.sh
+check "two shells deep, capped"                     allow "$(payload "bash -c 'bash -c \"docker run --rm --cpus 2 --memory 2g python:3.12 pytest\"'")" guard-bash.sh
+check "two shells deep, docker ps"                  allow "$(payload "bash -c 'bash -c \"docker ps\"'")"                                guard-bash.sh
+check "a shell running a script named docker-x.sh"  allow "$(payload 'bash docker-x.sh pytest')"                                       guard-bash.sh
+# 3. The container tokenizer printed one word per line, so a newline inside a quoted value split
+# it: the label's text was read as the caps. A newline inside a word now stays inside it.
+check "docker run -l \"a<NL>--cpus=2<NL>--memory=2g\""  block "$(payload "docker run --rm -l \"a${nl}--cpus=2${nl}--memory=2g\" python:3.12 pytest")" guard-bash.sh
+check "docker run -e \"X<NL>--cpus 2<NL>--memory 2g\""  block "$(payload "docker run --rm -e \"X=1${nl}--cpus 2${nl}--memory 2g\" python:3.12 pytest")" guard-bash.sh
+check "docker run --name \"a<NL>pytest\", capped"       allow "$(payload "docker run --rm --cpus 2 --memory 2g --name \"a${nl}b\" python:3.12 pytest")" guard-bash.sh
+check "docker run img \"pytest<NL>\", uncapped"          block "$(payload "docker run --rm python:3.12 \"pytest${nl}\"")"                  guard-bash.sh
+check "bash -c with a newline: docker ps, then pytest"  allow "$(payload "bash -c \"docker ps${nl}echo pytest\"")"                        guard-bash.sh
+echo ""
+echo "guard-bash.sh — a heredoc body fed to a shell through any launcher (TheHub #62071)"
+# Each class with an uncapped docker run and a compose run of the production service.
+check $'a redirect after <<EOF, run'                             block "$(payload $'bash <<EOF > run.log\ndocker run --rm python:3.12 pytest\nEOF')" guard-bash.sh
+check $'a redirect after <<EOF, compose'                         block "$(payload $'bash <<EOF > run.log\ndocker compose run --rm backend pytest\nEOF')" guard-bash.sh
+check $'a pipeline after <<EOF, run'                             block "$(payload $'bash <<EOF | tee run.log\ndocker run --rm python:3.12 pytest\nEOF')" guard-bash.sh
+check $'a pipeline after <<EOF, compose'                         block "$(payload $'bash <<EOF | tee run.log\ndocker compose run --rm backend pytest\nEOF')" guard-bash.sh
+check $'&& after <<EOF, run'                                     block "$(payload $'bash <<EOF && echo done\ndocker run --rm python:3.12 pytest\nEOF')" guard-bash.sh
+check $'&& after <<EOF, compose'                                 block "$(payload $'bash <<EOF && echo done\ndocker compose run --rm backend pytest\nEOF')" guard-bash.sh
+check $'a shell named BASH.EXE, run'                             block "$(payload $'BASH.EXE <<EOF\ndocker run --rm python:3.12 pytest\nEOF')" guard-bash.sh
+check $'a shell named BASH.EXE, compose'                         block "$(payload $'BASH.EXE <<EOF\ndocker compose run --rm backend pytest\nEOF')" guard-bash.sh
+check $'a shell by its path, run'                                block "$(payload $'/usr/bin/bash <<EOF\ndocker run --rm python:3.12 pytest\nEOF')" guard-bash.sh
+check $'a shell by its path, compose'                            block "$(payload $'/usr/bin/bash <<EOF\ndocker compose run --rm backend pytest\nEOF')" guard-bash.sh
+check $'sudo -u x bash, run'                                     block "$(payload $'sudo -u ci bash <<EOF\ndocker run --rm python:3.12 pytest\nEOF')" guard-bash.sh
+check $'sudo -u x bash, compose'                                 block "$(payload $'sudo -u ci bash <<EOF\ndocker compose run --rm backend pytest\nEOF')" guard-bash.sh
+check $'env -i bash, run'                                        block "$(payload $'env -i bash <<EOF\ndocker run --rm python:3.12 pytest\nEOF')" guard-bash.sh
+check $'env -i bash, compose'                                    block "$(payload $'env -i bash <<EOF\ndocker compose run --rm backend pytest\nEOF')" guard-bash.sh
+check $'nice -n 5 sh, run'                                       block "$(payload $'nice -n 5 sh <<EOF\ndocker run --rm python:3.12 pytest\nEOF')" guard-bash.sh
+check $'nice -n 5 sh, compose'                                   block "$(payload $'nice -n 5 sh <<EOF\ndocker compose run --rm backend pytest\nEOF')" guard-bash.sh
+check $'timeout 600 bash, run'                                   block "$(payload $'timeout 600 bash <<EOF\ndocker run --rm python:3.12 pytest\nEOF')" guard-bash.sh
+check $'timeout 600 bash, compose'                               block "$(payload $'timeout 600 bash <<EOF\ndocker compose run --rm backend pytest\nEOF')" guard-bash.sh
+check $'wsl bash, run'                                           block "$(payload $'wsl bash <<EOF\ndocker run --rm python:3.12 pytest\nEOF')" guard-bash.sh
+check $'wsl bash, compose'                                       block "$(payload $'wsl bash <<EOF\ndocker compose run --rm backend pytest\nEOF')" guard-bash.sh
+check $'wsl alone, run'                                          block "$(payload $'wsl <<EOF\ndocker run --rm python:3.12 pytest\nEOF')" guard-bash.sh
+check $'wsl alone, compose'                                      block "$(payload $'wsl <<EOF\ndocker compose run --rm backend pytest\nEOF')" guard-bash.sh
+check $'pwsh, run'                                               block "$(payload $'pwsh -NoProfile <<EOF\ndocker run --rm python:3.12 pytest\nEOF')" guard-bash.sh
+check $'pwsh, compose'                                           block "$(payload $'pwsh -NoProfile <<EOF\ndocker compose run --rm backend pytest\nEOF')" guard-bash.sh
+check $'powershell.exe, run'                                     block "$(payload $'powershell.exe <<EOF\ndocker run --rm python:3.12 pytest\nEOF')" guard-bash.sh
+check $'powershell.exe, compose'                                 block "$(payload $'powershell.exe <<EOF\ndocker compose run --rm backend pytest\nEOF')" guard-bash.sh
+check $'source /dev/stdin, run'                                  block "$(payload $'source /dev/stdin <<EOF\ndocker run --rm python:3.12 pytest\nEOF')" guard-bash.sh
+check $'source /dev/stdin, compose'                              block "$(payload $'source /dev/stdin <<EOF\ndocker compose run --rm backend pytest\nEOF')" guard-bash.sh
+check $'. /dev/stdin, run'                                       block "$(payload $'. /dev/stdin <<EOF\ndocker run --rm python:3.12 pytest\nEOF')" guard-bash.sh
+check $'. /dev/stdin, compose'                                   block "$(payload $'. /dev/stdin <<EOF\ndocker compose run --rm backend pytest\nEOF')" guard-bash.sh
+check $'docker exec -i <ctr> sh, run'                            block "$(payload $'docker exec -i scratch sh <<EOF\ndocker run --rm python:3.12 pytest\nEOF')" guard-bash.sh
+check $'docker exec -i <ctr> sh, compose'                        block "$(payload $'docker exec -i scratch sh <<EOF\ndocker compose run --rm backend pytest\nEOF')" guard-bash.sh
+check $'xargs sh -c, run'                                        block "$(payload $'xargs -I{} sh -c \'{}\' <<EOF\ndocker run --rm python:3.12 pytest\nEOF')" guard-bash.sh
+check $'xargs sh -c, compose'                                    block "$(payload $'xargs -I{} sh -c \'{}\' <<EOF\ndocker compose run --rm backend pytest\nEOF')" guard-bash.sh
+check $'cat <<EOF | bash, run'                                   block "$(payload $'cat <<EOF | bash\ndocker run --rm python:3.12 pytest\nEOF')" guard-bash.sh
+check $'cat <<EOF | bash, compose'                               block "$(payload $'cat <<EOF | bash\ndocker compose run --rm backend pytest\nEOF')" guard-bash.sh
+check $'a here-string to bash, run'                              block "$(payload $'bash <<< \'docker run --rm python:3.12 pytest\'')" guard-bash.sh
+check $'a here-string to bash, compose'                          block "$(payload $'bash <<< \'docker compose run --rm backend pytest\'')" guard-bash.sh
+check $'$() in an unquoted heredoc to cat, run'                  block "$(payload $'cat <<EOF\nx $(docker run --rm python:3.12 pytest)\nEOF')" guard-bash.sh
+check $'$() in an unquoted heredoc to cat, compose'              block "$(payload $'cat <<EOF\nx $(docker compose run --rm backend pytest)\nEOF')" guard-bash.sh
+check $'a backtick in an unquoted heredoc to git, run'           block "$(payload $'git commit -F - <<EOF\nx `docker run --rm python:3.12 pytest`\nEOF')" guard-bash.sh
+check $'a backtick in an unquoted heredoc to git, compose'       block "$(payload $'git commit -F - <<EOF\nx `docker compose run --rm backend pytest`\nEOF')" guard-bash.sh
+check $'<<$\'EOF\', run'                                         block "$(payload $'bash <<$\'EOF\'\ndocker run --rm python:3.12 pytest\nEOF')" guard-bash.sh
+check $'<<$\'EOF\', compose'                                     block "$(payload $'bash <<$\'EOF\'\ndocker compose run --rm backend pytest\nEOF')" guard-bash.sh
+check $'<<"E F", run'                                            block "$(payload $'bash <<"E F"\ndocker run --rm python:3.12 pytest\nE F')" guard-bash.sh
+check $'<<"E F", compose'                                        block "$(payload $'bash <<"E F"\ndocker compose run --rm backend pytest\nE F')" guard-bash.sh
+check $'<<\\EOF, run'                                            block "$(payload $'bash <<\\EOF\ndocker run --rm python:3.12 pytest\nEOF')" guard-bash.sh
+check $'<<\\EOF, compose'                                        block "$(payload $'bash <<\\EOF\ndocker compose run --rm backend pytest\nEOF')" guard-bash.sh
+check $': # <<X is a comment, run'                               block "$(payload $': # <<X\ndocker run --rm python:3.12 pytest\nX')" guard-bash.sh
+check $': # <<X is a comment, compose'                           block "$(payload $': # <<X\ndocker compose run --rm backend pytest\nX')" guard-bash.sh
+check $'an unreadable delimiter, run'                            block "$(payload $'cat <<$\'E\\x46\'\ndocker run --rm python:3.12 pytest\nEF')" guard-bash.sh
+check $'an unreadable delimiter, compose'                        block "$(payload $'cat <<$\'E\\x46\'\ndocker compose run --rm backend pytest\nEF')" guard-bash.sh
+check $'prose in a quoted heredoc to git' allow "$(payload $'git commit -F - <<\'EOF\'\nfix: docker run --rm python:3.12 pytest is refused now\nEOF')" guard-bash.sh
+check $'prose in an unquoted heredoc to git' allow "$(payload $'git commit -F - <<EOF\nrun docker compose run --rm backend pytest by hand\nEOF')" guard-bash.sh
+check $'$() in a quoted heredoc' allow "$(payload $'cat <<\'EOF\'\nx $(docker run --rm python:3.12 pytest)\nEOF')" guard-bash.sh
+check $'<<"E F" to a file' allow "$(payload $'cat <<"E F" > notes.md\ndocker run --rm python:3.12 pytest\nE F')" guard-bash.sh
+check $'a capped run fed to bash' allow "$(payload $'bash <<EOF\ndocker run --rm --cpus 2 --memory 2g python:3.12 pytest\nEOF')" guard-bash.sh
+check $'a quoted heredoc to grep' allow "$(payload $'cat <<\'EOF\' | grep pytest\ndocker run --rm python:3.12 pytest\nEOF')" guard-bash.sh
+check $'sudo cat to a file' allow "$(payload $'sudo -u ci cat <<EOF > out.txt\ndocker run --rm python:3.12 pytest\nEOF')" guard-bash.sh
+check $'a here-string to bash, docker ps' allow "$(payload $'bash <<< \'docker ps\'')" guard-bash.sh
+check $'a comment naming a run' allow "$(payload $'echo hi # docker run --rm python:3.12 pytest')" guard-bash.sh
+check $'a here-string to grep' allow "$(payload $'grep -c pytest <<< \'docker run --rm python:3.12 pytest\'')" guard-bash.sh
+check "push \$() in an unquoted heredoc"  block "$(payload $'cat <<EOF\nx $(git push origin +main)\nEOF')" guard-bash.sh
+check "push \$() in a quoted heredoc"     allow "$(payload $'cat <<\'EOF\'\nx $(git push origin +main)\nEOF')" guard-bash.sh
+echo ""
 echo "guard-write.sh — must BLOCK (AU-9, AIC-5)"
 check "hand-edit generated SARIF" block "$(wpayload 'evidence/142/g4/scan.sarif' 'x')"    guard-write.sh
 check "hand-edit generated XML"   block "$(wpayload 'evidence/142/g4/results.xml' 'x')"   guard-write.sh
