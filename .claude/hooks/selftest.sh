@@ -977,6 +977,10 @@ check $'class: an escaped quote in ${...} opens nothing'        block "$(payload
 check $'class: nested ${...} then a branch push is allowed'     allow "$(payload 'echo ${a:-${b}}; git push origin feature-x')" guard-bash.sh
 check $'class: a substitution in ${...} is not skipped as quotes' block "$(payload $'echo ${y:-$(: # a\'b\n)}; git tag v2.0.0 # \'}')" guard-bash.sh
 check $'class: a backtick in ${...} is not skipped as quotes'     block "$(payload $'echo ${y:-`: # a\'b`}; git push origin v2.0.0 # \'}')" guard-bash.sh
+check $'class: an input process substitution in ${...} is not skipped'  block "$(payload $'echo ${y:-<(: # a\'b\n)}; git tag v2.0.0 # \'}')" guard-bash.sh
+check $'class: an output process substitution in ${...} is not skipped' block "$(payload $'echo ${y:->(: # a\'b\n)}; git push --tags # \'}')" guard-bash.sh
+check $'class: an ANSI-C quote in ${...} ends at the }'                  block "$(payload $'echo ${y:-$\'a\\tb\'}; git push origin v2.0.0')" guard-bash.sh
+check $'class: the container reader reads past ${...} too'              block "$(payload $'echo ${y:-<(: # a\'b\n)}; docker run --rm python:3.12 pytest # \'}')" guard-bash.sh
 echo ""
 echo "guard-write.sh — must BLOCK (AU-9, AIC-5)"
 check "hand-edit generated SARIF" block "$(wpayload 'evidence/142/g4/scan.sarif' 'x')"    guard-write.sh
