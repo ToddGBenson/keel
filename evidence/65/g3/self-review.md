@@ -1,7 +1,7 @@
 # Self-review — #65
 
 Mode: solo (POAM-008)
-PR: #66   Author: Todd Benson (claude-opus-5, AI-authored)   Date: 2026-08-15
+PR: #66   Author: the system owner (claude-opus-5, AI-authored)   Date: 2026-08-15
 
 Adopting the supplied agentic-SDLC specification: UX role, RACI, developer pool, observability
 loop, and — the consequential one — moving gate approval from a human to `delivery-lead`.

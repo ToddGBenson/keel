@@ -1,6 +1,6 @@
 # Security Exception EXC-001 — Pre-publication history rewrite
 
-**Requested by:** claude-opus-5 (agent) · **Approved by:** Todd Benson (system owner)
+**Requested by:** claude-opus-5 (agent) · **Approved by:** the system owner
 **Date:** 2026-08-08 · **Controls affected:** AU-12, SI-7, CM-5, AIC-3
 **Related:** publication of the repository to public visibility
 
@@ -15,7 +15,7 @@ Three, briefly and simultaneously:
 
 ## 2. Why
 
-Four commits carry the owner's personal email address (`tgbenson602@gmail.com`) as author
+Four commits carry the owner's personal email address as author
 and committer. Publishing the repository makes that address permanently scrapable, and
 publication is a **one-way door** — GitHub does not un-index a public commit history.
 
@@ -66,7 +66,7 @@ Branch protection re-applied and verified. `allow_force_pushes` returns to `fals
 |---|---|---|---|
 | Requesting agent | claude-opus-5 | requested | 2026-08-08 |
 | Security Engineer | *(solo — role held by owner)* | recommend | 2026-08-08 |
-| **Human operator** | Todd Benson | **approved** (selected the rewrite option explicitly) | 2026-08-08 |
+| **Human operator** | System owner | **approved** (selected the rewrite option explicitly) | 2026-08-08 |
 
 ## 9. What actually happened — corrected 2026-08-08
 

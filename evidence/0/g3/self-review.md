@@ -1,6 +1,6 @@
 # Self-review — PR #1
 
-**Mode:** solo (POAM-008) · **Author:** Todd Benson · **Agent:** claude-opus-5
+**Mode:** solo (POAM-008) · **Author:** the system owner · **Agent:** claude-opus-5
 **Opened:** 2026-08-08 03:20Z · **Reviewed:** 2026-08-08 03:40Z
 **Cooling-off:** ⚠️ 0.3h — **below the 4h threshold.** Recorded, not hidden. This PR is
 platform bootstrap; the first substantive feature PR observes the full interval.

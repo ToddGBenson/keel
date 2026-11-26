@@ -1,7 +1,7 @@
 # Self-review — #63
 
 Mode: solo (POAM-008)
-PR: #64   Author: Todd Benson (claude-opus-5, AI-authored)   Date: 2026-08-14
+PR: #64   Author: the system owner (claude-opus-5, AI-authored)   Date: 2026-08-14
 
 Retiring the self-hosted runner from the documentation, and recording the failure modes that
 caused it to be retired early.

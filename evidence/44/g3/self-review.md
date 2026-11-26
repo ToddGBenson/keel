@@ -1,7 +1,7 @@
 # Self-review — #44
 
 Mode: solo (POAM-008)
-PR: #46   Author: Todd Benson (claude-opus-5, AI-authored)   Date: 2026-08-13
+PR: #46   Author: the system owner (claude-opus-5, AI-authored)   Date: 2026-08-13
 Opened: 2026-08-13 13:18 UTC   Reviewed: 2026-08-13 14:40 UTC   **Cooling-off: ~1h 22m ❌**
 
 > **Cooling-off is not satisfied**, for the second time today. The `self-review` skill

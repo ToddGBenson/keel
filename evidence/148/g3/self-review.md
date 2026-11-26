@@ -1,7 +1,7 @@
 # Self-review — TheHub #60981
 
 Mode: solo (POAM-008)
-PR: #148   Author: Todd Benson (Claude Opus 5.5, AI-authored)   Date: 2026-10-23
+PR: #148   Author: the system owner (Claude Opus 5.5, AI-authored)   Date: 2026-10-23
 verdict: pass
 
 Every gate command writes an evidence record `scripts/control-liveness.py` can count, so G0, G1

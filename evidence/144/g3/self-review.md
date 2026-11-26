@@ -1,7 +1,7 @@
 # Self-review — #144, TheHub #60936
 
 Mode: solo (POAM-008)
-Issue: #144   Author: Claude Opus 5.5 (AI-authored), for Todd Benson   Date: 2026-10-22
+Issue: #144   Author: Claude Opus 5.5 (AI-authored), for the system owner   Date: 2026-10-22
 
 Make signing and attestation real (POAM-011), and make `verify-artifact` fail an unsigned
 release.

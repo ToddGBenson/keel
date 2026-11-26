@@ -1,6 +1,6 @@
 # POA&M review — 2026-08-14
 
-**Assessor:** Todd Benson (claude-opus-5, agent-performed) · **Control:** CA-5, CA-7
+**Assessor:** the system owner (claude-opus-5, agent-performed) · **Control:** CA-5, CA-7
 **Method:** every row measured against the live system today. Nothing carried forward on the
 strength of what a previous entry said.
 
