@@ -931,6 +931,17 @@ check "docker run --name \"a<NL>pytest\", capped"       allow "$(payload "docker
 check "docker run img \"pytest<NL>\", uncapped"          block "$(payload "docker run --rm python:3.12 \"pytest${nl}\"")"                  guard-bash.sh
 check "bash -c with a newline: docker ps, then pytest"  allow "$(payload "bash -c \"docker ps${nl}echo pytest\"")"                        guard-bash.sh
 echo ""
+echo "guard-bash.sh — a heredoc body fed to a shell is a command, a # or << is read as bash reads it (TheHub #62071, #62239)"
+# One row per class. The full input list is kept in the private mirror's corpus.
+check $'class: a wrapper before the shell fed a heredoc'        block "$(payload $'env bash <<EOF\ndocker run --rm python:3.12 pytest\nEOF')" guard-bash.sh
+check $'class: a heredoc carried across a pipe to a shell'      block "$(payload $'cat <<EOF | sh\ndocker run --rm python:3.12 pytest\nEOF')" guard-bash.sh
+check $'class: $( ) in an unquoted heredoc fed to text'         block "$(payload $'cat > x.txt <<EOF\n$(docker run --rm python:3.12 pytest)\nEOF')" guard-bash.sh
+check $'class: $( ) in a quoted heredoc is text'                allow "$(payload $'cat > x.txt <<\'EOF\'\n$(docker run --rm python:3.12 pytest)\nEOF')" guard-bash.sh
+check $'class: a heredoc fed to git is text'                    allow "$(payload $'git commit -F - <<EOF\ndocker run --rm python:3.12 pytest\nEOF')" guard-bash.sh
+check $'class: a # that bash does not read as a comment'        block "$(payload 'echo `#`; docker run --rm python:3.12 pytest')" guard-bash.sh
+check $'class: a << that bash does not read as a heredoc'       block "$(payload $'printf "%s <<\'X\' end"\necho $(docker run --rm python:3.12 pytest)')" guard-bash.sh
+check $'class: a comment naming no test run is text'          allow "$(payload 'docker ps # see docker images')" guard-bash.sh
+echo ""
 echo "guard-write.sh — must BLOCK (AU-9, AIC-5)"
 check "hand-edit generated SARIF" block "$(wpayload 'evidence/142/g4/scan.sarif' 'x')"    guard-write.sh
 check "hand-edit generated XML"   block "$(wpayload 'evidence/142/g4/results.xml' 'x')"   guard-write.sh
