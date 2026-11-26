@@ -390,6 +390,24 @@ class Decisions(unittest.TestCase):
         self.assertEqual(self.run_gate(gh).conclusion, "failure")
         self.assertEqual(gh.runs[HEAD][0]["conclusion"], "failure")
 
+    def test_a_sticky_run_that_lands_mid_run_is_not_overwritten(self):
+        # Another run posts the BLOCK between this run's read and its write.
+        gh = FakeGitHub()
+        gh.add_pr(comments=[verdict("Fable 5.2", HEAD, "SHIP")])
+        sticky = {"id": 5, "name": ar.CHECK_NAME, "head_sha": HEAD, "app": {"id": APP_ID},
+                  "status": "completed", "conclusion": "failure", "external_id": ar.STICKY}
+        reads = []
+
+        def check_runs(sha):
+            reads.append(sha)
+            return [sticky] if len(reads) > 1 else []
+
+        gh.check_runs = check_runs
+        gate(gh).evaluate(1)
+        self.assertFalse([w for w in gh.writes if w[0] in ("create_check", "update_check")])
+        self.assertEqual(sticky["conclusion"], "failure")
+        self.assertNotIn(("auto_merge", 1, True), gh.writes)
+
     def test_a_run_by_another_app_is_ignored(self):
         # A forged check run of the same name (a workflow on the PR branch, as
         # github-actions) is neither trusted nor sticky; ours is created beside it.
@@ -468,6 +486,35 @@ class Train(unittest.TestCase):
         gh.add_pr(1, mergeable_state="behind")
         gate(gh).sweep()
         self.assertFalse([w for w in gh.writes if w[0] == "update_branch"])
+
+
+class WorkflowShape(unittest.TestCase):
+    """The workflow properties the trust argument rests on (agent_review.py docstring)."""
+
+    text = (Path(__file__).resolve().parent.parent / "workflows" / "agent-review.yml").read_text()
+
+    def test_the_token_gets_nothing_by_default(self):
+        self.assertRegex(self.text, r"(?m)^permissions: \{\}$")
+
+    def test_no_job_is_named_like_the_check(self):
+        self.assertNotRegex(self.text, r"(?m)^  agent-review:")
+        self.assertNotRegex(self.text, r"(?m)^\s+name:\s*agent-review\s*$")
+
+    def test_the_gate_runs_in_the_main_only_environment_from_the_default_branch(self):
+        gate_job = self.text.split("\n  gate:\n", 1)[1].split("\n  tests:\n", 1)[0]
+        self.assertIn("environment: agent-review", gate_job)
+        self.assertIn("ref: ${{ github.event.repository.default_branch }}", gate_job)
+        self.assertIn("persist-credentials: false", gate_job)
+        self.assertIn("github.event_name != 'pull_request'", gate_job)
+        self.assertNotIn("github.event.pull_request.head", self.text)
+
+    def test_the_tests_job_holds_no_secret(self):
+        tests_job = self.text.split("\n  tests:\n", 1)[1]
+        self.assertNotIn("secrets.", tests_job)
+        self.assertNotIn("environment:", tests_job)
+
+    def test_runs_never_interleave(self):
+        self.assertIn("cancel-in-progress: false", self.text)
 
 
 if __name__ == "__main__":

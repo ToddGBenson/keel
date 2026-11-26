@@ -56,7 +56,7 @@ fields:
   allow_force_pushes:
     value: false
   required_status_checks:
-    value: [Concourse / keel, library-allowlist]
+    value: [Concourse / keel, agent-review, library-allowlist]
     reason: >-
       TheHub #61778: Concourse judges pull request heads and posts Concourse / keel
       on them, so it is required (with library-allowlist), both pinned to App
@@ -64,3 +64,7 @@ fields:
       independent-review, configure-github.sh's default, is not required; POAM-014
       stays open. A green Concourse / keel can show without the suites having run
       (TheHub #62015).
+      agent-review is added by TheHub #62342 (Enable-AutoMerge-62342.ps1), pinned to
+      the agent-review App: an agent-reviewed PR merges itself
+      (.github/agent-review/agent_review.py). Until the operator applies it, the
+      daily drift check reports this one field.
