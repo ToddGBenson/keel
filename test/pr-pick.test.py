@@ -14,6 +14,7 @@ Needs git and bash.
 """
 import json
 import os
+import re
 import shutil
 import stat
 import subprocess
@@ -294,6 +295,11 @@ def main():
         check("pr-checks judges it, and the red suite fails the build rather than passing as 'none'",
               r.returncode != 0 and "No pull request head" not in r.stdout
               and f"Unit suites on #5 {evil}" in r.stdout, r.stdout + r.stderr)
+        # TheHub #62268: each suite says how long it took, and the slowest are summed up at the end.
+        check("each suite reports its time, and the slowest are listed at the end (TheHub #62268)",
+              re.search(r"red\.test: FAIL \(\d+ s\)", r.stdout) is not None
+              and re.search(r"Slowest suites \(seconds\), of \d+ s in all:\n   \d+ ", r.stdout) is not None,
+              r.stdout)
 
         print("the head moves between ls-remote and fetch (TheHub #62015 F2)")
         o3 = Origin(sub(tmp, "o3"))
