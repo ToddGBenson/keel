@@ -446,22 +446,15 @@ check("platform-release.sh: RELEASE_FLOOR is a hard-coded full sha", fm is not N
 floor = fm.group(1) if fm else ""
 have = floor and subprocess.run(["git", "-C", str(ROOT), "cat-file", "-e", f"{floor}^{{commit}}"],
                                 capture_output=True).returncode == 0
-# The verifier holds a repository to keel's floor only where the trusted ref
-# descends from it (#223); this section uses the same condition. A repository
-# without keel's history whose clone fetched keel as a remote holds the floor
-# commit off its HEAD and has its own .github/release-floor: it is skipped
-# here, as the verifier skips keel's floor for it. Keel itself has no such
-# file, so a keel HEAD that stopped descending from the floor still fails below.
-on_head = have and subprocess.run(["git", "-C", str(ROOT), "merge-base", "--is-ancestor", floor, "HEAD"],
-                                  capture_output=True).returncode == 0
-own_floor = (ROOT / ".github" / "release-floor").is_file()
+# This is keel's own copy (project-owned): upstream keel is always held to
+# its floor by the verifier, whatever its clone or a floor file says, so this
+# section never skips for a floor off HEAD or for a .github/release-floor.
+# A repository made from keel keeps its own copy, with its own condition.
 if not have:
     # A template fork or a shallow clone does not hold keel's history. The
     # verifier refuses in that case (tested in platform-release.test.py); this
     # check of keel's own history can only run where the history is.
     print(f"  [skip] floor {floor[:12]} is not in this clone's history")
-elif not on_head and own_floor:
-    print(f"  [skip] floor {floor[:12]} is not on HEAD, and this repository has its own .github/release-floor")
 else:
     floor_on_head = subprocess.run(["git", "-C", str(ROOT), "merge-base", "--is-ancestor", floor, "HEAD"],
                                    capture_output=True).returncode == 0

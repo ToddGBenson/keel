@@ -91,7 +91,9 @@ KEEL_UPSTREAM="ToddGBenson/keel"
 #   2. a repository whose trusted ref descends from RELEASE_FLOOR (keel, a GitHub fork with
 #      keel's history), or whose signer is KEEL_UPSTREAM, is held to RELEASE_FLOOR. Holding the
 #      object is not enough: a clone that fetched keel as a remote holds it off its main;
-#   3. any other repository is held to its own floor: the commit sha in .github/release-floor
+#   3. any other repository, a fork with keel's history whose trusted ref no longer descends
+#      from RELEASE_FLOOR included, is held to its own floor (and #217's per-revision reader
+#      judges the release.yml at it): the commit sha in .github/release-floor
 #      as committed on the TRUSTED ref. That is reviewed content, not a parameter, so whoever
 #      runs the verifier cannot lower it. It must be in the repository and reachable from the
 #      trusted ref. It names the first commit whose release.yml has the G5 gate and takes no
@@ -131,9 +133,16 @@ release_floor() { # $1 git dir, $2 trusted sha, $3 OWNER/REPO -> prints the floo
     git -C "$gitdir" cat-file -e "${RELEASE_FLOOR}^{commit}" 2>/dev/null \
       || die "the release floor ${RELEASE_FLOOR} is not in the repository at ${gitdir}; fetch the full history of ${KEEL_UPSTREAM} and retry"
     base=$RELEASE_FLOOR
-  elif git -C "$gitdir" cat-file -e "${RELEASE_FLOOR}^{commit}" 2>/dev/null \
-       && git -C "$gitdir" merge-base --is-ancestor "$RELEASE_FLOOR" "$trusted"; then
-    base=$RELEASE_FLOOR
+  elif git -C "$gitdir" cat-file -e "${RELEASE_FLOOR}^{commit}" 2>/dev/null; then
+    # 0: on the trusted ref; 1: not an ancestor. Anything else is git failing to tell (a missing
+    # object, a damaged clone), which must not read as "no keel history".
+    local anc=0
+    git -C "$gitdir" merge-base --is-ancestor "$RELEASE_FLOOR" "$trusted" || anc=$?
+    case "$anc" in
+      0) base=$RELEASE_FLOOR ;;
+      1) ;;
+      *) die "git could not tell whether the release floor ${RELEASE_FLOOR} is on the trusted ref (merge-base exit ${anc}); repair or re-fetch the clone at ${gitdir} and retry" ;;
+    esac
   fi
   # An absent file is "no configured floor"; a file that exists but cannot be read is refused,
   # never read as absent (review nit: it fell back to keel's floor silently).

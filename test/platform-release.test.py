@@ -573,6 +573,26 @@ try:
     check("verify: the UPSTREAM's own repository with the floor off its main -> still held to "
           "RELEASE_FLOOR (refused)", rc == 1 and "floor" in log and called is None, log)
 
+    # Review of keel #223 (2): a fork WITH keel's history leaves keel's floor by rolling its trusted
+    # branch back below it and committing its own floor file there, at a pre-gate commit. The
+    # ancestry test then holds it to its own floor; what refuses it is the per-revision reader
+    # (#217), which judges the release.yml at that floor. This row pins the pairing.
+    rolled = tmp / "rolled"
+    subprocess.run(["git", "clone", "-q", tree.as_posix(), rolled.as_posix()], check=True)
+    rgit = git_cmd(rolled)
+    subprocess.run([*rgit, "checkout", "-q", "-f", "-B", "main", old_sha], check=True)
+    (rolled / ".github" / "release-floor").write_text(old_sha + "\n", encoding="utf-8")
+    subprocess.run([*rgit, "add", "-A"], check=True)
+    subprocess.run([*rgit, "commit", "-q", "-m", "roll main back below keel's floor; own floor at the root"],
+                   check=True)
+    subprocess.run([*rgit, "tag", "v0.9.1"], check=True)
+    off = subprocess.run([*rgit, "merge-base", "--is-ancestor", main_sha, "main"]).returncode == 1
+    check("fixture (rolled-back fork): keel's floor is in the clone and no longer on its main", off)
+    rc, log, called = verify_as("owner/fork", sh=script, tag="v0.9.1", git_dir=rolled)
+    check("verify: a fork that rolls its trusted branch below keel's floor and commits its own "
+          "pre-gate floor there -> refused before cosign",
+          rc == 1 and "lacks the G5 gate" in log and called is None, log)
+
     rc, log, called = verify(bundle.as_posix(), tag="v9.9.9")
     check("verify: a tag the repository does not have -> refused",
           rc == 1 and "v9.9.9" in log and called is None, log)
