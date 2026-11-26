@@ -13,6 +13,13 @@
 
 set -uo pipefail
 
+# TheHub #62264 (review of keel #218): the whole hook is one function, called on the last line.
+# bash reads a script as it runs it, at a byte offset, so a file rewritten in place while a run
+# waits (cp, a redirect, an editor that saves in place) could hand the rest of the run text the
+# hook never had, and an allow. A function is parsed whole before any of it runs: a cut file is a
+# syntax error, and a later rewrite cannot change what this run does.
+guard_main() {
+
 # TheHub #61843: PIN PATH. Every rule reads the command through grep, sed, awk, tr, cat
 # and jq, looked up on PATH. A directory earlier on PATH that an agent can write to
 # (~/bin, ~/.local/bin, a venv's bin) could hold a grep that always answers "no match" or
@@ -61,6 +68,7 @@ hash -r
 # deadline. The live hook takes no override.
 guard_deadline=40  # guard-deadline: the hook tests rewrite this line, and only it
 guard_max_bytes=1048576
+[ "${1:-}" = "--guard-worker" ] && export -n guard_nonce 2>/dev/null
 if [ "${1:-}" != "--guard-worker" ]; then
   # The supervisor's own stderr is fd 3; fd 2 is muted, so bash's job notices ("Killed")
   # never reach Claude Code.
@@ -75,8 +83,8 @@ if [ "${1:-}" != "--guard-worker" ]; then
   }
   guard_err="$(command mktemp 2>/dev/null)" || { guard_block "it cannot create its output file"; exit 2; }
   set -m
-  # TheHub #62264: the guard proves it reached its verdict by writing this line, which no command
-  # can predict, as the last line of its stderr; an exit 0 without it is a block.
+  # TheHub #62264: the worker proves it reached its verdict by writing this line, new for each
+  # run, to its stderr; an exit 0 without it is a block. The worker keeps it out of its children.
   guard_nonce="guard-bash.sh verdict: allow $$.$RANDOM.$RANDOM"
   guard_nonce=$guard_nonce "$BASH" "${BASH_SOURCE[0]}" --guard-worker <&0 >/dev/null 2>"$guard_err" &
   guard_wpid=$!
@@ -2246,6 +2254,8 @@ if [[ $raw_cmd =~ $ctr_eng_re ]] || [[ $ps_cmd =~ $ctr_eng_re ]]; then
   [ "$ps_cmd" != "$raw_cmd" ] && ctr_guard "$ps_cmd"
 fi
 
-# The verdict, and the last line of this file: a read cut anywhere before or inside it ends
-# with no verdict, or with a command that does not exist, and blocks (TheHub #62264).
+# The verdict (TheHub #62264): guard_allow is the only allow, and a run cut short never reaches it.
 guard_allow
+}
+# The last line of this file: the hook runs only once bash has read all of it.
+guard_main "$@"

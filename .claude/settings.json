@@ -84,7 +84,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash -c 'v=$(bash \"$1\"); r=$?; [ \"$r\" = 0 ] && [ \"$v\" = \"guard-verdict: allow\" ] && exit 0; [ \"$r\" = 2 ] || echo \"BLOCKED by $1: it exited $r without its verdict (TheHub #62264: was the file being rewritten as it started?). Retry the call.\" >&2; exit 2' guard-hook \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard-bash.sh\""
+            "command": "bash -c 'trap \"echo \\\"BLOCKED by $1: the guard was sent a signal, so it cannot tell whether the call is allowed. Retry the call.\\\" >&2; exit 2\" HUP INT TERM PIPE ALRM USR1 USR2; v=$(bash \"$1\"); r=$?; [ \"$r\" = 0 ] && [ \"$v\" = \"guard-verdict: allow\" ] && exit 0; [ \"$r\" = 2 ] || echo \"BLOCKED by $1: it exited $r without its verdict (TheHub #62264). Either the file was being rewritten as it started (retry the call), or this checkout's hook predates TheHub #62264 (a branch cut before it): switch the checkout back to a branch that has it, or merge main into this branch. Every Bash and Write call is blocked until then, so a person may need to run the switch.\" >&2; exit 2' guard-hook \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard-bash.sh\""
           }
         ]
       },
@@ -93,7 +93,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash -c 'v=$(bash \"$1\"); r=$?; [ \"$r\" = 0 ] && [ \"$v\" = \"guard-verdict: allow\" ] && exit 0; [ \"$r\" = 2 ] || echo \"BLOCKED by $1: it exited $r without its verdict (TheHub #62264: was the file being rewritten as it started?). Retry the call.\" >&2; exit 2' guard-hook \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard-write.sh\""
+            "command": "bash -c 'trap \"echo \\\"BLOCKED by $1: the guard was sent a signal, so it cannot tell whether the call is allowed. Retry the call.\\\" >&2; exit 2\" HUP INT TERM PIPE ALRM USR1 USR2; v=$(bash \"$1\"); r=$?; [ \"$r\" = 0 ] && [ \"$v\" = \"guard-verdict: allow\" ] && exit 0; [ \"$r\" = 2 ] || echo \"BLOCKED by $1: it exited $r without its verdict (TheHub #62264). Either the file was being rewritten as it started (retry the call), or this checkout's hook predates TheHub #62264 (a branch cut before it): switch the checkout back to a branch that has it, or merge main into this branch. Every Bash and Write call is blocked until then, so a person may need to run the switch.\" >&2; exit 2' guard-hook \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard-write.sh\""
           }
         ]
       }

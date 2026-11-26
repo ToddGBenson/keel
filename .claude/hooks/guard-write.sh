@@ -10,6 +10,13 @@
 
 set -uo pipefail
 
+# TheHub #62264 (review of keel #218): the whole hook is one function, called on the last line.
+# bash reads a script as it runs it, at a byte offset, so a file rewritten in place while a run
+# waits (cp, a redirect, an editor that saves in place) could hand the rest of the run text the
+# hook never had, and an allow. A function is parsed whole before any of it runs: a cut file is a
+# syntax error, and a later rewrite cannot change what this run does.
+guard_main() {
+
 # TheHub #61844: FAIL CLOSED, as guard-bash.sh does since TheHub #61794. This hook
 # had the same three defects (test/hook-write-fail-closed.test.py holds each):
 #
@@ -302,6 +309,8 @@ case "$npath" in
 esac
 shopt -u nocasematch
 
-# The verdict, and the last line of this file: a read cut anywhere before or inside it ends
-# with no verdict, or with a command that does not exist, and blocks (TheHub #62264).
+# The verdict (TheHub #62264): guard_allow is the only allow, and a run cut short never reaches it.
 guard_allow
+}
+# The last line of this file: the hook runs only once bash has read all of it.
+guard_main "$@"
