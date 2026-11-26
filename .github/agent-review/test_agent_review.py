@@ -267,6 +267,17 @@ class Decisions(unittest.TestCase):
             gh.add_pr(comments=[verdict(spelled, HEAD, "SHIP")])
             self.assertEqual(self.run_gate(gh).conclusion, "failure", spelled)
 
+    def test_a_trailer_without_a_version_matches_every_version(self):
+        # "Co-Authored-By: Claude Sonnet" is on real commits; a Sonnet 5.5 review is no
+        # more independent of it than a Sonnet review would be.
+        gh = FakeGitHub()
+        gh.add_pr(commits=[commit(HEAD, "a\n\nCo-Authored-By: Claude Sonnet <noreply@anthropic.com>")],
+                  comments=[verdict("Sonnet 5.5", HEAD, "SHIP")])
+        self.assertEqual(self.run_gate(gh).conclusion, "failure")
+        self.assertTrue(ar.same_model("opus", "opus-5-5"))
+        self.assertFalse(ar.same_model("opus-5-5", "opus-5-4"))
+        self.assertFalse(ar.same_model("opus-5", "fable-5"))
+
     def test_any_builder_model_counts_as_the_builder(self):
         gh = FakeGitHub()
         gh.add_pr(commits=[commit(OLD, "a\n\nCo-Authored-By: Claude Fable 5.2 <noreply@anthropic.com>"),
