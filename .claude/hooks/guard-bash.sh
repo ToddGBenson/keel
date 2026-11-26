@@ -1682,11 +1682,14 @@ END {
     # TheHub #62239 follow-up: ${...} stays inside its word too, so a << inside it opens no heredoc
     # and a # inside it is text. It ends where bash ends it (review of binnacle #119): only ${ is a
     # level, a bare { is text, a backslash steps over the next character, and quotes are skipped.
-    # Still open at the end of the text (or of a body), the $ is read as an ordinary character.
+    # Still open at the end of the text (or of a body), the $ is read as an ordinary character. So
+    # is one holding $(, a backtick or an ANSI-C quote outside single quotes, which this loop does not parse: a
+    # quote in a comment or heredoc inside it ran the loop past the end (second review of binnacle #119).
     if (c == "$" && substr(s, i + 1, 1) == "{") {
       d = 1; qq = ""
       for (j = i + 2; j <= n; j++) {
         x = substr(s, j, 1); if (x == "\005") { j = n + 1; break }
+        if (qq != "\047" && (x == "`" || (x == "$" && (substr(s, j + 1, 1) == "(" || substr(s, j + 1, 1) == "\047")))) { j = n + 1; break }
         if (x == "\\" && qq != "\047") { j++; continue }
         if (qq != "") { if (x == qq) qq = ""; continue }
         if (x == "\047" || x == "\"") qq = x
@@ -1922,11 +1925,14 @@ END {
     # comment ends at the closing backtick. Dropping the rest of the line hid a release-tag push.
     # It ends where bash ends it (review of binnacle #119): only ${ is a level, a bare { is text,
     # a backslash steps over the next character, and quotes are skipped. Still open at the end of
-    # the text, the $ is read as an ordinary character, as before.
+    # the text, the $ is read as an ordinary character, as before. So is one holding $(, a backtick
+    # or $' outside single quotes, which this loop does not parse: a quote in a comment or heredoc
+    # inside it ran the loop past the end (second review of binnacle #119).
     if (c == "$" && d == "{") {
       e = 1; qq = ""
       for (j = i + 2; j <= n; j++) {
         x = substr(s, j, 1)
+        if (qq != "'" && (x == "`" || (x == "$" && (substr(s, j + 1, 1) == "(" || substr(s, j + 1, 1) == "'")))) { j = n + 1; break }
         if (x == "\\" && qq != "'") { j++; continue }
         if (qq != "") { if (x == qq) qq = ""; continue }
         if (x == "'" || x == "\"") qq = x
