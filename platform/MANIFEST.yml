@@ -168,6 +168,9 @@ project_owned:
 # and silently skipping it would strand you on an old control set.
 merge_required:
   - .github/workflows/
+  # The agent-review gate (TheHub #62342): the code agent-review.yml runs, merged
+  # with that workflow, since a fork's App, checks and trust rules are its own.
+  - .github/agent-review/
   - .github/CODEOWNERS
   - .github/ISSUE_TEMPLATE/
   - .github/PULL_REQUEST_TEMPLATE.md
