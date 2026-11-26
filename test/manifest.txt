@@ -64,6 +64,6 @@ test/control-liveness-keel.test.py  test         keel liveness: frozen legacy G3
 test/mykronos-pins.test.py          test         every MyKronos pin names one commit, none before mykronos #1036 (TheHub #61212)
 test/configure-github.test.py       test         configure-github.sh: the merge gate is MyKronos independent-review, App-pinned (TheHub #60978)
 test/self-review-docs.test.py       lint         docs: the building agent writes the self-review, the operator does not run it (TheHub #61360)
-.github/agent-review/test_agent_review.py lint       agent-review gate: who may merge itself (TheHub #62342)
+test/agent-review.test.py           lint         agent-review gate: who may merge itself (TheHub #62342)
 # keel is PUBLIC: no home path, personal email, private IP or owner name in the tree (TheHub #62227).
 test/public-readiness.test.py       lint,quick   public tree: no home path, personal email, private IP or owner name (TheHub #62227)
