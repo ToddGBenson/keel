@@ -123,6 +123,15 @@ def model_key(name: str) -> str:
     return "-".join(t for t in tokens if t != "claude")
 
 
+def same_model(a: str, b: str) -> bool:
+    """Whether two model keys can name one model. A key without a version
+    ('sonnet', from a 'Co-Authored-By: Claude Sonnet' trailer) matches every
+    version of it; 'opus-5-5' and 'opus-5-4' are two models."""
+    ta, tb = a.split("-"), b.split("-")
+    n = min(len(ta), len(tb))
+    return n > 0 and ta[:n] == tb[:n]
+
+
 def parse_verdict(body: str | None) -> Verdict | None:
     first = (body or "").split("\n", 1)[0]
     if first.endswith("\r"):
@@ -274,7 +283,8 @@ class Gate:
             return _fail("Not independent: the builder's model is unknown",
                          "No commit carries a `Co-Authored-By: Claude ...` trailer, so the "
                          "review cannot be shown to come from another model." + note)
-        independent = [(c, v, t) for c, v, t in ships if v.model_key not in builders]
+        independent = [(c, v, t) for c, v, t in ships
+                       if not any(same_model(v.model_key, b) for b in builders)]
         if not independent:
             return _fail("Not independent: the reviewer is the same model as the builder",
                          f"Builder: {', '.join(sorted(builders))}. Reviews: "
