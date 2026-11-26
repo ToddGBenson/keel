@@ -1,6 +1,6 @@
 # Security Policy
 
-**CIS Software Supply Chain 1.2.5** · **NIST IR-6, RA-5, SI-2** · **Owner:** Todd Benson
+**CIS Software Supply Chain 1.2.5** · **NIST IR-6, RA-5, SI-2** · **Owner:** the system owner
 
 ## Reporting a vulnerability
 

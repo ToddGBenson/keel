@@ -45,10 +45,15 @@ EVALS=evals/run-agent-evals.sh
 
 rc=0
 failed=()
+# TheHub #62268: each suite's time, so a run that overruns its timeout on a small worker
+# says which suite took it. The slowest are listed again at the end.
+timings=()
 suite() {
-  local name=$1; shift
+  local name=$1 t0=$SECONDS took; shift
   echo "── ${name} ──"
-  if "$@"; then echo "   ${name}: pass"; else echo "   ${name}: FAIL"; rc=1; failed+=("$name"); fi
+  if "$@"; then took=$((SECONDS - t0)); echo "   ${name}: pass (${took} s)"
+  else took=$((SECONDS - t0)); echo "   ${name}: FAIL (${took} s)"; rc=1; failed+=("$name"); fi
+  timings+=("${took} ${name}")
 }
 shopt -s nullglob
 for t in test/*.test.py; do suite "$(basename "$t" .py)" python "$t"; done
@@ -64,6 +69,8 @@ suite guard-selftest bash "$SELFTEST"
 suite agent-evals    bash "$EVALS"
 
 echo
+echo "Slowest suites (seconds), of ${SECONDS} s in all:"
+printf '%s\n' "${timings[@]}" | sort -rn | head -n 5 | sed 's/^/   /'
 if [ "$rc" -eq 0 ]; then
   echo "All unit suites passed on #${number} ${sha}."
 else

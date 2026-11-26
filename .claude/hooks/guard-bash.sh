@@ -13,6 +13,13 @@
 
 set -uo pipefail
 
+# TheHub #62264 (review of keel #218): the whole hook is one function, called on the last line.
+# bash reads a script as it runs it, at a byte offset, so a file rewritten in place while a run
+# waits (cp, a redirect, an editor that saves in place) could hand the rest of the run text the
+# hook never had, and an allow. A function is parsed whole before any of it runs: a cut file is a
+# syntax error, and a later rewrite cannot change what this run does.
+guard_main() {
+
 # TheHub #61843: PIN PATH. Every rule reads the command through grep, sed, awk, tr, cat
 # and jq, looked up on PATH. A directory earlier on PATH that an agent can write to
 # (~/bin, ~/.local/bin, a venv's bin) could hold a grep that always answers "no match" or
@@ -61,6 +68,7 @@ hash -r
 # deadline. The live hook takes no override.
 guard_deadline=40  # guard-deadline: the hook tests rewrite this line, and only it
 guard_max_bytes=1048576
+[ "${1:-}" = "--guard-worker" ] && export -n guard_nonce 2>/dev/null
 if [ "${1:-}" != "--guard-worker" ]; then
   # The supervisor's own stderr is fd 3; fd 2 is muted, so bash's job notices ("Killed")
   # never reach Claude Code.
@@ -75,7 +83,10 @@ if [ "${1:-}" != "--guard-worker" ]; then
   }
   guard_err="$(command mktemp 2>/dev/null)" || { guard_block "it cannot create its output file"; exit 2; }
   set -m
-  "$BASH" "${BASH_SOURCE[0]}" --guard-worker <&0 >/dev/null 2>"$guard_err" &
+  # TheHub #62264: the worker proves it reached its verdict by writing this line, new for each
+  # run, to its stderr; an exit 0 without it is a block. The worker keeps it out of its children.
+  guard_nonce="guard-bash.sh verdict: allow $$.$RANDOM.$RANDOM"
+  guard_nonce=$guard_nonce "$BASH" "${BASH_SOURCE[0]}" --guard-worker <&0 >/dev/null 2>"$guard_err" &
   guard_wpid=$!
   # The timer: USR1 at the deadline, USR2 at once if it cannot sleep (no timer, no verdict).
   ( if command sleep "$guard_deadline"; then kill -USR1 "$$"; else kill -USR2 "$$"; fi ) </dev/null >/dev/null 2>&1 &
@@ -87,11 +98,19 @@ if [ "${1:-}" != "--guard-worker" ]; then
     guard_stop "$guard_tpid"
     [ -n "${2:-}" ] && guard_stop "$guard_wpid"
     # Builtins only: a broken cat must not hide the guard's own message.
+    local guard_seen=0
     while IFS= read -r guard_line || [ -n "$guard_line" ]; do
+      [ "$guard_line" = "$guard_nonce" ] && { guard_seen=1; continue; }
       printf '%s\n' "$guard_line" >&3
     done < "$guard_err"
     command rm -f "$guard_err" 2>/dev/null
     if [ -n "${2:-}" ]; then guard_block "$2"; exit 2; fi
+    if [ "$1" -eq 0 ]; then
+      [ "$guard_seen" -eq 1 ] || { guard_block "the guard ended without reaching its verdict (its file may have been rewritten while it started, TheHub #62264)"; exit 2; }
+      # The settings entry allows only when this line is the hook's whole stdout (TheHub #62264), so a
+      # run of this file that bash cut short, before this point, is a block too.
+      printf '%s\n' "guard-verdict: allow"
+    fi
     exit "$1"
   }
   trap 'guard_done 2 "it ran past its own deadline of ${guard_deadline} s"' USR1
@@ -226,6 +245,11 @@ guard_exit() { # builtins only: a broken helper must not be able to hide its own
       why="a helper it reads the command with failed (${lines[*]:1:3})"
     elif [ "$rc" -ne 0 ]; then
       why="it stopped with exit $rc before reaching a verdict"
+    elif [ "$guard_verdict" != 1 ]; then
+      # TheHub #62264: bash reads a script as it runs it. A hook file rewritten in place while a run
+      # starts (a branch switch, a platform sync) can end early, and bash then exits 0 at the cut:
+      # an allow nobody decided. An allow now comes only from guard_allow, which the rules end in.
+      why="it reached the end of what it read without a verdict (its file may have been rewritten while it ran)"
     fi
   fi
   command rm -f "$guard_faults" 2>/dev/null
@@ -238,8 +262,15 @@ guard_exit() { # builtins only: a broken helper must not be able to hide its own
     } >&2
     exit 2
   fi
+  [ "$rc" -eq 0 ] && [ -n "${guard_nonce:-}" ] && printf '%s\n' "$guard_nonce" >&2
   exit "$rc"
 }
+# TheHub #62264: guard_allow is the only allow. It is called where a verdict is reached (the last
+# line of this file, and an empty command or path), so a run whose file was cut short ends without
+# one, and guard_exit turns that into a block. The verdict starts empty here: nothing inherited
+# from the environment may stand in for it.
+guard_verdict=""
+guard_allow() { guard_verdict=1; exit 0; }
 trap guard_exit EXIT
 # TheHub #61973: a catchable signal ends the shell with 128+N, which Claude Code reads as
 # an allow. Each one is recorded as a fault and turned into a block by the EXIT trap.
@@ -381,7 +412,7 @@ else
   fi
 fi
 
-[ -z "$cmd" ] && exit 0
+[ -z "$cmd" ] && guard_allow
 
 # TheHub #61038 review: a backslash-newline continues the command, for every command.
 # This was done for curl only, so `gh api --method POST \<newline> .../pending_deployments`
@@ -1507,17 +1538,36 @@ push_judge() { # $@: the words of one invocation
   [ -n "${guard_cwd_read:-}" ] || { guard_read_cwd; guard_cwd_read=1; }   # TheHub #62258: on first use
   local base="${payload_cwd:-$PWD}" branch rc
   if [ -n "$dir" ]; then case "$dir" in /*|[A-Za-z]:[/\\]*) base=$dir ;; *) base="$base/$dir" ;; esac; fi
-  branch=$(command git -C "$base" symbolic-ref --short -q HEAD 2>/dev/null); rc=$?
-  case "$rc" in
-    0) ;;
-    1) return 0 ;;                                         # a detached HEAD is not a branch
-    128) [ -z "$dir" ] && return 0                          # the payload cwd is not a repository: nothing to judge
-         block "a push of the current branch from ${dir} (git -C), which git cannot read as a repository. Name the branch: git push origin <feature>." "AC-5, CM-5" ;;
-    *) block "a push of the current branch, which this hook cannot read (git exited ${rc}): it may be main. Name the branch: git push origin <feature>." "AC-5, CM-5" ;;
-  esac
-  case "$branch" in
-    main|master) block "a push of the current branch, which is $branch (in $base). All change goes through a reviewed PR: push a feature branch." "AC-5, CM-5" ;;
-  esac
+  # TheHub #62265: git reads GIT_DIR, GIT_WORK_TREE, GIT_COMMON_DIR, GIT_CEILING_DIRECTORIES, the
+  # GIT_CONFIG_* injections and the rest from the environment, and the hook inherits whatever its
+  # caller set. With GIT_DIR naming a feature checkout's .git (or no repository at all), the read
+  # below said "feat" (or "not a repository") for a checkout on main, and the push was allowed. The
+  # branch is now read with every GIT_* variable removed, from the payload's cwd. It is not ONLY
+  # read that way: the push itself inherits the same environment, so a GIT_DIR naming main's .git
+  # pushes main from any cwd. When any GIT_* variable is set, both readings are judged, and either
+  # one that is main, or that cannot be read, blocks.
+  local view
+  for view in clean inherited; do
+    if [ "$view" = clean ]; then
+      branch=$(unset "${!GIT_@}"; command git -C "$base" symbolic-ref --short -q HEAD 2>/dev/null); rc=$?
+    else
+      [ -n "${!GIT_*}" ] || break
+      branch=$(command git -C "$base" symbolic-ref --short -q HEAD 2>/dev/null); rc=$?
+    fi
+    case "$rc" in
+      0) ;;
+      1) continue ;;                                       # a detached HEAD is not a branch
+      128) if [ -z "$dir" ] && [ "$view" = clean ]; then continue; fi   # the payload cwd is not a repository: nothing to judge
+           [ -z "$dir" ] && block "a push of the current branch while the environment sets ${!GIT_*} and git cannot read a repository from it: which branch it pushes cannot be read here. Name the branch: git push origin <feature>." "AC-5, CM-5"
+           block "a push of the current branch from ${dir} (git -C), which git cannot read as a repository. Name the branch: git push origin <feature>." "AC-5, CM-5" ;;
+      *) block "a push of the current branch, which this hook cannot read (git exited ${rc}): it may be main. Name the branch: git push origin <feature>." "AC-5, CM-5" ;;
+    esac
+    case "$branch" in
+      main|master)
+        [ "$view" = clean ] && block "a push of the current branch, which is $branch (in $base). All change goes through a reviewed PR: push a feature branch." "AC-5, CM-5"
+        block "a push of the current branch, which is $branch as the environment's ${!GIT_*} reads it. All change goes through a reviewed PR: push a feature branch." "AC-5, CM-5" ;;
+    esac
+  done
   return 0
 }
 push_guard() { # $1: one view of the command
@@ -2223,4 +2273,8 @@ if [[ $raw_cmd =~ $ctr_eng_re ]] || [[ $ps_cmd =~ $ctr_eng_re ]]; then
   [ "$ps_cmd" != "$raw_cmd" ] && ctr_guard "$ps_cmd"
 fi
 
-exit 0
+# The verdict (TheHub #62264): guard_allow is the only allow, and a run cut short never reaches it.
+guard_allow
+}
+# The last line of this file: the hook runs only once bash has read all of it.
+guard_main "$@"

@@ -1,7 +1,7 @@
 # Self-review — TheHub #60980
 
 Mode: solo (POAM-008)
-PR: #147   Author: Todd Benson (Claude Opus 5.5, AI-authored)   Date: 2026-10-23
+PR: #147   Author: the system owner (Claude Opus 5.5, AI-authored)   Date: 2026-10-23
 
 One list of test files, `test/manifest.txt`, read by `ci/scripts/ci-stage.sh` and by
 `./keel check` through `scripts/test-manifest.py`. CI fails on a test file the list does not
