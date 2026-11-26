@@ -61,8 +61,16 @@ LARGE["self-merge, then 100,000 one-character comment lines"] = MUST_BLOCK["self
 # 18.8 s, keel #189), while a per-kilobyte cost still shows as a multiple of the one-line time.
 # The ceiling stays absolute: past Claude Code's 60 s hook timeout the call proceeds, so no box
 # may take longer than BUDGET_CEILING_S, however slow its one-line time.
-BUDGET_X = 4
+# Review of keel #221 (2): a padded harmless command costs a healthy hook about 8x its one-line
+# time (0.5 s against 0.06 s on the GitHub runner, 7-8.6 s against ~1 s in a capped container),
+# so 4x failed on a slow box. 10x covers that shape; BASE_MAX_S keeps a uniform slowdown visible.
+BUDGET_X = 10
 BUDGET_CEILING_S = 50
+# Review of keel #221: a cost paid on EVERY call moves the base and the budget together, so a
+# relative budget alone passed a hook that slept 10 s per call. The base itself is bounded,
+# absolutely: measured one-line times are 0.06 s (GitHub runner), 0.6-1.1 s (a capped 2-CPU
+# container), 2.3 s (the small worker); a hook over BASE_MAX_S on a one-line command fails here.
+BASE_MAX_S = 5
 # Never under the old absolute 5 s: on a fast box a padded harmless command (every rule on every
 # view) takes more than 4x a one-line one, and that was never a fault.
 BUDGET_FLOOR_S = 5
@@ -167,6 +175,8 @@ def main():
         budget = min(max(BUDGET_X * base + 1.0, BUDGET_FLOOR_S), BUDGET_CEILING_S)
         print(f"  timing: base {base:.2f} s (`{HARMLESS}`, best of 3) x {BUDGET_X} + 1 s = {budget:.1f} s budget"
               f" (floor {BUDGET_FLOOR_S} s, ceiling {BUDGET_CEILING_S} s)")
+        check(f"the one-line time is under {BASE_MAX_S} s (base {base:.2f} s): a hook slow on every call is a fault",
+              base < BASE_MAX_S, "TOO SLOW: every call pays this, and the relative budget would hide it")
 
         print("a large command: a match is still a match (review #1)")
         for with_jq in ([True, False] if have_jq else [False]):
@@ -178,10 +188,10 @@ def main():
                 want = 0 if name in HARMLESS_LARGE and not capped else 2
                 for t in ("Bash", "PowerShell"):
                     mode = "jq" if with_jq else "no-jq"
-                    # [TheHub #61973, review of #184] The better of two runs, so one starved
-                    # sample on a busy worker is not a failure; the budget is unchanged.
+                    # [TheHub #61973, review of #184] The best of three runs (as the base is), so
+                    # one starved sample on a busy worker is not a failure; the budget is unchanged.
                     took = None
-                    for _ in range(2):
+                    for _ in range(3):
                         start = time.monotonic()
                         rc, err = run(cmd, d, t)
                         took = min(took, time.monotonic() - start) if took is not None else time.monotonic() - start
@@ -192,7 +202,7 @@ def main():
                     why_ok = not capped or "over 256 KB" in err
                     check(f"{mode} {t}: {name} is {verdict}", rc == want and why_ok, f"rc={rc} {err[:200]}")
                     check(f"{mode} {t}: {name} is decided in {took:.1f} s (budget {budget:.1f} s ="
-                          f" {BUDGET_X} x base {base:.2f} s + 1 s, floor {BUDGET_FLOOR_S} s, ceiling {BUDGET_CEILING_S} s; best of two)",
+                          f" {BUDGET_X} x base {base:.2f} s + 1 s, floor {BUDGET_FLOOR_S} s, ceiling {BUDGET_CEILING_S} s; best of three)",
                           took < budget, "TOO SLOW: a hook past its timeout lets the call proceed")
 
         print("one helper fails: the hook refuses")

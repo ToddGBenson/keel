@@ -53,6 +53,13 @@ DEADLINE_S = 2
 # under DEADLINE_S and never over BUDGET_CEILING_S (under Claude Code's 60 s hook timeout).
 BUDGET_X = 4
 BUDGET_CEILING_S = 50
+# Review of keel #221: a cost paid on EVERY call moves the base and the budget together, so a
+# relative budget alone passed a hook that slept 10 s per call. The base itself is bounded,
+# absolutely: measured one-line times are 0.06 s (GitHub runner), 0.6-1.1 s (a capped 2-CPU
+# container), 2.3 s (the small worker); a hook over BASE_MAX_S on a one-line command fails here.
+BASE_MAX_S = 5
+# The 1 MiB refusal's budget is never under this (it was an absolute 10 s).
+SIZE_FLOOR_S = 5
 failures = []
 
 
@@ -154,7 +161,10 @@ def main():
         relative = max(DEADLINE_S, min(int(BUDGET_X * base + 1.0 + 0.999), BUDGET_CEILING_S))
         print(f"  timing: base {base:.2f} s (`{HARMLESS}`, best of 3) x {BUDGET_X} + 1 s -> a {relative} s deadline"
               f" (at least {DEADLINE_S} s, ceiling {BUDGET_CEILING_S} s)")
-        rc, err, took = run(test_copy(BASH_HOOK, copies, relative), bash_payload(HARMLESS), clean, timeout=60)
+        check(f"the one-line time is under {BASE_MAX_S} s (base {base:.2f} s): a hook slow on every call is a fault",
+              base < BASE_MAX_S, "TOO SLOW: every call pays this, and the relative deadline would hide it")
+        rel_copy = test_copy(BASH_HOOK, copies, relative)
+        rc, err, took = run(rel_copy, bash_payload(HARMLESS), clean, timeout=60)
         check(f"no hung helper: `{HARMLESS}` is still allowed, in {took:.1f} s (deadline {relative} s)",
               rc == 0, f"rc={rc} {err[:200]}")
         text = BASH_HOOK.read_text(encoding="utf-8")
@@ -179,7 +189,9 @@ def main():
             for name, cmd in MUST_BLOCK.items():
                 rc, err, _ = run(bash_copy, bash_payload(cmd), d)
                 check(f"guard-bash.sh, {helper} killed by SIGPIPE: {name} is still blocked", rc == 2, f"rc={rc} ALLOWED")
-            rc, err, _ = run(bash_copy, bash_payload(HARMLESS), d)
+            # Review of keel #221 (3): through the relative copy, as the no-hung-helper row: the 2 s
+            # copy's deadline, not the fault, refused a harmless command on a slow box.
+            rc, err, _ = run(rel_copy, bash_payload(HARMLESS), d, timeout=60)
             # Review of keel #205: the copy has a short deadline, whose message also says
             # "internal error"; the refusal must be a fault (the failed helper, or with no jq the
             # fallback parser refusing what it could not read), never the deadline.
@@ -197,7 +209,7 @@ def main():
         big = HARMLESS + "".join(f"\n# padding line {i:06d} " + "x" * 57 for i in range(14000))
         rc, err, took = run(BASH_HOOK, bash_payload(big), clean, timeout=60)
         # TheHub #62098: within BUDGET_X x the one-line time + 1 s (base, above), not an absolute 10 s.
-        limit = min(BUDGET_X * base + 1.0, BUDGET_CEILING_S)
+        limit = min(max(BUDGET_X * base + 1.0, SIZE_FLOOR_S), BUDGET_CEILING_S)
         check(f"a {len(big) // 1024} KB harmless command is refused, in {took:.1f} s (budget {limit:.1f} s ="
               f" {BUDGET_X} x base {base:.2f} s + 1 s)",
               rc == 2 and "1048576 bytes" in err and took < limit, f"rc={rc} took {took:.1f} s {err[:200]}")
