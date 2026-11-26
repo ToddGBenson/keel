@@ -12,6 +12,7 @@ import sys
 import unittest
 from pathlib import Path
 
+sys.dont_write_bytecode = True  # no __pycache__ beside the gate
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import agent_review as ar  # noqa: E402
