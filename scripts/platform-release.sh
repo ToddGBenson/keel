@@ -88,8 +88,9 @@ KEEL_UPSTREAM="ToddGBenson/keel"
 # repository made from keel without its history (a template copy, binnacle) does not hold it,
 # so every one of its releases was refused. The floor that applies:
 #   1. a shallow clone is refused: missing history is not "no keel history";
-#   2. a repository that holds RELEASE_FLOOR (keel, a GitHub fork with keel's history), or
-#      whose signer is KEEL_UPSTREAM, is held to RELEASE_FLOOR;
+#   2. a repository whose trusted ref descends from RELEASE_FLOOR (keel, a GitHub fork with
+#      keel's history), or whose signer is KEEL_UPSTREAM, is held to RELEASE_FLOOR. Holding the
+#      object is not enough: a clone that fetched keel as a remote holds it off its main;
 #   3. any other repository is held to its own floor: the commit sha in .github/release-floor
 #      as committed on the TRUSTED ref. That is reviewed content, not a parameter, so whoever
 #      runs the verifier cannot lower it. It must be in the repository and reachable from the
@@ -97,7 +98,7 @@ KEEL_UPSTREAM="ToddGBenson/keel"
 #      workflow input as program text (keel's af878f1 fix). With no such file the release is
 #      refused. There is no implicit default: a repository's first commit may carry the
 #      pre-gate release.yml (binnacle's does), so the root is not a safe floor.
-# A repository holding RELEASE_FLOOR may still configure a floor, but only one that descends
+# A repository whose trusted ref holds RELEASE_FLOOR may still configure a floor, but only one that descends
 # from RELEASE_FLOOR: a configured floor can only move the floor forward.
 # The trusted ref names a BRANCH, never a tag (TheHub #61432 review). A short name is looked up
 # only among branches (refs/remotes/<name>, refs/heads/<name>, refs/remotes/origin/<name>), so a
@@ -122,10 +123,17 @@ release_floor() { # $1 git dir, $2 trusted sha, $3 OWNER/REPO -> prints the floo
   local gitdir=$1 trusted=$2 repo=$3 cfg base=""
   [ "$(git -C "$gitdir" rev-parse --is-shallow-repository 2>/dev/null)" = "false" ] \
     || die "the repository at ${gitdir} is a shallow clone (or not a repository); fetch its full history (no --depth) and retry: the release floor cannot be judged on part of it"
-  if git -C "$gitdir" cat-file -e "${RELEASE_FLOOR}^{commit}" 2>/dev/null; then
+  # keel's floor applies where the TRUSTED REF descends from it, not wherever its object is: a
+  # repository without keel's history whose clone also fetched keel (an upstream remote, to sync
+  # the platform) holds the object off its main, and is held to its own floor like any other.
+  # Upstream keel is held to RELEASE_FLOOR whatever its trusted ref holds.
+  if [ "$(printf '%s' "$repo" | tr 'A-Z' 'a-z')" = "$(printf '%s' "$KEEL_UPSTREAM" | tr 'A-Z' 'a-z')" ]; then
+    git -C "$gitdir" cat-file -e "${RELEASE_FLOOR}^{commit}" 2>/dev/null \
+      || die "the release floor ${RELEASE_FLOOR} is not in the repository at ${gitdir}; fetch the full history of ${KEEL_UPSTREAM} and retry"
     base=$RELEASE_FLOOR
-  elif [ "$(printf '%s' "$repo" | tr 'A-Z' 'a-z')" = "$(printf '%s' "$KEEL_UPSTREAM" | tr 'A-Z' 'a-z')" ]; then
-    die "the release floor ${RELEASE_FLOOR} is not in the repository at ${gitdir}; fetch the full history of ${KEEL_UPSTREAM} and retry"
+  elif git -C "$gitdir" cat-file -e "${RELEASE_FLOOR}^{commit}" 2>/dev/null \
+       && git -C "$gitdir" merge-base --is-ancestor "$RELEASE_FLOOR" "$trusted"; then
+    base=$RELEASE_FLOOR
   fi
   # An absent file is "no configured floor"; a file that exists but cannot be read is refused,
   # never read as absent (review nit: it fell back to keel's floor silently).
