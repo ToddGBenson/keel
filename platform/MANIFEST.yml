@@ -141,6 +141,12 @@ project_owned:
   # false the moment it landed in a fork, and sync replacing a fork's would
   # silently rewrite what the fork has declared about itself.
   - .sdlc/threat-model.yaml
+  # Your release floor (TheHub #61432, #62061): the first commit of YOUR history
+  # whose release.yml has the G5 gate. scripts/platform-release.sh reads it from
+  # the trusted ref when the repository does not carry keel's history. Upstream's
+  # would name a commit a fork does not have, and sync replacing a fork's would
+  # move its floor.
+  - .github/release-floor
   # Your intended branch protection (TheHub #60979), which the protection-drift
   # job compares with GitHub's live settings. Upstream's values describe keel's
   # main; in a fork they would report drift on the first morning, or worse,
