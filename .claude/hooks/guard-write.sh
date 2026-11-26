@@ -10,6 +10,13 @@
 
 set -uo pipefail
 
+# TheHub #62264 (review of keel #218): the whole hook is one function, called on the last line.
+# bash reads a script as it runs it, at a byte offset, so a file rewritten in place while a run
+# waits (cp, a redirect, an editor that saves in place) could hand the rest of the run text the
+# hook never had, and an allow. A function is parsed whole before any of it runs: a cut file is a
+# syntax error, and a later rewrite cannot change what this run does.
+guard_main() {
+
 # TheHub #61844: FAIL CLOSED, as guard-bash.sh does since TheHub #61794. This hook
 # had the same three defects (test/hook-write-fail-closed.test.py holds each):
 #
@@ -76,6 +83,11 @@ guard_exit() { # builtins only: a broken helper must not be able to hide its own
       why="a helper it reads the write with failed (${lines[*]:1:3})"
     elif [ "$rc" -ne 0 ]; then
       why="it stopped with exit $rc before reaching a verdict"
+    elif [ "$guard_verdict" != 1 ]; then
+      # TheHub #62264: bash reads a script as it runs it. A hook file rewritten in place while a run
+      # starts (a branch switch, a platform sync) can end early, and bash then exits 0 at the cut:
+      # an allow nobody decided. An allow now comes only from guard_allow, which the rules end in.
+      why="it reached the end of what it read without a verdict (its file may have been rewritten while it ran)"
     fi
   fi
   command rm -f "$guard_faults" 2>/dev/null
@@ -88,8 +100,16 @@ guard_exit() { # builtins only: a broken helper must not be able to hide its own
     } >&2
     exit 2
   fi
+  # The settings entry allows only when this line is the hook's whole stdout (TheHub #62264).
+  [ "$rc" -eq 0 ] && printf '%s\n' "guard-verdict: allow"
   exit "$rc"
 }
+# TheHub #62264: guard_allow is the only allow. It is called where a verdict is reached (the last
+# line of this file, and an empty command or path), so a run whose file was cut short ends without
+# one, and guard_exit turns that into a block. The verdict starts empty here: nothing inherited
+# from the environment may stand in for it.
+guard_verdict=""
+guard_allow() { guard_verdict=1; exit 0; }
 trap guard_exit EXIT
 # TheHub #61973: a catchable signal ends the shell with 128+N, which Claude Code reads as
 # an allow. Each one is recorded as a fault and turned into a block by the EXIT trap.
@@ -127,10 +147,10 @@ else
   # No reliable parser. Fail OPEN on content scanning rather than blocking all edits,
   # and say so — CI secret scanning is authoritative and will catch it server-side.
   echo "guard-write.sh: no jq or python; content scanning skipped (CI scan is authoritative)" >&2
-  exit 0
+  guard_allow
 fi
 
-[ -z "$path" ] && exit 0
+[ -z "$path" ] && guard_allow
 
 block() {
   echo "BLOCKED by .claude/hooks/guard-write.sh — $1" >&2
@@ -302,4 +322,8 @@ case "$npath" in
 esac
 shopt -u nocasematch
 
-exit 0
+# The verdict (TheHub #62264): guard_allow is the only allow, and a run cut short never reaches it.
+guard_allow
+}
+# The last line of this file: the hook runs only once bash has read all of it.
+guard_main "$@"
