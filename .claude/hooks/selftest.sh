@@ -972,6 +972,9 @@ check $'class: the tag reader reads past a # in backticks'      block "$(payload
 check $'class: the tag reader reads past a # in ${...}'         block "$(payload 'echo ${y:- #}; git push origin v2.0.0')" guard-bash.sh
 check $'class: a comment naming a release tag is text'          allow "$(payload 'git status # git push origin v2.0.0')" guard-bash.sh
 check $'class: PowerShell ${...} is one word for the tag reader' block "$(pspayload 'echo ${y:- #}; git push origin v2.0.0')" guard-bash.sh
+check $'class: ${...} ends where bash ends it (a bare {)'       block "$(payload 'echo ${y:-{}; git tag v2.0.0')" guard-bash.sh
+check $'class: an escaped quote in ${...} opens nothing'        block "$(payload $'echo ${y:-\\\'}; git push origin v2.0.0')" guard-bash.sh
+check $'class: nested ${...} then a branch push is allowed'     allow "$(payload 'echo ${a:-${b}}; git push origin feature-x')" guard-bash.sh
 echo ""
 echo "guard-write.sh — must BLOCK (AU-9, AIC-5)"
 check "hand-edit generated SARIF" block "$(wpayload 'evidence/142/g4/scan.sarif' 'x')"    guard-write.sh
