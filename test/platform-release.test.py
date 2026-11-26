@@ -529,6 +529,70 @@ try:
     check("verify: a configured floor NOT reachable from the trusted ref -> refused",
           rc == 1 and "not reachable from the trusted ref" in log and called is None, log)
 
+    # keel's floor applies where the TRUSTED REF descends from it, not wherever its object is.
+    # A repository made from keel without its history (binnacle) whose clone also fetched keel
+    # (an `upstream` remote, to sync the platform) holds RELEASE_FLOOR as an object, but not on
+    # its main. Held to keel's floor, its own configured floor "did not descend" and every
+    # release was refused; it is held to its own .github/release-floor, as in a clone without keel.
+    def unrelated(name, sh_name):
+        u = tmp / name
+        subprocess.run(["git", "init", "-q", "-b", "main", u.as_posix()], check=True)
+        ugit = git_cmd(u)
+        subprocess.run([*ugit, "commit", "-q", "--allow-empty", "-m", "its own root"], check=True)
+        (u / ".github").mkdir(exist_ok=True)
+        (u / "a.txt").write_text("gated\n", encoding="utf-8")
+        subprocess.run([*ugit, "add", "-A"], check=True)
+        subprocess.run([*ugit, "commit", "-q", "-m", "its first gated commit"], check=True)
+        own = subprocess.run([*ugit, "rev-parse", "HEAD"], capture_output=True, text=True,
+                             check=True).stdout.strip()
+        (u / ".github" / "release-floor").write_text(own + "\n", encoding="utf-8")
+        subprocess.run([*ugit, "add", "-A"], check=True)
+        subprocess.run([*ugit, "commit", "-q", "-m", "its release floor"], check=True)
+        subprocess.run([*ugit, "tag", "v3.0.0"], check=True)
+        # keel's history as an upstream remote: the floor object is present, off main.
+        subprocess.run([*ugit, "fetch", "-q", "--no-tags", tree.as_posix(),
+                        "refs/heads/main:refs/remotes/upstream/main"], check=True)
+        has = subprocess.run([*ugit, "cat-file", "-e", f"{main_sha}^{{commit}}"]).returncode == 0
+        off = subprocess.run([*ugit, "merge-base", "--is-ancestor", main_sha, "main"]).returncode != 0
+        check(f"fixture ({sh_name}): keel's floor object is in the clone, and not on its main", has and off)
+        return u
+    unrel = unrelated("unrelated", "a fork without keel history")
+    rc, log, called = verify_as("owner/fork", sh=script, tag="v3.0.0", git_dir=unrel)
+    check("verify: a repo WITHOUT keel history whose clone also fetched keel -> held to its OWN "
+          ".github/release-floor (passes)", rc == 0 and called is not None, log)
+    rc, log, called = verify_as("owner/fork", sh=script, tag="v3.0.0", git_dir=unrel, trusted="upstream/main")
+    check("verify: ... the same clone with keel's main as the trusted ref -> tag not on it, refused",
+          rc == 1 and "not reachable from" in log and called is None, log)
+    # Upstream keel itself stays held to RELEASE_FLOOR whatever its trusted ref holds.
+    up_floored = tmp / "platform-release.upstream-floored.sh"
+    upf_text, n_upf = re.subn(r'^KEEL_UPSTREAM="[^"]*"$', 'KEEL_UPSTREAM="owner/fork"',
+                              script.read_text(encoding="utf-8"), flags=re.M)
+    up_floored.write_text(upf_text, encoding="utf-8", newline="\n")
+    check("the floored script names its upstream in exactly one KEEL_UPSTREAM line", n_upf == 1)
+    rc, log, called = verify_as("owner/fork", sh=up_floored, tag="v3.0.0", git_dir=unrel)
+    check("verify: the UPSTREAM's own repository with the floor off its main -> still held to "
+          "RELEASE_FLOOR (refused)", rc == 1 and "floor" in log and called is None, log)
+
+    # Review of keel #223 (2): a fork WITH keel's history leaves keel's floor by rolling its trusted
+    # branch back below it and committing its own floor file there, at a pre-gate commit. The
+    # ancestry test then holds it to its own floor; what refuses it is the per-revision reader
+    # (#217), which judges the release.yml at that floor. This row pins the pairing.
+    rolled = tmp / "rolled"
+    subprocess.run(["git", "clone", "-q", tree.as_posix(), rolled.as_posix()], check=True)
+    rgit = git_cmd(rolled)
+    subprocess.run([*rgit, "checkout", "-q", "-f", "-B", "main", old_sha], check=True)
+    (rolled / ".github" / "release-floor").write_text(old_sha + "\n", encoding="utf-8")
+    subprocess.run([*rgit, "add", "-A"], check=True)
+    subprocess.run([*rgit, "commit", "-q", "-m", "roll main back below keel's floor; own floor at the root"],
+                   check=True)
+    subprocess.run([*rgit, "tag", "v0.9.1"], check=True)
+    off = subprocess.run([*rgit, "merge-base", "--is-ancestor", main_sha, "main"]).returncode == 1
+    check("fixture (rolled-back fork): keel's floor is in the clone and no longer on its main", off)
+    rc, log, called = verify_as("owner/fork", sh=script, tag="v0.9.1", git_dir=rolled)
+    check("verify: a fork that rolls its trusted branch below keel's floor and commits its own "
+          "pre-gate floor there -> refused before cosign",
+          rc == 1 and "lacks the G5 gate" in log and called is None, log)
+
     rc, log, called = verify(bundle.as_posix(), tag="v9.9.9")
     check("verify: a tag the repository does not have -> refused",
           rc == 1 and "v9.9.9" in log and called is None, log)

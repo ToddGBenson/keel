@@ -446,6 +446,10 @@ check("platform-release.sh: RELEASE_FLOOR is a hard-coded full sha", fm is not N
 floor = fm.group(1) if fm else ""
 have = floor and subprocess.run(["git", "-C", str(ROOT), "cat-file", "-e", f"{floor}^{{commit}}"],
                                 capture_output=True).returncode == 0
+# This is keel's own copy (project-owned): upstream keel is always held to
+# its floor by the verifier, whatever its clone or a floor file says, so this
+# section never skips for a floor off HEAD or for a .github/release-floor.
+# A repository made from keel keeps its own copy, with its own condition.
 if not have:
     # A template fork or a shallow clone does not hold keel's history. The
     # verifier refuses in that case (tested in platform-release.test.py); this
