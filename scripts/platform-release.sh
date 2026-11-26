@@ -161,6 +161,109 @@ release_floor() { # $1 git dir, $2 trusted sha, $3 OWNER/REPO -> prints the floo
   printf '%s' "$cfg"
 }
 
+# TheHub #62061: a configured floor is reviewed content, but in a repository without keel's floor
+# commit nothing held it forward, and main may need no approval: a PR moving .github/release-floor
+# back to the root commit, once merged, let a tag on the root verify, though the root's release.yml
+# signed from injected input. So the release.yml of EVERY commit from a CONFIGURED floor to the
+# tag's commit (the floor's, each commit in floor..commit including merges, and the tag's own; each
+# distinct version read once) must carry the G5 gate:
+#   - no `id-token: write` (nor write-all) at the top level;
+#   - a job holding `id-token: write` (or write-all) runs in the `production` environment, or needs,
+#     directly or through other jobs, one that does, with no `if:` and no `continue-on-error` on
+#     the signing job or on any job between it and the production job (`if: always()` would run
+#     it when production was rejected);
+#   - inside a `run:` (or an action's `script:`), every ${{ }} expression is one of a short list
+#     that cannot carry caller text: secrets.*, a fixed github.* value (sha, run_id, run_number,
+#     run_attempt, repository, repository_owner, server_url, api_url, workspace, job, workflow),
+#     runner.*. Inputs reach the shell through env:, as data. Anything else is refused, so inputs
+#     in any form (inputs['x'], format(), toJSON(inputs)), job outputs, matrix values, steps
+#     outputs, env.* and github.ref_name are all refused there.
+# It reads the workflow, not the repository's settings: whether `production` has required
+# reviewers is the environment's configuration, and is not checked here. keel's own built-in floor
+# is keel's reviewed history and is not walked.
+# Read with PyYAML, from bytes; without it the floor cannot be judged, and the release is refused.
+release_yml_gated() { # $1 git dir, $2 floor, $3 commit
+  local gitdir=$1 floor=$2 commit=$3 blob kind seen=" " out first list c
+  list=$(git -C "$gitdir" rev-list "${floor}..${commit}") \
+    || die "cannot list the commits from the release floor ${floor:0:12} to ${commit:0:12}"
+  # One line per commit, "<commit>:<path> <commit>", for one cat-file: its blob id, or "missing".
+  list=$(for c in "$floor" "$commit" $list; do printf '%s:%s %s\n' "$c" "$WORKFLOW_PATH" "$c"; done \
+         | git -C "$gitdir" cat-file --batch-check='%(objectname) %(objecttype) %(rest)') \
+    || die "cannot read ${WORKFLOW_PATH} at the commits from the release floor ${floor:0:12}"
+  while read -r blob kind first; do
+    [ "$kind" = blob ] || continue           # no release.yml at that commit: nothing signs there
+    case "$seen" in *" $blob "*) continue ;; esac
+    seen="$seen$blob "
+    out=$(git -C "$gitdir" cat-file blob "$blob" 2>/dev/null | python -c '
+import re, sys
+try:
+    import yaml
+except ImportError:
+    sys.exit("PyYAML is not installed (pip install pyyaml), so its G5 gate cannot be read")
+try:
+    wf = yaml.safe_load(sys.stdin.buffer.read()) or {}
+except yaml.YAMLError as exc:
+    sys.exit(f"it is not valid YAML ({exc.__class__.__name__})")
+if not isinstance(wf, dict):
+    sys.exit("it is not a workflow mapping")
+def signs(p):
+    return p == "write-all" or (isinstance(p, dict) and p.get("id-token") == "write")
+SAFE = re.compile(r"\s*(secrets\.[A-Za-z_][A-Za-z0-9_]*|runner\.[A-Za-z_]+"
+                  r"|github\.(sha|run_id|run_number|run_attempt|repository|repository_owner"
+                  r"|server_url|api_url|workspace|job|workflow))\s*")
+def scripts(node):
+    if isinstance(node, dict):
+        for k, v in node.items():
+            if k in ("run", "script") and isinstance(v, str):
+                yield v
+            yield from scripts(v)
+    elif isinstance(node, list):
+        for v in node:
+            yield from scripts(v)
+def unsafe(text):
+    rest = text
+    while "${{" in rest:
+        rest = rest.split("${{", 1)[1]
+        if "}}" not in rest:
+            return True
+        expr, rest = rest.split("}}", 1)
+        if not SAFE.fullmatch(expr):
+            return True
+    return False
+bad = []
+if signs(wf.get("permissions")):
+    bad.append("id-token: write at the top level")
+jobs = wf.get("jobs") or {}
+jobs = jobs if isinstance(jobs, dict) else {}
+def env_name(j):
+    e = j.get("environment") if isinstance(j, dict) else None
+    return e.get("name") if isinstance(e, dict) else e
+def behind(name, seen=()):
+    j = jobs.get(name)
+    if not isinstance(j, dict) or name in seen:
+        return False
+    if "continue-on-error" in j:
+        return False
+    if env_name(j) == "production":
+        return True
+    if "if" in j:
+        return False
+    needs = j.get("needs") or []
+    needs = [needs] if isinstance(needs, str) else needs
+    return any(behind(n, seen + (name,)) for n in needs if isinstance(n, str))
+for name, j in jobs.items():
+    if isinstance(j, dict) and signs(j.get("permissions")) and not behind(name):
+        bad.append(f"job {name} holds id-token: write outside the production environment, or "
+                   "behind it with an if: or continue-on-error that can run it without approval")
+if any(unsafe(v) for v in scripts(wf)):
+    bad.append("a ${{ }} expression in run: or script: that is not on the allowed list "
+               "(inputs reach the shell through env:)")
+if bad:
+    sys.exit("; ".join(bad))
+' 2>&1) || die "the release floor ${floor:0:12} is not safe: ${WORKFLOW_PATH} at ${first:0:12} lacks the G5 gate (${out}). Move .github/release-floor (through a reviewed PR) to the first commit whose ${WORKFLOW_PATH} has it"
+  done <<< "$list"
+}
+
 die() { echo "REFUSED: $*" >&2; exit 1; }
 
 # platform_owned paths from platform/MANIFEST.yml, one per line. The same
@@ -284,6 +387,7 @@ verify() {
   if ! git -C "$gitdir" merge-base --is-ancestor "$floor" "$commit"; then
     die "tag ${tag} is on commit ${commit}, which does not descend from the release floor ${floor}: its release.yml predates the G5 gate and could sign from injected input"
   fi
+  [ "$floor" = "$RELEASE_FLOOR" ] || release_yml_gated "$gitdir" "$floor" "$commit"   # TheHub #62061
   echo "tag: ${tag} -> ${commit}, on ${trusted}, at or above the release floor ${floor:0:12}"
 
   command -v cosign >/dev/null 2>&1 || die "cosign is not installed; cannot verify, so this is not a pass"

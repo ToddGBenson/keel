@@ -905,6 +905,65 @@ check "git tag (lists)"                allow "$(payload 'git tag')"             
 check "create a non-v tag"             allow "$(payload 'git tag rc-1')"                                 guard-bash.sh
 check "gh api GET git/refs/tags?page"  allow "$(payload "gh api 'repos/O/R/git/refs/tags?per_page=100'")" guard-bash.sh
 echo ""
+echo "guard-bash.sh — a push inside \$( ), a shell nested two deep, a newline in a quoted value (TheHub #62239)"
+# 1. The push tokenizer kept a $(...) inside the word it stands in, so a push run by the
+# substitution was never judged: allowed on main and on a detached checkout alike. Each body is
+# now judged as a command of its own, as the container rule already did.
+smain=$(mktemp -d); sfeat=$(mktemp -d); sdet=$(mktemp -d)
+git -C "$smain" init -q -b main 2>/dev/null || { git -C "$smain" init -q; git -C "$smain" checkout -q -b main; }
+git -C "$sfeat" init -q -b feat 2>/dev/null || { git -C "$sfeat" init -q; git -C "$sfeat" checkout -q -b feat; }
+git -C "$sdet" init -q 2>/dev/null; printf '%040d\n' 0 > "$sdet/.git/HEAD"   # a detached HEAD
+spay() { payload "$2" | sed "s|^{|{\"cwd\":\"$1\",|"; }
+for s in main det; do
+  sd=$smain; [ "$s" = det ] && sd=$sdet
+  check "on $s: echo \$(push +main)"                block "$(spay "$sd" 'echo $(git push origin +main)')"              guard-bash.sh
+  check "on $s: x=\$(push feat:main)"               block "$(spay "$sd" 'x=$(git push origin feat:main)')"             guard-bash.sh
+  check "on $s: \"\$(push +main)\" in quotes"       block "$(spay "$sd" 'echo "$(git push origin +main)"')"            guard-bash.sh
+  check "on $s: \$(\$(push feat:main)), nested"     block "$(spay "$sd" 'echo $(echo $(git push origin feat:main))')"  guard-bash.sh
+  check "on $s: \$(cd, newline, push +main)"        block "$(spay "$sd" "x=\$(cd /${nl}git push origin +main)")"     guard-bash.sh
+  check "on $s: \${x:-\$(push +main)}"              block "$(spay "$sd" 'echo ${x:-$(git push origin +main)}')"        guard-bash.sh
+  check "on $s: PS \$(push feat:main)"              block "$(spay "$sd" 'echo $(git push origin feat:main)' | sed 's/^{/{"tool_name":"PowerShell",/')" guard-bash.sh
+  check "on $s: echo \$(git rev-parse HEAD)"        allow "$(spay "$sd" 'echo $(git rev-parse HEAD)')"                 guard-bash.sh
+  check "on $s: x=\$(push origin feat)"             allow "$(spay "$sd" 'x=$(git push origin feat)')"                  guard-bash.sh
+done
+check "on main: x=\$(git push), the current branch" block "$(spay "$smain" 'x=$(git push 2>&1)')"                     guard-bash.sh
+check "on feat: x=\$(git push), the current branch" allow "$(spay "$sfeat" 'x=$(git push 2>&1)')"                     guard-bash.sh
+check "detached: x=\$(git push)"                    allow "$(spay "$sdet" 'x=$(git push 2>&1)')"                      guard-bash.sh
+# The same class in the push tokenizer: a newline inside a quoted option value split the word,
+# so its second line read as the repository and the real one as a refspec.
+check "on main: push -o \"a<NL>b\" origin"          block "$(spay "$smain" "git push -o \"a${nl}b\" origin")"         guard-bash.sh
+check "on feat: push -o \"a<NL>b\" origin"          allow "$(spay "$sfeat" "git push -o \"a${nl}b\" origin")"         guard-bash.sh
+check "on main: commit -m \"a<NL>b\""               allow "$(spay "$smain" "git commit -m \"a${nl}b\"")"              guard-bash.sh
+rm -rf "$smain" "$sfeat" "$sdet"
+# 2. A shell -c body was judged only through the PowerShell view's quote removal, which reaches
+# one level down. Every word after a shell that names an engine is now judged as a command.
+check "bash -c 'bash -c \"docker run\"', uncapped"   block "$(payload "bash -c 'bash -c \"docker run --rm python:3.12 pytest\"'")"   guard-bash.sh
+check "sh -c \"bash -c 'docker run'\", uncapped"     block "$(payload "sh -c \"bash -c 'docker run --rm python:3.12 pytest'\"")"     guard-bash.sh
+check "three shells deep, uncapped"                 block "$(payload "bash -c 'sh -c \"bash -c \\\"docker run --rm python:3.12 pytest\\\"\"'")" guard-bash.sh
+check "bash -lc 'bash -c \"compose run backend\"'"  block "$(payload "bash -lc 'bash -c \"docker compose run --rm backend pytest\"'")" guard-bash.sh
+check "PS: bash -c 'bash -c \"docker run\"'"        block "$(pspayload "bash -c 'bash -c \"docker run --rm python:3.12 pytest\"'")" guard-bash.sh
+check "two shells deep, capped"                     allow "$(payload "bash -c 'bash -c \"docker run --rm --cpus 2 --memory 2g python:3.12 pytest\"'")" guard-bash.sh
+check "two shells deep, docker ps"                  allow "$(payload "bash -c 'bash -c \"docker ps\"'")"                                guard-bash.sh
+check "a shell running a script named docker-x.sh"  allow "$(payload 'bash docker-x.sh pytest')"                                       guard-bash.sh
+# 3. The container tokenizer printed one word per line, so a newline inside a quoted value split
+# it: the label's text was read as the caps. A newline inside a word now stays inside it.
+check "docker run -l \"a<NL>--cpus=2<NL>--memory=2g\""  block "$(payload "docker run --rm -l \"a${nl}--cpus=2${nl}--memory=2g\" python:3.12 pytest")" guard-bash.sh
+check "docker run -e \"X<NL>--cpus 2<NL>--memory 2g\""  block "$(payload "docker run --rm -e \"X=1${nl}--cpus 2${nl}--memory 2g\" python:3.12 pytest")" guard-bash.sh
+check "docker run --name \"a<NL>pytest\", capped"       allow "$(payload "docker run --rm --cpus 2 --memory 2g --name \"a${nl}b\" python:3.12 pytest")" guard-bash.sh
+check "docker run img \"pytest<NL>\", uncapped"          block "$(payload "docker run --rm python:3.12 \"pytest${nl}\"")"                  guard-bash.sh
+check "bash -c with a newline: docker ps, then pytest"  allow "$(payload "bash -c \"docker ps${nl}echo pytest\"")"                        guard-bash.sh
+echo ""
+echo "guard-bash.sh — a heredoc body fed to a shell is a command, a # or << is read as bash reads it (TheHub #62071, #62239)"
+# One row per class. The full input list is kept in the private mirror's corpus.
+check $'class: a wrapper before the shell fed a heredoc'        block "$(payload $'env bash <<EOF\ndocker run --rm python:3.12 pytest\nEOF')" guard-bash.sh
+check $'class: a heredoc carried across a pipe to a shell'      block "$(payload $'cat <<EOF | sh\ndocker run --rm python:3.12 pytest\nEOF')" guard-bash.sh
+check $'class: $( ) in an unquoted heredoc fed to text'         block "$(payload $'cat > x.txt <<EOF\n$(docker run --rm python:3.12 pytest)\nEOF')" guard-bash.sh
+check $'class: $( ) in a quoted heredoc is text'                allow "$(payload $'cat > x.txt <<\'EOF\'\n$(docker run --rm python:3.12 pytest)\nEOF')" guard-bash.sh
+check $'class: a heredoc fed to git is text'                    allow "$(payload $'git commit -F - <<EOF\ndocker run --rm python:3.12 pytest\nEOF')" guard-bash.sh
+check $'class: a # that bash does not read as a comment'        block "$(payload 'echo `#`; docker run --rm python:3.12 pytest')" guard-bash.sh
+check $'class: a << that bash does not read as a heredoc'       block "$(payload $'printf "%s <<\'X\' end"\necho $(docker run --rm python:3.12 pytest)')" guard-bash.sh
+check $'class: a comment naming no test run is text'          allow "$(payload 'docker ps # see docker images')" guard-bash.sh
+echo ""
 echo "guard-write.sh — must BLOCK (AU-9, AIC-5)"
 check "hand-edit generated SARIF" block "$(wpayload 'evidence/142/g4/scan.sarif' 'x')"    guard-write.sh
 check "hand-edit generated XML"   block "$(wpayload 'evidence/142/g4/results.xml' 'x')"   guard-write.sh
