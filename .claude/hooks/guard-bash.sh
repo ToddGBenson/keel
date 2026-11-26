@@ -1364,6 +1364,7 @@ END {
   n = length(s); q = ""
   for (i = 1; i <= n; i++) {
     c = substr(s, i, 1)
+    if (c == "\005") { q = ""; sep(); continue }   # the end of one body of a level (TheHub #62239 review)
     if (q != "") { if (c == q) q = ""; else if (c == "\\" && q == "\"" && i < n) tok = tok substr(s, ++i, 1); else tok = tok c; continue }
     if (c == "'" || c == "\"") { q = c; have = 1; continue }
     if (c == "\\" && i < n) { tok = tok substr(s, ++i, 1); have = 1; continue }
@@ -1530,7 +1531,9 @@ push_guard() { # $1: one view of the command
   # the rest judged as a push with no refspec, which on main reads as a push of main. As ? it is a
   # word this hook cannot read, as in tag_guard (TheHub #61972). \004 holds a newline inside a word
   # (TheHub #62239), so one written into the text is a ? too.
-  src=${src//[$'\001\002\003\004']/?}
+  # TheHub #62239 review: \005 separates the bodies of one level (below); only the command
+  # itself (depth 0) is text an agent wrote, so only it is cleaned of the marks.
+  [ "$push_depth" -eq 0 ] && src=${src//[$'\001\002\003\004\005']/?}
   mapfile -t toks < <(printf '%s' "$src" | LC_ALL=C awk "$push_tok_awk")
   toks+=($'\001')
   for t in "${toks[@]}"; do
@@ -1548,7 +1551,13 @@ push_guard() { # $1: one view of the command
   push_depth=$((push_depth + 1))
   [ "$push_depth" -gt 6 ] && block "a command with substitutions nested more than 6 deep, which this hook does not unfold. Write it flatter; an ordinary command does not nest that far." "AC-5, CM-5"
   mapfile -t bodies < <(printf '%s' "$src" | LC_ALL=C awk -v nl=';' -v hdsub="$guard_hdsub" "$ctr_subst_awk")
-  for b in "${bodies[@]}"; do [ -n "$b" ] && push_guard "$b"; done
+  # TheHub #62239 review: one pass per LEVEL, not one per body. A PR body with 60 code spans
+  # started 73 awk processes and ran past the 40 s deadline on Git Bash. The bodies of a level are
+  # judged together, each ended by \005, which both tokenizers read as a hard end: a quote left
+  # open in one body cannot swallow the next.
+  local lvl=""
+  for b in "${bodies[@]}"; do [ -n "$b" ] && lvl+="$b"$'\005'; done
+  [ -n "$lvl" ] && push_guard "$lvl"
   push_depth=$((push_depth - 1))
 }
 # TheHub #62071: the heredoc reader the container tokenizer and the substitution reader share.
@@ -1601,8 +1610,8 @@ AWK
 # printed as \004, which ctr_u reads as a space and a shell body turns back into a newline.
 # TheHub #62071: a heredoc body (\002) is printed where its << stands, so it stays with the command
 # it is fed to whatever follows on the line (a redirect, | tee, &&); a here-string's word (<<<) is a
-# body too; a # at the start of a word is a comment to the end of the line, so `: # <<X` opens no
-# heredoc; and a pipe is printed as \001| so a body can follow the pipeline (cat <<EOF | bash).
+# body too; after a # at the start of a word no << opens a heredoc to the end of the line (`: # <<X`),
+# though its words are still read; and a pipe is printed as \001| so a body can follow the pipeline (cat <<EOF | bash).
 ctr_tok_awk="$HD_AWK"'
 function o(x) { out[++no] = x }
 function flush() { if (have) { gsub(/\n/, "\004", tok); o(hs ? "\002" tok : tok); tok = ""; have = 0; hs = 0 } }
@@ -1619,12 +1628,15 @@ END {
       for (; i <= n; i++) { c = substr(s, i, 1); tok = tok c; if (c == "(") d++; else if (c == ")" && --d == 0) break }
       have = 1; continue
     }
-    if (c == "#" && !have) { while (i < n && substr(s, i + 1, 1) != "\n") i++; continue }
-    if (c == "<" && substr(s, i + 1, 2) == "<<") { flush(); i += 2; hs = 1; continue }
-    if (c == "<" && substr(s, i + 1, 1) == "<") { flush(); if (hd_open()) { o("\002"); hph[nhd] = no }; continue }
+    # TheHub #62239 review: a word-initial # opens no heredoc until the next newline (: # <<X),
+    # but its words are still read. Inside backticks, ${...:- #} or after a PowerShell backtick it
+    # is no comment, and dropping the line hid a docker run that followed.
+    if (c == "#" && !have) cmt = 1
+    if (c == "<" && substr(s, i + 1, 2) == "<<" && !cmt) { flush(); i += 2; hs = 1; continue }
+    if (c == "<" && substr(s, i + 1, 1) == "<" && !cmt) { flush(); if (hd_open()) { o("\002"); hph[nhd] = no }; continue }
     if (c == " " || c == "\t") { flush(); continue }
     if (c == "\n") {
-      flush()
+      flush(); cmt = 0
       for (k = 1; k <= nhd; k++) out[hph[k]] = "\002" hd_body(k)
       nhd = 0; o("\001"); continue
     }
@@ -1686,11 +1698,31 @@ function scan(t, m,   k, c, d, b, j, e) {   # print the body of every $(...) and
 { s = (NR > 1) ? s "\n" $0 : $0 }
 END {
   n = length(s); if (nl == "") nl = " "   # what a newline in a body becomes (push_guard: ";")
+  q = ""; cmt = 0; ar = 0; ansi = 0
   for (i = 1; i <= n; i++) {
     c = substr(s, i, 1)
-    if (c == "<" && substr(s, i + 1, 2) == "<<") { i += 2; continue }
-    if (c == "<" && substr(s, i + 1, 1) == "<") { hd_open(); continue }
+    # TheHub #62239 review: \005 ends one body of a level and starts the next (push_guard reads
+    # a whole level in one pass): nothing carries across it.
+    if (c == "\005") { nhd = 0; q = ""; cmt = 0; ar = 0; ansi = 0; continue }
+    # A << inside quotes, after a word-initial # or in arithmetic is no heredoc: read as one, its
+    # quoted body hid the substitutions on the lines after it. Quotes are tracked only to decide
+    # that; a substitution inside quotes is still read. A quote left open reads more as commands.
+    if (cmt) { }
+    else if (q != "") { if (c == "\\" && (q == "\"" || ansi)) { i++; continue } else if (c == q) { q = ""; ansi = 0; continue } }
+    else if (c == "\\") { i++; continue }
+    else if (c == "$" && substr(s, i + 1, 1) == "\047") { q = "\047"; ansi = 1; i++; continue }
+    else if (c == "\047" || c == "\"") { q = c; continue }
+    else if (c == "#" && (i == 1 || index(" \t\n;&|(", substr(s, i - 1, 1)))) cmt = 1
+    else if (c == "$" && substr(s, i + 1, 1) == "[") ar++
+    else if (c == "(" && substr(s, i + 1, 1) == "(") { ar++; i++; continue }
+    else if (ar && (c == "]" || (c == ")" && substr(s, i + 1, 1) == ")"))) { if (c == ")") i++; ar--; continue }
+    if (q == "" && !cmt && !ar && c == "<" && substr(s, i + 1, 2) == "<<") { i += 2; continue }
+    if (q == "" && !cmt && !ar && c == "<" && substr(s, i + 1, 1) == "<") { hd_open(); continue }
     if (c == "\n") {
+      # A quote still open at a newline (or one this reader misread) consumes no heredoc body:
+      # its lines are read as commands instead, which can only block more.
+      if (q != "") { nhd = 0; continue }
+      cmt = 0
       for (k = 1; k <= nhd; k++) { b = hd_body(k); if (hdsub && !hquo[k]) { gsub(/\003/, "\n", b); scan(b, length(b)) } }
       nhd = 0; continue
     }
