@@ -1,7 +1,7 @@
 # Self-review — #48
 
 Mode: solo (POAM-008)
-PR: #49   Author: Todd Benson (claude-opus-5, AI-authored)   Date: 2026-08-13
+PR: #49   Author: the system owner (claude-opus-5, AI-authored)   Date: 2026-08-13
 
 A one-token path fix, found by executing the pipeline and verified the same way.
 

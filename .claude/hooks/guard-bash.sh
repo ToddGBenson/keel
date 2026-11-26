@@ -1510,17 +1510,36 @@ push_judge() { # $@: the words of one invocation
   [ -n "${guard_cwd_read:-}" ] || { guard_read_cwd; guard_cwd_read=1; }   # TheHub #62258: on first use
   local base="${payload_cwd:-$PWD}" branch rc
   if [ -n "$dir" ]; then case "$dir" in /*|[A-Za-z]:[/\\]*) base=$dir ;; *) base="$base/$dir" ;; esac; fi
-  branch=$(command git -C "$base" symbolic-ref --short -q HEAD 2>/dev/null); rc=$?
-  case "$rc" in
-    0) ;;
-    1) return 0 ;;                                         # a detached HEAD is not a branch
-    128) [ -z "$dir" ] && return 0                          # the payload cwd is not a repository: nothing to judge
-         block "a push of the current branch from ${dir} (git -C), which git cannot read as a repository. Name the branch: git push origin <feature>." "AC-5, CM-5" ;;
-    *) block "a push of the current branch, which this hook cannot read (git exited ${rc}): it may be main. Name the branch: git push origin <feature>." "AC-5, CM-5" ;;
-  esac
-  case "$branch" in
-    main|master) block "a push of the current branch, which is $branch (in $base). All change goes through a reviewed PR: push a feature branch." "AC-5, CM-5" ;;
-  esac
+  # TheHub #62265: git reads GIT_DIR, GIT_WORK_TREE, GIT_COMMON_DIR, GIT_CEILING_DIRECTORIES, the
+  # GIT_CONFIG_* injections and the rest from the environment, and the hook inherits whatever its
+  # caller set. With GIT_DIR naming a feature checkout's .git (or no repository at all), the read
+  # below said "feat" (or "not a repository") for a checkout on main, and the push was allowed. The
+  # branch is now read with every GIT_* variable removed, from the payload's cwd. It is not ONLY
+  # read that way: the push itself inherits the same environment, so a GIT_DIR naming main's .git
+  # pushes main from any cwd. When any GIT_* variable is set, both readings are judged, and either
+  # one that is main, or that cannot be read, blocks.
+  local view
+  for view in clean inherited; do
+    if [ "$view" = clean ]; then
+      branch=$(unset "${!GIT_@}"; command git -C "$base" symbolic-ref --short -q HEAD 2>/dev/null); rc=$?
+    else
+      [ -n "${!GIT_*}" ] || break
+      branch=$(command git -C "$base" symbolic-ref --short -q HEAD 2>/dev/null); rc=$?
+    fi
+    case "$rc" in
+      0) ;;
+      1) continue ;;                                       # a detached HEAD is not a branch
+      128) if [ -z "$dir" ] && [ "$view" = clean ]; then continue; fi   # the payload cwd is not a repository: nothing to judge
+           [ -z "$dir" ] && block "a push of the current branch while the environment sets ${!GIT_*} and git cannot read a repository from it: which branch it pushes cannot be read here. Name the branch: git push origin <feature>." "AC-5, CM-5"
+           block "a push of the current branch from ${dir} (git -C), which git cannot read as a repository. Name the branch: git push origin <feature>." "AC-5, CM-5" ;;
+      *) block "a push of the current branch, which this hook cannot read (git exited ${rc}): it may be main. Name the branch: git push origin <feature>." "AC-5, CM-5" ;;
+    esac
+    case "$branch" in
+      main|master)
+        [ "$view" = clean ] && block "a push of the current branch, which is $branch (in $base). All change goes through a reviewed PR: push a feature branch." "AC-5, CM-5"
+        block "a push of the current branch, which is $branch as the environment's ${!GIT_*} reads it. All change goes through a reviewed PR: push a feature branch." "AC-5, CM-5" ;;
+    esac
+  done
   return 0
 }
 push_depth=0

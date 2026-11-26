@@ -1,7 +1,7 @@
 # Self-review — #56
 
 Mode: solo (POAM-008)
-PR: #57   Author: Todd Benson (claude-opus-5, AI-authored)   Date: 2026-08-14
+PR: #57   Author: the system owner (claude-opus-5, AI-authored)   Date: 2026-08-14
 
 Re-governing keel as a template rather than a deployable service.
 

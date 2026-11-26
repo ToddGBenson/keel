@@ -1,7 +1,7 @@
 # Self-review — #67
 
 Mode: solo (POAM-008)
-PR: #68   Author: Todd Benson (claude-opus-5, AI-authored)   Date: 2026-08-15
+PR: #68   Author: the system owner (claude-opus-5, AI-authored)   Date: 2026-08-15
 Stacked on #66 (`feat/65-agentic-sdlc-spec`) — both touch `poam.md` and the control map.
 
 Recording that 14 controls were marked satisfied on gates that have never run, and building the

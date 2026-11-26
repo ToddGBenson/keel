@@ -571,6 +571,28 @@ check "env lazy state: on main: push origin HEAD"  block "$(cwpay "$onmain" 'git
 check "env lazy state: on feat: push origin HEAD"  allow "$(cwpay "$onfeat" 'git push -u origin HEAD')"           guard-bash.sh
 unset guard_cwd_read payload_cwd tool_name guard_grep_ran
 check "on main: git push origin feat"     allow "$(cwpay "$onmain" 'git push origin feat')"                      guard-bash.sh
+# TheHub #62265: the branch was read with whatever GIT_* environment the hook inherited. It is now
+# read with none, and, when any is set, with it too: either reading that is main blocks.
+mkdir -p "$onmain/sub"
+export GIT_DIR="$onfeat/.git"
+check "GIT_DIR=<feat>: on main: git push"         block "$(cwpay "$onmain" 'git push')"                          guard-bash.sh
+check "GIT_DIR=<feat>: on main: push origin HEAD" block "$(cwpay "$onmain" 'git push -u origin HEAD')"           guard-bash.sh
+check "GIT_DIR=<feat>: on feat: push origin HEAD" allow "$(cwpay "$onfeat" 'git push -u origin HEAD')"           guard-bash.sh
+export GIT_DIR="$onmain/no-such-dir"
+check "GIT_DIR=<no repo>: on main: git push"      block "$(cwpay "$onmain" 'git push')"                          guard-bash.sh
+export GIT_DIR="$onmain/.git"
+check "GIT_DIR=<main>: on feat: git push"         block "$(cwpay "$onfeat" 'git push')"                          guard-bash.sh
+unset GIT_DIR
+export GIT_WORK_TREE="$onfeat" GIT_COMMON_DIR="$onfeat/.git"
+check "GIT_WORK_TREE/COMMON_DIR=<feat>: on main"  block "$(cwpay "$onmain" 'git push')"                          guard-bash.sh
+unset GIT_WORK_TREE GIT_COMMON_DIR
+export GIT_CEILING_DIRECTORIES="$onmain"
+check "GIT_CEILING_DIRECTORIES: on main, a subdir" block "$(cwpay "$onmain/sub" 'git push')"                     guard-bash.sh
+unset GIT_CEILING_DIRECTORIES
+export GIT_EDITOR=true
+check "GIT_EDITOR set: on feat: git push"         allow "$(cwpay "$onfeat" 'git push')"                          guard-bash.sh
+check "GIT_EDITOR set: on main: git push"         block "$(cwpay "$onmain" 'git push')"                          guard-bash.sh
+unset GIT_EDITOR
 # Review round 1 (classes; the exact inputs are in the binnacle review).
 check "feat:main then ;"                  block "$(payload 'git push origin feat:main; echo done')"              guard-bash.sh
 check "feat:main then &&"                 block "$(payload 'git push origin feat:main&& echo done')"             guard-bash.sh
@@ -1055,6 +1077,20 @@ for guard_raw_case in 'evidence/142/a\u001b[31m.sarif' 'evidence/142/b.md.\u0007
   esac
 done
 
+echo ""
+echo "guard-write.sh — a drive prefix read as a POSIX host reads it (TheHub #62217)"
+# On Linux and macOS a drive prefix is part of a relative path: C:/142/a.sarif from a cwd inside
+# evidence/ is evidence/C:/142/a.sarif. Both readings are judged on every host.
+check "C:/ path from a cwd inside evidence/"        block "$(cwpayload 'C:/142/g4/a.sarif' 'x' '/repo/evidence')"      guard-write.sh
+check "c:/ path, lower case drive"                  block "$(cwpayload 'c:/142/a.sarif' 'x' '/repo/evidence')"         guard-write.sh
+check "C:\ path, backslashes"                      block "$(cwpayload 'C:\142\a.sarif' 'x' '/repo/evidence')"         guard-write.sh
+check "C:/.. popped, from inside evidence/"         block "$(cwpayload 'C:/../142/a.sarif' 'x' '/repo/evidence')"      guard-write.sh
+check "C:/x/../.. back into evidence/"              block "$(cwpayload 'C:/x/../../evidence/142/a.sarif' 'x' '/repo/src')" guard-write.sh
+check "C: drive-relative from inside evidence/"     block "$(cwpayload 'C:142/a.sarif' 'x' '/repo/evidence')"          guard-write.sh
+check "C:/ path from a cwd outside evidence/"       allow "$(cwpayload 'C:/src/a.py' 'x = 1' '/repo')"                 guard-write.sh
+check "a Windows absolute path, Windows cwd"        allow "$(cwpayload 'C:/repo/src/a.py' 'x = 1' 'C:/repo')"          guard-write.sh
+check "C:/ path, no cwd"                            allow "$(wpayload 'C:/repo/src/a.py' 'x = 1')"                    guard-write.sh
+check "C:/ evidence path, no cwd"                   block "$(wpayload 'C:/repo/evidence/142/a.sarif' 'x')"           guard-write.sh
 echo ""
 echo "──────────────────────────────────────────────────────────────"
 printf '  %d passed, %d failed\n' "$pass" "$fail"
