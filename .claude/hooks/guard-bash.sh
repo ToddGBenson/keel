@@ -1680,15 +1680,21 @@ END {
       have = 1; continue
     }
     # TheHub #62239 follow-up: ${...} stays inside its word too, so a << inside it opens no heredoc
-    # and a # inside it is text. Quotes inside it are skipped when counting braces.
+    # and a # inside it is text. It ends where bash ends it (review of binnacle #119): only ${ is a
+    # level, a bare { is text, a backslash steps over the next character, and quotes are skipped.
+    # Still open at the end of the text (or of a body), the $ is read as an ordinary character.
     if (c == "$" && substr(s, i + 1, 1) == "{") {
-      d = 0; qq = ""
-      for (; i <= n; i++) {
-        c = substr(s, i, 1); if (c == "\005") { i--; break }; tok = tok c
-        if (qq != "") { if (c == qq) qq = ""; continue }
-        if (c == "\047" || c == "\"") qq = c; else if (c == "{") d++; else if (c == "}" && --d == 0) break
+      d = 1; qq = ""
+      for (j = i + 2; j <= n; j++) {
+        x = substr(s, j, 1); if (x == "\005") { j = n + 1; break }
+        if (x == "\\" && qq != "\047") { j++; continue }
+        if (qq != "") { if (x == qq) qq = ""; continue }
+        if (x == "\047" || x == "\"") qq = x
+        else if (x == "$" && substr(s, j + 1, 1) == "{") { d++; j++ }
+        else if (x == "}" && --d == 0) break
       }
-      have = 1; continue
+      if (j > n) { tok = tok c; have = 1; continue }
+      tok = tok substr(s, i, j - i + 1); i = j; have = 1; continue
     }
     # TheHub #62239 review: a word-initial # opens no heredoc until the next newline (: # <<X),
     # but its words are still read. Inside backticks, ${...:- #} or after a PowerShell backtick it
@@ -1914,10 +1920,20 @@ END {
     if (c == "\\" && i < n) { i++; if (d != "\n") { tok = tok d; have = 1 }; continue }
     # TheHub #62239 follow-up: ${...} is one word, so a # inside it is text; inside backticks a
     # comment ends at the closing backtick. Dropping the rest of the line hid a release-tag push.
+    # It ends where bash ends it (review of binnacle #119): only ${ is a level, a bare { is text,
+    # a backslash steps over the next character, and quotes are skipped. Still open at the end of
+    # the text, the $ is read as an ordinary character, as before.
     if (c == "$" && d == "{") {
-      e = 0; qq = ""
-      for (; i <= n; i++) { c = substr(s, i, 1); tok = tok c; if (qq != "") { if (c == qq) qq = ""; continue }; if (c == "'" || c == "\"") qq = c; else if (c == "{") e++; else if (c == "}" && --e == 0) break }
-      have = 1; continue
+      e = 1; qq = ""
+      for (j = i + 2; j <= n; j++) {
+        x = substr(s, j, 1)
+        if (x == "\\" && qq != "'") { j++; continue }
+        if (qq != "") { if (x == qq) qq = ""; continue }
+        if (x == "'" || x == "\"") qq = x
+        else if (x == "$" && substr(s, j + 1, 1) == "{") { e++; j++ }
+        else if (x == "}" && --e == 0) break
+      }
+      if (j <= n) { tok = tok substr(s, i, j - i + 1); i = j; have = 1; continue }
     }
     if (c == "#" && !have) { while (i < n && substr(s, i + 1, 1) != "\n" && !(bt && substr(s, i + 1, 1) == "`")) i++; continue }
     if (c == " " || c == "\t") { flush(); continue }
