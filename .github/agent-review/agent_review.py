@@ -19,7 +19,8 @@ WHEN THE CHECK PASSES. Every one of these must hold:
     the branch leaves when main touched none of the PR's files. A review at
     any other older head does not count.
   * The verdict is SHIP or SHIP WITH NITS, from a model that differs from
-    every model in the PR's `Co-Authored-By: Claude ...` trailers. A PR by an
+    every model in the PR's `Co-Authored-By: Claude ...` trailers. A trailer
+    with no version ("Claude Sonnet") matches every version. A PR by an
     agent with no such trailer does not pass: stripping the trailer must not
     turn a self-review into an independent one. A Dependabot PR needs no
     trailer.
@@ -349,6 +350,8 @@ class Gate:
         judged = []
         for pr in sorted(self.gh.list_open_prs(), key=lambda p: (p.get("created_at") or "",
                                                                  p["number"])):
+            if pr["base"]["ref"] != (pr["base"].get("repo") or {}).get("default_branch"):
+                continue
             try:
                 d = self.evaluate(pr["number"])
             except Exception as exc:  # one PR never stops the rest
