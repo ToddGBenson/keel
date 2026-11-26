@@ -558,7 +558,7 @@ class Decisions(unittest.TestCase):
         gh = FakeGitHub()
         gh.files[OLD] = FILES_A
         gh.files[MERGED] = FILES_A
-        gh.modes[OLD] = None
+        gh.modes[OLD] = gh.modes[MERGED] = None  # e.g. both trees truncated
         gh.add_pr(head=MERGED, commits=[commit(OLD), commit(MERGED)],
                   comments=[verdict("Fable 5.2", OLD, "SHIP")])
         self.assertIsNone(self.run_gate(gh).conclusion)
