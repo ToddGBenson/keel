@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-guard-bash.sh judges a long heredoc about as fast as a one-line command. Refs: TheHub #61987
+guard-bash.sh judges a long heredoc about as fast as a one-line command. Refs: TheHub #61987, #62239
 
 Review of keel #198, round 4: the container word judge forked a subshell per word, on two views,
 even when the text named no container engine. A 300-line heredoc commit took 8.5 s on a fast
@@ -51,6 +51,14 @@ check(f"a 300-line heredoc with no engine word is decided in {took:.2f} s, withi
 check("... and it is allowed (prose in a commit message)", rc == 0, f"rc={rc}")
 rc, took = timed(heredoc(300).replace("the hook reads", "run docker compose ps, then"))
 check(f"the same heredoc naming docker on every line: {took:.2f} s, within {limit:.2f} s (a heredoc fed to git is text)",
+      took <= limit and rc == 0, f"rc={rc}")
+
+# TheHub #62239 review (B2): the push reader judged each $(...) and backtick body with an awk
+# of its own, so a commit message with 60 Markdown code spans started 73 awk processes and ran
+# past the 40 s deadline on Git Bash. One pass per nesting level keeps it near a one-line command.
+spans = " ".join(f"`name{i}`" for i in range(60))
+rc, took = timed(f'git commit -m "docs: {spans}"')
+check(f"a git command with 60 backtick spans: {took:.2f} s, within {limit:.2f} s (one pass per level, not per span)",
       took <= limit and rc == 0, f"rc={rc}")
 
 print()

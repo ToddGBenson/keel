@@ -1992,6 +1992,54 @@ entries:
     command: "bash -c 'docker run --rm -l \"\x01\" python:3.12 pytest'"
     expect: block
     why: "an uncapped test container inside nested text, a command mark in a label"
+  # The push tokenizer, ported to keel from binnacle #107 (the review of keel #211): a mark in -o's
+  # value ended the push there, and what was left read as a push of the current branch.
+  - id: KB-331
+    hook: guard-bash.sh
+    class: quoted-separator
+    source: TheHub#61972
+    command: "git push -o \"\x01\" origin feat:main"
+    expect: block
+    why: "move main through a refspec, the refspec cut off by a command mark in a push option"
+  - id: KB-332
+    hook: guard-bash.sh
+    class: quoted-separator
+    source: TheHub#61972
+    command: "git push -o \"\x01\" origin +main"
+    expect: block
+    why: "force push main, the refspec cut off by a command mark in a push option"
+  # TheHub #62239: three bypasses the review of binnacle #107 / keel #211 found outside #62237.
+  # The push tokenizer kept a $(...) inside its word, so a push the substitution runs was never
+  # judged; a shell -c body was read one level down only (by the PowerShell view's quote removal);
+  # and the container tokenizer split a word at a newline inside its quotes.
+  - id: KB-333
+    hook: guard-bash.sh
+    class: substitution-wrapper
+    source: TheHub#62239
+    command: "echo $(git push origin +main)"
+    expect: block
+    why: "force push main, the push run by a $(...) substitution"
+  - id: KB-334
+    hook: guard-bash.sh
+    class: substitution-wrapper
+    source: TheHub#62239
+    command: "x=$(git push origin feat:main)"
+    expect: block
+    why: "move main through a refspec, the push run by a $(...) substitution"
+  - id: KB-335
+    hook: guard-bash.sh
+    class: substitution-wrapper
+    source: TheHub#62239
+    command: "bash -c 'bash -c \"docker run --rm python:3.12 pytest\"'"
+    expect: block
+    why: "an uncapped test container, two shells deep"
+  - id: KB-336
+    hook: guard-bash.sh
+    class: quoted-separator
+    source: TheHub#62239
+    command: "docker run --rm -l \"a\n--cpus=2\n--memory=2g\" python:3.12 pytest"
+    expect: block
+    why: "an uncapped test container, a label whose lines read as the caps"
 
   # ── TheHub #61391: guard-write.sh on every write tool ─────────────────────────
   # guard-write.sh was bound to Write|Edit and read only file_path and content /
