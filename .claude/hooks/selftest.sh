@@ -964,6 +964,24 @@ check $'class: a # that bash does not read as a comment'        block "$(payload
 check $'class: a << that bash does not read as a heredoc'       block "$(payload $'printf "%s <<\'X\' end"\necho $(docker run --rm python:3.12 pytest)')" guard-bash.sh
 check $'class: a comment naming no test run is text'          allow "$(payload 'docker ps # see docker images')" guard-bash.sh
 echo ""
+echo "guard-bash.sh — a # after a metacharacter, \${...}, and the tag reader's # (TheHub #62239 follow-ups)"
+# One row per class. The full input list is kept in the private mirror's corpus.
+check $'class: a comment after ) opens no heredoc'               block "$(payload $'(:)# <<\'Q\'\necho $(docker run --rm python:3.12 pytest)')" guard-bash.sh
+check $'class: a << inside ${...} opens no heredoc'             block "$(payload $'echo ${y:-<<\'Q\'}\necho $(docker run --rm python:3.12 pytest)')" guard-bash.sh
+check $'class: the tag reader reads past a # in backticks'      block "$(payload 'echo `# a`; git push origin v2.0.0')" guard-bash.sh
+check $'class: the tag reader reads past a # in ${...}'         block "$(payload 'echo ${y:- #}; git push origin v2.0.0')" guard-bash.sh
+check $'class: a comment naming a release tag is text'          allow "$(payload 'git status # git push origin v2.0.0')" guard-bash.sh
+check $'class: PowerShell ${...} is one word for the tag reader' block "$(pspayload 'echo ${y:- #}; git push origin v2.0.0')" guard-bash.sh
+check $'class: ${...} ends where bash ends it (a bare {)'       block "$(payload 'echo ${y:-{}; git tag v2.0.0')" guard-bash.sh
+check $'class: an escaped quote in ${...} opens nothing'        block "$(payload $'echo ${y:-\\\'}; git push origin v2.0.0')" guard-bash.sh
+check $'class: nested ${...} then a branch push is allowed'     allow "$(payload 'echo ${a:-${b}}; git push origin feature-x')" guard-bash.sh
+check $'class: a substitution in ${...} is not skipped as quotes' block "$(payload $'echo ${y:-$(: # a\'b\n)}; git tag v2.0.0 # \'}')" guard-bash.sh
+check $'class: a backtick in ${...} is not skipped as quotes'     block "$(payload $'echo ${y:-`: # a\'b`}; git push origin v2.0.0 # \'}')" guard-bash.sh
+check $'class: an input process substitution in ${...} is not skipped'  block "$(payload $'echo ${y:-<(: # a\'b\n)}; git tag v2.0.0 # \'}')" guard-bash.sh
+check $'class: an output process substitution in ${...} is not skipped' block "$(payload $'echo ${y:->(: # a\'b\n)}; git push --tags # \'}')" guard-bash.sh
+check $'class: an ANSI-C quote in ${...} ends at the }'                  block "$(payload $'echo ${y:-$\'a\\tb\'}; git push origin v2.0.0')" guard-bash.sh
+check $'class: the container reader reads past ${...} too'              block "$(payload $'echo ${y:-<(: # a\'b\n)}; docker run --rm python:3.12 pytest # \'}')" guard-bash.sh
+echo ""
 echo "guard-write.sh — must BLOCK (AU-9, AIC-5)"
 check "hand-edit generated SARIF" block "$(wpayload 'evidence/142/g4/scan.sarif' 'x')"    guard-write.sh
 check "hand-edit generated XML"   block "$(wpayload 'evidence/142/g4/results.xml' 'x')"   guard-write.sh

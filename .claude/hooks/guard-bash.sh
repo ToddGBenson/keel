@@ -1401,7 +1401,7 @@ END {
     if (c == "\\" && i < n) { tok = tok substr(s, ++i, 1); have = 1; continue }
     if (c == "$" && substr(s, i + 1, 1) == "(") {           # $(...) stays inside its word (round 2)
       d = 0
-      for (; i <= n; i++) { c = substr(s, i, 1); tok = tok c; if (c == "(") d++; else if (c == ")" && --d == 0) break }
+      for (; i <= n; i++) { c = substr(s, i, 1); if (c == "\005") { i--; break }; tok = tok c; if (c == "(") d++; else if (c == ")" && --d == 0) break }
       have = 1; continue
     }
     if (c == " " || c == "\t") { flush(); continue }
@@ -1670,13 +1670,35 @@ END {
   n = length(s); q = ""; no = 0
   for (i = 1; i <= n; i++) {
     c = substr(s, i, 1)
+    if (c == "\005") { flush(); q = ""; cmt = 0; nhd = 0; o("\001"); continue }   # the end of one body of a level
     if (q != "") { if (c == q) q = ""; else if (c == "\\" && q == "\"" && i < n) tok = tok substr(s, ++i, 1); else tok = tok c; continue }
     if (c == "'"'"'" || c == "\"") { q = c; have = 1; continue }
     if (c == "\\" && i < n) { tok = tok substr(s, ++i, 1); have = 1; continue }
     if (c == "$" && substr(s, i + 1, 1) == "(") {           # $(...) stays inside its word (round 2)
       d = 0
-      for (; i <= n; i++) { c = substr(s, i, 1); tok = tok c; if (c == "(") d++; else if (c == ")" && --d == 0) break }
+      for (; i <= n; i++) { c = substr(s, i, 1); if (c == "\005") { i--; break }; tok = tok c; if (c == "(") d++; else if (c == ")" && --d == 0) break }
       have = 1; continue
+    }
+    # TheHub #62239 follow-up: ${...} stays inside its word too, so a << inside it opens no heredoc
+    # and a # inside it is text. It ends where bash ends it (review of binnacle #119): only ${ is a
+    # level, a bare { is text, a backslash steps over the next character, and quotes are skipped.
+    # Still open at the end of the text (or of a body), the $ is read as an ordinary character. So
+    # is one holding $(, <(, >(, a backtick or an ANSI-C quote outside single quotes, which this
+    # loop does not parse: a quote in a comment or heredoc inside one ran the loop past the end
+    # (second and third review of binnacle #119).
+    if (c == "$" && substr(s, i + 1, 1) == "{") {
+      d = 1; qq = ""
+      for (j = i + 2; j <= n; j++) {
+        x = substr(s, j, 1); if (x == "\005") { j = n + 1; break }
+        if (qq != "\047" && (x == "`" || (x == "$" && (substr(s, j + 1, 1) == "(" || substr(s, j + 1, 1) == "\047")) || ((x == "<" || x == ">") && substr(s, j + 1, 1) == "("))) { j = n + 1; break }
+        if (x == "\\" && qq != "\047") { j++; continue }
+        if (qq != "") { if (x == qq) qq = ""; continue }
+        if (x == "\047" || x == "\"") qq = x
+        else if (x == "$" && substr(s, j + 1, 1) == "{") { d++; j++ }
+        else if (x == "}" && --d == 0) break
+      }
+      if (j > n) { tok = tok c; have = 1; continue }
+      tok = tok substr(s, i, j - i + 1); i = j; have = 1; continue
     }
     # TheHub #62239 review: a word-initial # opens no heredoc until the next newline (: # <<X),
     # but its words are still read. Inside backticks, ${...:- #} or after a PowerShell backtick it
@@ -1748,12 +1770,12 @@ function scan(t, m,   k, c, d, b, j, e) {   # print the body of every $(...) and
 { s = (NR > 1) ? s "\n" $0 : $0 }
 END {
   n = length(s); if (nl == "") nl = " "   # what a newline in a body becomes (push_guard: ";")
-  q = ""; cmt = 0; ar = 0; ansi = 0
+  q = ""; cmt = 0; ar = 0; ansi = 0; br = 0
   for (i = 1; i <= n; i++) {
     c = substr(s, i, 1)
     # TheHub #62239 review: \005 ends one body of a level and starts the next (push_guard reads
     # a whole level in one pass): nothing carries across it.
-    if (c == "\005") { nhd = 0; q = ""; cmt = 0; ar = 0; ansi = 0; continue }
+    if (c == "\005") { nhd = 0; q = ""; cmt = 0; ar = 0; ansi = 0; br = 0; continue }
     # A << inside quotes, after a word-initial # or in arithmetic is no heredoc: read as one, its
     # quoted body hid the substitutions on the lines after it. Quotes are tracked only to decide
     # that; a substitution inside quotes is still read. A quote left open reads more as commands.
@@ -1762,12 +1784,14 @@ END {
     else if (c == "\\") { i++; continue }
     else if (c == "$" && substr(s, i + 1, 1) == "\047") { q = "\047"; ansi = 1; i++; continue }
     else if (c == "\047" || c == "\"") { q = c; continue }
-    else if (c == "#" && (i == 1 || index(" \t\n;&|(", substr(s, i - 1, 1)))) cmt = 1
+    else if (c == "#" && (i == 1 || index(" \t\n;&|()<>\005", substr(s, i - 1, 1)))) cmt = 1   # after any metacharacter (TheHub #62239 follow-up)
+    else if (c == "$" && substr(s, i + 1, 1) == "{") { br++; i++; continue }   # ${...}: a << inside it is no heredoc
+    else if (c == "}" && br) br--
     else if (c == "$" && substr(s, i + 1, 1) == "[") ar++
     else if (c == "(" && substr(s, i + 1, 1) == "(") { ar++; i++; continue }
     else if (ar && (c == "]" || (c == ")" && substr(s, i + 1, 1) == ")"))) { if (c == ")") i++; ar--; continue }
-    if (q == "" && !cmt && !ar && c == "<" && substr(s, i + 1, 2) == "<<") { i += 2; continue }
-    if (q == "" && !cmt && !ar && c == "<" && substr(s, i + 1, 1) == "<") { hd_open(); continue }
+    if (q == "" && !cmt && !ar && !br && c == "<" && substr(s, i + 1, 2) == "<<") { i += 2; continue }
+    if (q == "" && !cmt && !ar && !br && c == "<" && substr(s, i + 1, 1) == "<") { hd_open(); continue }
     if (c == "\n") {
       # A quote still open at a newline (or one this reader misread) consumes no heredoc body:
       # its lines are read as commands instead, which can only block more.
@@ -1801,7 +1825,9 @@ ctr_guard() { # $1: one view of the command
   # argument (docker run -l "<\001>" ...), ended the invocation there, so the image and the test
   # runner after it were never judged. As ? it is a word this hook cannot read, as in tag_guard and
   # push_guard (review of keel #210, TheHub #61972). \004 holds a newline inside a word (TheHub #62239).
-  src=${src//[$'\001\002\003\004']/?}
+  # \005 separates the bodies of one level (below); only the command itself (depth 0) is text an
+  # agent wrote, so only it is cleaned of the marks (TheHub #62239 follow-up).
+  [ "$ctr_depth" -eq 0 ] && src=${src//[$'\001\002\003\004\005']/?}
   mapfile -t toks < <(printf '%s' "$src" | LC_ALL=C awk "$ctr_tok_awk")
   toks+=($'\001')
   for t in "${toks[@]}"; do
@@ -1821,7 +1847,11 @@ ctr_guard() { # $1: one view of the command
   [ "$ctr_depth" -gt 6 ] && block "a command with substitutions nested more than 6 deep, which this hook does not unfold. Write it flatter; an ordinary command does not nest that far." "AIC-3, SC-6, CP-2"
   if [ "$ctr_depth" -le 6 ]; then
     mapfile -t bodies < <(printf '%s' "$src" | LC_ALL=C awk -v hdsub="$guard_hdsub" "$ctr_subst_awk")
-    for b in "${bodies[@]}"; do [ -n "$b" ] && ctr_guard "$b"; done
+    # TheHub #62239 follow-up: one pass per LEVEL, as in push_guard. A PR body naming an engine
+    # with 60 code spans paid an awk per span. Each body is ended by \005, a hard end for both readers.
+    local lvl=""
+    for b in "${bodies[@]}"; do [ -n "$b" ] && lvl+="$b"$'\005'; done
+    [ -n "$lvl" ] && ctr_guard "$lvl"
   fi
   ctr_depth=$((ctr_depth - 1))
 }
@@ -1892,12 +1922,32 @@ END {
     }
     if (c == "'" || c == "\"") { q = c; have = 1; continue }
     if (c == "\\" && i < n) { i++; if (d != "\n") { tok = tok d; have = 1 }; continue }
-    if (c == "#" && !have) { while (i < n && substr(s, i + 1, 1) != "\n") i++; continue }
+    # TheHub #62239 follow-up: ${...} is one word, so a # inside it is text; inside backticks a
+    # comment ends at the closing backtick. Dropping the rest of the line hid a release-tag push.
+    # It ends where bash ends it (review of binnacle #119): only ${ is a level, a bare { is text,
+    # a backslash steps over the next character, and quotes are skipped. Still open at the end of
+    # the text, the $ is read as an ordinary character, as before. So is one holding $(, <(, >(, a
+    # backtick or $' outside single quotes, which this loop does not parse: a quote in a comment or
+    # heredoc inside one ran the loop past the end (second and third review of binnacle #119).
+    if (c == "$" && d == "{") {
+      e = 1; qq = ""
+      for (j = i + 2; j <= n; j++) {
+        x = substr(s, j, 1)
+        if (qq != "'" && (x == "`" || (x == "$" && (substr(s, j + 1, 1) == "(" || substr(s, j + 1, 1) == "'")) || ((x == "<" || x == ">") && substr(s, j + 1, 1) == "("))) { j = n + 1; break }
+        if (x == "\\" && qq != "'") { j++; continue }
+        if (qq != "") { if (x == qq) qq = ""; continue }
+        if (x == "'" || x == "\"") qq = x
+        else if (x == "$" && substr(s, j + 1, 1) == "{") { e++; j++ }
+        else if (x == "}" && --e == 0) break
+      }
+      if (j <= n) { tok = tok substr(s, i, j - i + 1); i = j; have = 1; continue }
+    }
+    if (c == "#" && !have) { while (i < n && substr(s, i + 1, 1) != "\n" && !(bt && substr(s, i + 1, 1) == "`")) i++; continue }
     if (c == " " || c == "\t") { flush(); continue }
     if (c == "\n") { flush(); if (nhd) bodies(); print "\001"; continue }
     if (c == "&" && d == ">") { flush(); i++; while (substr(s, i + 1, 1) ~ /[>|&]/) i++; print ">"; continue }
     if (c == ";" || c == "|" || c == "&" || c == "(" || c == ")") { flush(); print "\001"; continue }
-    if (c == "`") { tok = tok c; have = 1; flush(); print "\001"; continue }   # a word holding ` is not literal
+    if (c == "`") { bt = !bt; tok = tok c; have = 1; flush(); print "\001"; continue }   # a word holding ` is not literal
     if (c == "<" && d == "<" && substr(s, i + 2, 1) == "<") { flush(); i += 2; print "<<<"; continue }
     if (c == "<" && d == "<") {
       flush(); i++
@@ -1943,6 +1993,12 @@ END {
     }
     if (c == "'" || c == "\"") { q = c; have = 1; continue }
     if (c == "`" && i < n) { i++; if (d != "\n") { tok = tok d; have = 1 }; continue }
+    # TheHub #62239 follow-up: ${...} is one braced variable name, ended by the first } a backtick
+    # does not escape, so a # inside it is no comment. Dropping the line hid a release-tag push.
+    if (c == "$" && d == "{") {
+      for (; i <= n; i++) { c = substr(s, i, 1); tok = tok c; if (c == "`" && i < n) { tok = tok substr(s, ++i, 1); continue }; if (c == "}") break }
+      have = 1; continue
+    }
     if (c == "#" && !have) { while (i < n && substr(s, i + 1, 1) != "\n") i++; continue }
     if (c == " " || c == "\t" || c == ",") { flush(); continue }
     if (c == "\n" || c == ";" || c == "|" || c == "&" || c == "(" || c == ")" || c == "{" || c == "}") { flush(); print "\001"; continue }

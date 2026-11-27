@@ -61,6 +61,12 @@ rc, took = timed(f'git commit -m "docs: {spans}"')
 check(f"a git command with 60 backtick spans: {took:.2f} s, within {limit:.2f} s (one pass per level, not per span)",
       took <= limit and rc == 0, f"rc={rc}")
 
+# TheHub #62239 follow-up: the container reader judged each body with an awk of its own too, so a
+# PR body that names an engine and has 60 code spans paid one awk per span.
+rc, took = timed(f'gh pr create --title t --body "uses docker compose ps; {spans}"')
+check(f"a command naming docker with 60 backtick spans: {took:.2f} s, within {limit:.2f} s (one pass per level)",
+      took <= limit and rc == 0, f"rc={rc}")
+
 print()
 if failures:
     print(f"{len(failures)} FAILED")
