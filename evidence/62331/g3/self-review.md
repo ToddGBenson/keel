@@ -54,6 +54,18 @@ challenge to #62331's AC-2 recorded in the PR body.
 - **Hooks identical:** `diff` of keel's and binnacle's `guard-bash.sh` at the two heads shows only
   the known comment at lines 1050-1053.
 - **Merge order:** `git merge-tree` of this branch and the #62332 branch (keel #226): no conflict.
+- **Both PRs merged (this branch + #226), python:3.13 (the pr-checks image, mawk 1.3.4), `--cpus 2
+  --memory 2g`:** every `test/*.test.py` exit 0; selftest 862 passed, 0 failed (816 on main + 21 + 25);
+  corpus 324 entries, 1186 hook runs, 0 failed, 36 open; agent evals exit 0.
+- **Cost, same container, alternating runs:** corpus 115 s and 133 s on main, 123 s and 115 s here;
+  selftest 99 s on main, 82 s here; hook-tag-timing's 300-line case 0.34 s on main, 0.35 s here.
+- **shellcheck v0.10.0 (the CI image), the repo's `ci/scripts/shellcheck.sh`:** `-S warning` exit 0.
+  At style level `guard-bash.sh` has one SC2016 more than main (a `$` in the single-quoted awk program).
+- **Concourse `pr-checks`:** builds 1453 (d48cf7e) and 1455 (af041fd) hit the task's 20-minute
+  timeout with every finished suite green. Both ran on worker linux-3, where the corpus took 955 s
+  and 968 s; #226's build 1456 on linux-3 timed out the same way (1004 s), while its build 1454 on
+  linux-2, same hook, took 257 s. Quiet builds on linux-1/2 take 96-112 s. TheHub #62268 (linux-3
+  overruns keel pr-checks) is the cause; this commit asks for a new judgment.
 
 ## Agent findings
 
