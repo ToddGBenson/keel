@@ -982,6 +982,30 @@ check $'class: an output process substitution in ${...} is not skipped' block "$
 check $'class: an ANSI-C quote in ${...} ends at the }'                  block "$(payload $'echo ${y:-$\'a\\tb\'}; git push origin v2.0.0')" guard-bash.sh
 check $'class: the container reader reads past ${...} too'              block "$(payload $'echo ${y:-<(: # a\'b\n)}; docker run --rm python:3.12 pytest # \'}')" guard-bash.sh
 echo ""
+echo "guard-bash.sh — the release-tag readers read a #, an ANSI-C quote and \"\$( )\" as the shell does (TheHub #62331, #62350)"
+# One row per class. The full input list is kept in the private mirror's corpus.
+check $'class: a # right after $( ) is text, not a comment' block "$(payload $'echo $(true)#; git push origin v2.0.0')" guard-bash.sh
+check $'class: a # right after a closing backtick is text' block "$(payload $'echo `true`#; git push origin v2.0.0')" guard-bash.sh
+check $'class: a # in a ${...} holding a substitution is text' block "$(payload $'echo ${x:-$(true) #}; git push origin v2.0.0')" guard-bash.sh
+check $'class: a # inside (( )) is no comment' block "$(payload $'(( 1 # )); git push origin v2.0.0')" guard-bash.sh
+check $'class: a # inside an extglob pattern is no comment' block "$(payload $'shopt -s extglob\necho @(a|#b); git push origin v2.0.0')" guard-bash.sh
+check $'class: a quote in such a #, then a line that closes it' block "$(payload $'echo $(true)#\'\n\'; git push origin v2.0.0 #\'')" guard-bash.sh
+check $'class: a << in arithmetic opens no heredoc' block "$(payload $'echo $((1<<2))\ngit push origin v2.0.0')" guard-bash.sh
+check $'class: a heredoc delimiter in an ANSI-C quote' block "$(payload $'cat <<$\'E\'\nfoo\nE\ngit push origin v2.0.0')" guard-bash.sh
+check $'class: a quoted heredoc delimiter with a space' block "$(payload $'cat <<\'E F\'\nx\nE F\ngit push origin v2.0.0 #\'')" guard-bash.sh
+check $'class: an escaped quote in $\'...\' ends nothing' block "$(payload $'echo $\'it\\\'s\'; git push origin v2.0.0 # \'')" guard-bash.sh
+check $'class: $\'...\' escapes are decoded' block "$(payload $'bash -c $\'\\x67it tag v2.0.0\'')" guard-bash.sh
+check $'class: the body of "$( )" is commands' block "$(payload $'echo "$(git tag v2.0.0)"')" guard-bash.sh
+check $'class: the body of a backtick in "..." is commands' block "$(payload $'echo "`git tag v2.0.0`"')" guard-bash.sh
+check $'class: a quote in a comment inside "$( )" ends nothing' block "$(payload $'echo "$(true # "\n)"; git push origin v2.0.0 # "')" guard-bash.sh
+check $'class: PowerShell: the body of "$( )" is commands' block "$(pspayload $'Write-Host "$(git tag v2.0.0)"')" guard-bash.sh
+check $'class: PowerShell: a block comment ends at its #>' block "$(pspayload $'Write-Host hi <# c #> ; git tag v2.0.0')" guard-bash.sh
+check $'class: a comment naming a release tag is text (kept)' allow "$(payload $'git status # then git push origin v2.0.0')" guard-bash.sh
+check $'class: a PR body in "$(cat <<\'EOF\' ...)" naming a tag is text' allow "$(payload $'gh pr create --title x --body "$(cat <<\'EOF\'\n## Summary\n- it\'s fine (#123)\n- git tag v2.0.0 is the operator\'s\nEOF\n)"')" guard-bash.sh
+check $'class: a tag read in "$( )" is allowed' allow "$(payload $'echo "$(git describe --tags --abbrev=0)"')" guard-bash.sh
+check $'class: an ANSI-C quote, then a branch push' allow "$(payload $'echo $\'it\\\'s\'; git push origin feature-x')" guard-bash.sh
+check $'class: PowerShell: a subexpression that reads is allowed' allow "$(pspayload $'Write-Host "$(git rev-parse HEAD)"')" guard-bash.sh
+echo ""
 echo "guard-write.sh — must BLOCK (AU-9, AIC-5)"
 check "hand-edit generated SARIF" block "$(wpayload 'evidence/142/g4/scan.sarif' 'x')"    guard-write.sh
 check "hand-edit generated XML"   block "$(wpayload 'evidence/142/g4/results.xml' 'x')"   guard-write.sh
