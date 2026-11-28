@@ -103,3 +103,55 @@ challenge to #62331's AC-2 recorded in the PR body.
   corpus entry), red at the reviewed head and green at this one.
 - Still open (not in this rework): findings 3b, 3c, 3d, 3e, 3f and 4 (follow-ups TheHub #62450,
   #62451).
+
+## Second rework after the independent re-review (2026-11-28)
+
+PO ruling: change the strategy, not the patch count. Wherever the reader cannot prove its reading it
+now fails closed. Commits: the rows first (red at the reviewed head), then the fix; no force-push.
+
+- Findings 1 and 2 (a reserved word the reader did or did not count): a `$( )` or backtick body
+  holding a word spelled `case` or `esac`, in any place and however quoted, is a reading that can
+  be wrong (`\004`), so `tag_amb` judges the text the blunt way. The word-position counting stays
+  for the reading, but no longer decides on its own.
+- Finding 3 (a comment in a `$( )` inside a backtick): `inbt()` is true when any open level is a
+  backtick, so the comment ends at the next backtick, as bash ends it. A backtick read inside a
+  `$( )` inside a backtick is also reported as a reading that can be wrong.
+- PowerShell: a backtick escape inside a `"$( )"` body is reported the same way. The re-review
+  called the one such input harmless, but main refused it and the reviewed head allowed it.
+- Rows: every input of the re-review's three tables (and the PowerShell one) is a block row, two
+  allow rows keep ordinary `case` use; each block row is allowed at the reviewed head.
+- New false positives: a body holding `case`/`esac` (or a backtick inside a `$( )` inside a
+  backtick, or a PowerShell `"$( )"` holding a backtick escape) in a command that also names a
+  release-shaped word and one of push, tag, send-pack, update-ref, fetch, config or api is refused,
+  for example `echo "$(case $v in v*) echo v1.2.3;; esac)"; git push origin feat`.
+- Out of scope, open on main: finding 4 (a heredoc opened inside a substitution that ends on the
+  same line), TheHub #62450.
+
+### How it was checked
+
+- **The reviewer's full probe set** (the first review's p1 to p12, the earlier builder matrices,
+  the re-review's pA1 to pA4, pB1 to pB4, p6 and the timing set) plus the inputs this rework added:
+  438 distinct inputs, through the real hook (PreToolUse JSON on stdin, Git Bash 5.2.37, at most 4
+  hook runs at a time) at main, both reviewed heads, both new heads and the two merged into main:
+  2628 hook runs per repository. Inputs main refuses that a new head or the merged tree allows:
+  **0** of the reviewer's set. Of the inputs this rework added, 1: a comment after a plain `$( )`
+  that holds a push in its text (`echo $(git rev-parse HEAD) # then; git push origin feat:main`).
+  Bash reads it as a comment and runs no push (checked with stubs in git's place); main refused it
+  because main read every `#` as a word. It is a kept selftest row, and the reviewed head allowed it
+  too. Inputs a reviewed head refuses that its new head allows: 0. keel and the mirror gave the same
+  verdict in every one of the 2628 cells. No deadline hit; the slowest run took 8.2 s.
+- **44 everyday agent commands** (pushes, heredoc commit messages and PR bodies, comments, `case`,
+  `-c` aliases, PowerShell) at the same six trees: the same verdict everywhere except one false
+  positive listed in the PR (`git -c alias.lg='log --format=%h' lg`).
+- **Hooks identical:** `guard-bash.sh` differs from the pair's only in the known comment at lines
+  1050-1053, at each new head and in the merged trees.
+
+- **Full selftest, Git Bash, in 4 shards (each check row once, the 8 assertions outside
+  check() in every shard, the hook's stderr read on every block):** this head 845 check rows,
+  0 failed; the two PRs merged into main 896 check rows, 0 failed. Every shard exit 0, no
+  deadline hit, every block names a rule.
+- **Corpus, the mirror's merged tree, every class, both parser modes, 4 workers:** 554
+  entries, 1874 hook runs, 0 failed, 36 open (the known gaps), exit 0, 1114 s.
+- **Not run:** Linux, the python:3.13 container (no Docker for this rework), shellcheck
+  (not installed on this host). CI runs them.
+
