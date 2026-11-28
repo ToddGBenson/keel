@@ -1925,6 +1925,11 @@ function flush() {
     gsub(/\n/, "\003", tok); out(tok); nw++
     # a quoted or escaped spelling (\case, "case") is a word, not the reserved word (TheHub #62331 review)
     if (fn && nw == 1 && !lq) { if (tok == "case") fcd[fn]++; else if (tok == "esac" && fcd[fn]) fcd[fn]-- }
+    # Second review of TheHub #62331: where bash reads case as the reserved word cannot be told from
+    # the place of the word alone (after then, do, { or !; an arithmetic operand, a [[ ]] operand and an
+    # array element are plain words). So a body holding a word spelled case or esac, in any place
+    # and however quoted, is a reading that can be wrong (a \004 line), and tag_amb judges the text.
+    if (fn && (tok == "case" || tok == "esac")) amb = 1
     tok = ""; have = 0; lq = 0
   }
 }
@@ -1938,7 +1943,10 @@ function unnest(   b) {   # the body ends: the outer word goes on, as one that i
   dfr[fn] = dfr[fn] b
 }
 function bodies(   k) { for (k = 1; k <= nhd; k++) out("\002" hd_body(k)); nhd = 0 }   # after this newline
-function inbt() { return fn && ft[fn] == "b" }
+function inbt(   k) {   # inside a backtick at any level: bash ends its body at the next backtick (second review of TheHub #62331)
+  for (k = 1; k <= fn; k++) if (ft[k] == "b") return 1
+  return 0
+}
 function ansi(   e, v, k, m, z) {   # i on the $ of an ANSI-C quote: the decoded text goes to tok; i ends on its closing quote
   z = 0
   for (i += 2; i <= n; i++) {
@@ -2052,6 +2060,7 @@ END {
     }
     if (c == "`") {
       if (fn && ft[fn] == "b") { unnest(); continue }   # the end of a backtick body
+      if (inbt()) amb = 1   # a backtick inside a $( ) inside a backtick: bash ends the outer body here
       nest("b", 0); bto = i; continue                    # unquoted too: its body is commands, and the word goes on
     }
     if (c == ";" || c == "|" || c == "&") { brk(); continue }
@@ -2098,6 +2107,9 @@ END {
         continue
       }
     }
+    # Second review of TheHub #62350: an escape (a backtick) inside a "$( )" body is read here one
+    # way and by PowerShell another ("$(`"(`")"); the reading can be wrong, so tag_amb judges the text.
+    if (fn && c == "`") amb = 1
     if (q == "'") {
       if (c == "'" && d == "'") { tok = tok "'"; i++ } else if (c == "'") q = ""; else tok = tok c
       continue
