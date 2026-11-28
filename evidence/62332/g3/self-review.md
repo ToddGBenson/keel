@@ -86,3 +86,17 @@ three container-rule forms in the story's "also open" list (TheHub #62391).
   `"$DOCKER" push image` on a checkout of main would be refused. That is a false positive the
   agents can avoid by naming the program.
 - `GIT_CONFIG_GLOBAL=...` (or `_SYSTEM`, or `GIT_CONFIG`) before any push is refused, like `-c push.*`.
+
+## Rework after the independent review (2026-11-28)
+
+- Finding 1 (the push reader's comment rule dropped a line bash runs): a `#` is dropped only
+  outside `${ }`, a backtick, any `( )` and any `[ ]`. Elsewhere the rest of the line is read as
+  words with quotes as text, and `push_guard` reads the text a second time with that `#` as an
+  ordinary character (main's reading). Both readings are judged. One shared reader with the tag
+  reader (#62331) was not done: the two PRs are separate and must not stack.
+- Nits: a `-c` alias that names no push is read as the subcommand it names;
+  `GIT_CONFIG_GLOBAL`/`GIT_CONFIG_SYSTEM` set to `/dev/null` or `NUL` is allowed. Any other config
+  file stays refused: `remote.<name>.push` in it maps even `git push origin feat` onto main
+  (checked with git: `feat -> main`).
+- The review's three nocasematch rows are selftest rows.
+- Still open (not in this rework): finding 2 (follow-ups TheHub #62450, #62451).
