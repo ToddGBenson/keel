@@ -1546,9 +1546,10 @@ push_judge() { # $@: the words of one invocation
       # TheHub #62332: reserved words, and a redirect and its target, before the command
       if|then|do|else|elif|while|until|'!'|'{'|coproc|builtin|nohup|busybox) i=$((i + 1)); continue ;;
       '>') i=$((i + 2)); continue ;;
-      env|command|exec|nice|time|sudo|doas|timeout|stdbuf|setsid|ionice) push_wrap "${a,,}" || return 0; continue ;;
-      xargs) push_wrap xargs || return 0
-             if [ -n "$hs" ]; then a="${w[*]:i} $hs"; push_guard "${a//$'\004'/$'\n'}"; return 0; fi
+      # (a return from here first unsets nocasematch: the rest of the hook matches case)
+      env|command|exec|nice|time|sudo|doas|timeout|stdbuf|setsid|ionice) push_wrap "${a,,}" || { shopt -u nocasematch; return 0; }; continue ;;
+      xargs) push_wrap xargs || { shopt -u nocasematch; return 0; }
+             if [ -n "$hs" ]; then shopt -u nocasematch; a="${w[*]:i} $hs"; push_guard "${a//$'\004'/$'\n'}"; return 0; fi
              continue ;;
     esac
     break
