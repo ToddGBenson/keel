@@ -662,6 +662,65 @@ for sx in bash.exe BASH Bash.Exe; do
 done
 check "PS: on main: git.exe push"           block "$(cwpay "$onmain" 'git.exe push' | sed 's/^{/{"tool_name":"PowerShell",/')" guard-bash.sh
 check "PS: on main: GIT push origin HEAD"   block "$(cwpay "$onmain" 'GIT push origin HEAD' | sed 's/^{/{"tool_name":"PowerShell",/')" guard-bash.sh
+echo ""
+echo "guard-bash.sh — the push judge reads wrappers, reserved words, & redirects, a backslash and more launchers (TheHub #62332)"
+# One row per class. The full input list is kept in the private mirror's corpus.
+cwpj() { payload "$2" | sed "s|^{|{\"cwd\":\"$1\",|"; }   # the payload, with a cwd
+check $'class: a push under timeout and its duration' block "$(payload $'timeout 60 git push origin feat:main')" guard-bash.sh
+check $'class: a push under env with an option' block "$(payload $'env -i git push origin feat:main')" guard-bash.sh
+check $'class: a push under a launcher not listed before' block "$(payload $'stdbuf -o0 git push origin feat:main')" guard-bash.sh
+check $'class: a push after a reserved word (if/then)' block "$(payload $'if true; then git push origin feat:main; fi')" guard-bash.sh
+check $'class: a redirect with & before the refspec' block "$(payload $'git push origin 2>&1 feat:main')" guard-bash.sh
+check $'class: git spelled with a backslash' block "$(payload $'g\\it push origin feat:main')" guard-bash.sh
+check $'class: a backslash-newline inside the refspec' block "$(payload $'git push origin feat:ma\\\nin')" guard-bash.sh
+check $'class: a shell not listed before' block "$(payload $'ksh -c \'git push origin feat:main\'')" guard-bash.sh
+check $'class: find -exec runs a push' block "$(payload $'find . -maxdepth 0 -exec git push origin feat:main \\;')" guard-bash.sh
+check $'class: a here-string fed to a shell' block "$(payload $'bash <<< \'git push origin feat:main\'')" guard-bash.sh
+check $'class: an ANSI-C quoted shell body' block "$(payload $'bash -c $\'git push origin feat:main\'')" guard-bash.sh
+check $'class: a git alias given with -c' block "$(payload $'git -c alias.p=push p origin feat:main')" guard-bash.sh
+check $'class: GIT_CONFIG_* assignments before the push' block "$(payload $'GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=remote.origin.push GIT_CONFIG_VALUE_0=HEAD:main git push origin')" guard-bash.sh
+check $'class: an abbreviated --force' block "$(payload $'git push --forc origin feat')" guard-bash.sh
+check $'class: a quote in a comment ends nothing' block "$(payload $'git log -1 # it\'s\ngit push origin feat:main # \'')" guard-bash.sh
+check $'class: on main: a comment after git push' block "$(cwpj "$onmain" $'git push # then open the PR')" guard-bash.sh
+check $'class: on main: timeout, if/then and env -i' block "$(cwpj "$onmain" $'timeout 60 git push')" guard-bash.sh
+check $'class: a feature push under timeout' allow "$(payload $'timeout 60 git push origin feat')" guard-bash.sh
+check $'class: a feature push, a redirect, a pipe' allow "$(payload $'git push origin feat 2>&1 | tail -5')" guard-bash.sh
+check $'class: a feature push in an if' allow "$(payload $'if git diff --quiet; then git push origin feat; fi')" guard-bash.sh
+check $'class: find -exec that runs no push' allow "$(payload $'find . -name \'*.md\' -exec grep -l push {} +')" guard-bash.sh
+check $'class: an ANSI-C body pushing a feature' allow "$(payload $'bash -c $\'git push origin feat\'')" guard-bash.sh
+check $'class: --no-force and a short cluster without f' allow "$(payload $'git push --no-force -u origin feat')" guard-bash.sh
+check $'class: on feat: timeout git push' allow "$(cwpj "$onfeat" $'timeout 60 git push')" guard-bash.sh
+check $'class: on main: a feature push after a comment' allow "$(cwpj "$onmain" $'git push origin feat # the PR branch')" guard-bash.sh
+echo "guard-bash.sh — the push reader drops only a comment it can prove; -c aliases and config files it can read (TheHub #62332 review)"
+# One row per class. The full input list is kept in the private mirror's corpus.
+check $'class: a # inside ${ } is no comment' block "$(payload $'echo ${x:- #}; git push origin feat:main')" guard-bash.sh
+check $'class: a # inside a backtick is no comment' block "$(payload $'echo ` # n`; git push origin feat:main')" guard-bash.sh
+check $'class: a # in an array subscript is no comment' block "$(payload $'declare -A a; a[x # y]=1; git push origin feat:main')" guard-bash.sh
+check $'class: on main: a # inside ${ }, then a plain push' block "$(cwpj "$onmain" $'echo ${x:- #}; git push')" guard-bash.sh
+check $'class: a config file named by GIT_CONFIG_GLOBAL' block "$(payload $'GIT_CONFIG_GLOBAL=./push.cfg git push origin feat')" guard-bash.sh
+check $'class: a -c alias that expands to tag' block "$(payload $'git -c alias.t=tag t v2.0.0')" guard-bash.sh
+check $'class: a -c alias that expands to status' allow "$(payload $'git -c alias.st=status st')" guard-bash.sh
+check $'class: GIT_CONFIG_GLOBAL=/dev/null, then a feature push' allow "$(payload $'GIT_CONFIG_GLOBAL=/dev/null git push origin feat')" guard-bash.sh
+check $'nocasematch is unset after env -S' allow "$(payload $'docker RUN img pytest; env -S \'git status\'')" guard-bash.sh
+check $'nocasematch is unset after env --split-string' allow "$(payload $'docker RUN img pytest; env --split-string=\'git status\'')" guard-bash.sh
+check $'nocasematch is unset after an xargs here-string' allow "$(payload $'docker RUN img pytest; xargs -n1 echo <<< \'git status\'')" guard-bash.sh
+echo "guard-bash.sh — the push reader proves a # only with no construct open, on one stack; a -c alias is read only when its value is plain (TheHub #62332 second review)"
+# One row per class. The full input list is kept in the private mirror's corpus.
+check $'class: a } in a backtick inside ${ } does not close it' block "$(payload $'echo ${x:-`echo }` #}; git push origin feat:main')" guard-bash.sh
+check $'class: a ] in a backtick inside a subscript does not close it' block "$(payload $'declare -A a; a[`echo ]` # y]=1; git push origin feat:main')" guard-bash.sh
+check $'class: a ) in a backtick inside (( )) does not close it' block "$(payload $'(( 1 + `echo ) )` # )); git push origin feat:main')" guard-bash.sh
+check $'class: on main: a } in a backtick inside ${ }, then a plain push' block "$(cwpj "$onmain" $'echo ${x:-`echo }` #}; git push')" guard-bash.sh
+check $'class: a } in <( ) inside ${ } does not close it' block "$(payload $'echo ${x:-<(echo }) #}; git push origin feat:main')" guard-bash.sh
+check $'class: a $( ) holding a quote proves no # after it' block "$(payload $'echo $(echo ")"; echo " #"); git push origin feat:main')" guard-bash.sh
+check $'class: a heredoc holding a quote proves no # after it' block "$(payload $'cat <<EOF\nit\'s\nEOF\necho \' #\'; git push origin feat:main')" guard-bash.sh
+check $'class: a -c alias chain in another case' block "$(payload $'git -c alias.B=push -c alias.a=B a origin feat:main')" guard-bash.sh
+check $'class: a -c alias value with a backslash' block "$(payload $'git -c "alias.x=pu\\\\sh" x origin feat:main')" guard-bash.sh
+check $'class: a -c alias value with quotes' block "$(payload $'git -c $\'alias.x=pu\\x22\\x22sh\' x origin feat:main')" guard-bash.sh
+check $'class: a -c alias value that starts with an option' block "$(payload $'git -c alias.t=\'-p tag\' t v1.2.3')" guard-bash.sh
+check $'class: a -c alias given twice' block "$(payload $'git -c alias.p=status -c alias.p=push p origin feat:main')" guard-bash.sh
+check $'class: GIT_CONFIG_GLOBAL naming NUL' block "$(payload $'GIT_CONFIG_GLOBAL=nul git push origin feat')" guard-bash.sh
+check $'class: a -c alias with a plain value and an option (kept)' allow "$(payload $'git -c alias.lg=\'log --oneline\' lg -3')" guard-bash.sh
+check $'class: a comment after a plain $( ) is proved (kept)' allow "$(payload $'echo $(git rev-parse HEAD) # then; git push origin feat:main')" guard-bash.sh
 rm -rf "$onmain" "$onfeat"
 echo ""
 echo "guard-bash.sh — a binary name is added, never substituted (TheHub #61987)"

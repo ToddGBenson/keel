@@ -1366,54 +1366,201 @@ fi
 #   - otherwise the branch is read where the push runs, with git symbolic-ref through the
 #     fault-recording wrapper. Outside a repository (git exits 128) there is nothing to judge,
 #     and the push is allowed.
-# Not read: a git alias, xargs, a push run by a script, and push.default other than
-# simple/current/upstream (a plain push is taken as the current branch).
+# Not read: a git alias set in a config file (one given with -c is refused), the words xargs
+# reads from a file or a pipe (a here-string is read), a push run by a script, a PowerShell
+# -EncodedCommand, and push.default other than simple/current/upstream (a plain push is taken
+# as the current branch).
 read -r -d '' push_tok_awk <<'AWK'
 # T1 (review round 3): a segment is printed only when one of its words can make it matter to
 # the judge (git, a shell, eval, a directory change, GIT_DIR / GIT_WORK_TREE), so a long heredoc
 # of prose costs this one awk pass and no shell work per line.
-# The test mirrors push_judge's own reading of the words before the command (assignments and
-# the same wrappers), so a dropped segment is one push_judge would have returned from unread.
+# The test mirrors push_judge's own reading of the words before the command (assignments,
+# reserved words and wrappers), so a dropped segment is one push_judge would have returned from
+# unread. TheHub #62332: a wrapper (env, timeout, sudo ...) keeps the segment, since its options
+# and their values come before the command; so do find, xargs, the shells push_judge reads and a
+# command word that is not written literally.
 function emit(x, lx) {
   gsub(/\n/, "\004", x)   # TheHub #62239: a newline inside a quoted word stays in it (\004 until judged)
   seg = seg x "\n"
   if (decided) return
+  if (rd) { rd = 0; return }             # a redirect's target
   lx = tolower(x)
-  if (lx ~ /^(git_dir=|git_work_tree=|\$env:git_dir|\$env:git_work_tree)/) { keep = 1; return }
+  if (lx == ">" || lx == "<<<") { rd = 1; return }
+  if (lx ~ /^(git_dir=|git_work_tree=|git_config|\$env:git_dir|\$env:git_work_tree)/) { keep = 1; return }
   if (lx ~ /^[a-z_].*=/ || lx ~ /^\$env:/) return
-  if (lx ~ /^(env|command|builtin|exec|nice|nohup|time|sudo|doas)$/) return
+  if (lx ~ /^(if|then|do|else|elif|while|until|!|[{]|coproc|busybox|builtin|nohup)$/) return
   decided = 1
   # Hook train review: without its directory (either slash) or .exe, as push_judge reads it.
   sub(/^.*[\/\\]/, "", lx); sub(/\.exe$/, "", lx)
-  if (lx ~ /^(cd|pushd|popd|chdir|set-location|sl|push-location|pop-location|sh|bash|dash|zsh|ash|eval)$/) keep = 1
-  if (lx ~ /git$/) keep = 1
+  if (lx ~ /^(cd|pushd|popd|chdir|set-location|sl|push-location|pop-location|eval)$/) keep = 1
+  if (lx ~ /^(sh|bash|dash|zsh|ash|ksh|mksh|yash|rbash|fish|su|pwsh|powershell|cmd|find)$/) keep = 1
+  if (lx ~ /^(env|command|exec|nice|time|sudo|doas|timeout|stdbuf|setsid|ionice|xargs)$/) keep = 1
+  if (lx ~ /git$/ || x ~ /[$`]/) keep = 1
 }
 function flush() { if (have) { emit(tok); tok = ""; have = 0 } }
-function sep() { flush(); if (keep) printf "%s", seg; print "\001"; seg = ""; keep = 0; decided = 0 }
+function sep() { flush(); if (keep) printf "%s", seg; print "\001"; seg = ""; keep = 0; decided = 0; rd = 0 }
+function ansi(   e, v, k, m, z) {   # TheHub #62332: i on the $ of $'...'; the decoded text goes to tok, i ends on its closing quote
+  z = 0
+  for (i += 2; i <= n; i++) {
+    e = substr(s, i, 1)
+    if (e == "'" || e == "\005") { if (e == "\005") i--; return }
+    if (e == "\\" && i < n) {
+      e = substr(s, ++i, 1); v = -1
+      if (e == "n") v = 10; else if (e == "t") v = 9; else if (e == "r") v = 13; else if (e == "a") v = 7
+      else if (e == "b") v = 8; else if (e == "f") v = 12; else if (e == "v") v = 11; else if (e == "e" || e == "E") v = 27
+      else if (e == "x" || e == "u" || e == "U") {
+        m = (e == "x") ? 2 : (e == "u") ? 4 : 8; v = 0
+        for (k = 0; k < m && index("0123456789abcdefABCDEF", substr(s, i + 1, 1)); k++) v = v * 16 + index("0123456789abcdef", tolower(substr(s, ++i, 1))) - 1
+        if (k == 0) { if (!z) tok = tok "\\" e; continue }
+      }
+      else if (e ~ /[0-7]/) { v = e + 0; for (k = 1; k < 3 && substr(s, i + 1, 1) ~ /[0-7]/; k++) v = v * 8 + substr(s, ++i, 1) }
+      else if (e == "c" && i < n) { e = toupper(substr(s, ++i, 1)); v = (e == "?") ? 127 : ((e in ord) ? ord[e] % 32 : 0) }
+      else { if (!z) tok = tok ((e == "\\" || e == "'" || e == "\"" || e == "?") ? e : "\\" e); continue }
+      if (v == 0) z = 1                        # bash ends the word at a NUL
+      if (!z) tok = tok ((v > 0 && v < 128) ? sprintf("%c", v) : "?")
+      continue
+    }
+    if (!z) tok = tok e
+  }
+}
+BEGIN { for (k = 32; k < 127; k++) ord[sprintf("%c", k)] = k }
 { s = (NR > 1) ? s "\n" $0 : $0 }
 END {
-  n = length(s); q = ""
+  n = length(s); q = ""; ns = 0; cf = 0; cm = 0; nc = 0
   for (i = 1; i <= n; i++) {
-    c = substr(s, i, 1)
-    if (c == "\005") { q = ""; sep(); continue }   # the end of one body of a level (TheHub #62239 review)
-    if (q != "") { if (c == q) q = ""; else if (c == "\\" && q == "\"" && i < n) tok = tok substr(s, ++i, 1); else tok = tok c; continue }
+    c = substr(s, i, 1); d = substr(s, i + 1, 1)
+    if (c == "\005") { q = ""; ns = 0; cf = 0; cm = 0; sep(); continue }   # the end of one body of a level (TheHub #62239 review)
+    if (cm) {   # a # this reader cannot prove is a comment: its words are read, its quotes are text
+      if (c == "\n") cm = 0
+      else {
+        if (c == " " || c == "\t") flush()
+        else if (index(";|&()`", c)) sep()
+        else { tok = tok c; have = 1 }
+        continue
+      }
+    }
+    if (q != "") {
+      # Second review of #62332: inside "...", a $( ), a ${ } or a backtick can hold quotes of its
+      # own, which this reader reads as the end of the outer quote. No # after it is proved (cf).
+      if (q == "\"" && ((c == "$" && (d == "(" || d == "{")) || c == "`")) cf = 1
+      if (c == q) q = ""
+      else if (c == "\\" && q == "\"" && d == "\n") i++   # TheHub #62332: a backslash-newline is removed, in "..." too
+      else if (c == "\\" && q == "\"" && i < n) tok = tok substr(s, ++i, 1)
+      else tok = tok c
+      continue
+    }
     if (c == "'" || c == "\"") { q = c; have = 1; continue }
+    if (c == "\\" && d == "\n") { i++; continue }        # TheHub #62332: a line continuation joins the words
     if (c == "\\" && i < n) { tok = tok substr(s, ++i, 1); have = 1; continue }
-    if (c == "$" && substr(s, i + 1, 1) == "(") {           # $(...) stays inside its word (round 2)
-      d = 0
-      for (; i <= n; i++) { c = substr(s, i, 1); if (c == "\005") { i--; break }; tok = tok c; if (c == "(") d++; else if (c == ")" && --d == 0) break }
+    if (c == "$" && d == "'") { ansi(); have = 1; continue }   # TheHub #62332: $'...', its escapes decoded
+    if (c == "$" && d == "(") {           # $(...) stays inside its word (round 2)
+      e = 0
+      for (j = i; i <= n; i++) { c = substr(s, i, 1); if (c == "\005") { i--; break }; tok = tok c; if (c == "(") e++; else if (c == ")" && --e == 0) break }
+      # Second review of #62332: the parentheses are counted as written, so where the body holds
+      # more than plain words (a quote, a backtick, a #, a backslash, a ${ }, a case pattern, a
+      # nested ( ), ...), or is left open, its end may be read in the wrong place. No # after it is
+      # proved (cf).
+      if (e != 0 || substr(s, j + 2, i - j - 2) ~ /[^A-Za-z0-9 _.,:=+\/@%-]/) cf = 1
       have = 1; continue
     }
+    # TheHub #62332: a # that starts a word after a blank or an operator is a comment to the end of
+    # the line; a quote in it opens nothing. A # anywhere else (glued to a word, after a ) or a
+    # redirect) is read as a word: reading more words can only block more.
+    # Review of #62332: only where this reader can prove it. Inside a ${ }, a backtick, any ( ) (a
+    # subshell, (( )), <( ), an extglob pattern, a [[ =~ ]] group) or a [ ] (a subscript) bash may
+    # read no comment, and dropping the line hid the push after it. There the rest of the line is
+    # read as words with quotes as text (cm), and the line is marked (\006) so push_guard reads the
+    # text a second time (pr2) with that # as an ordinary character, as main read every #. Each
+    # reading is right in one of the two cases; both are judged.
+    # Second review of #62332: the open constructs are one stack (st, ns deep), and a closer pops
+    # only the opener it matches: four counters let a } in a backtick close the ${ around it. A
+    # closer that matches no opener, or a reading that can be out of step (cf, above and below),
+    # leaves no # of this body proved. Fail closed: an unproved # costs a second reading, never a
+    # dropped line.
+    if (c == "#" && !have && (i == 1 || index(" \t\n;|&(\005", substr(s, i - 1, 1)))) {
+      if (ns || cf) {
+        if (!pr2) { nc = 1; cm = 1; continue }
+      } else {
+        while (i < n && substr(s, i + 1, 1) != "\n" && substr(s, i + 1, 1) != "\005") i++
+        continue
+      }
+    }
+    if (c == "$" && d == "{") st[++ns] = "{"
+    else if (c == "[" || c == "(") st[++ns] = c
+    else if (c == "{" && ns && substr(s, i - 1, 1) != "$") cf = 1   # a { inside: bash may count it
+    else if (c == "`") { if (ns && st[ns] == "`") ns--; else st[++ns] = c }
+    else if (c == "}" || c == "]" || c == ")") {
+      if (ns && st[ns] == ((c == "}") ? "{" : (c == "]") ? "[" : "(")) ns--; else if (ns) cf = 1
+    }
     if (c == " " || c == "\t") { flush(); continue }
+    if (c == "&" && d == ">") { c = ">"; i++ }           # TheHub #62332: &> and &>> redirect; they end no command
     if (c == "\n" || c == ";" || c == "|" || c == "&" || c == "(" || c == ")" || c == "`") { sep(); continue }
-    if (c == "<" || c == ">") { if (tok ~ /^[0-9]+$/) { tok = ""; have = 0 } else flush(); while (i < n && index("<>", substr(s, i + 1, 1))) i++; emit(">"); continue }
+    if (c == "<" || c == ">") {
+      # TheHub #62332: the whole operator (2>&1, >&2, >|) is one redirect, and its target the next
+      # word; a here-string (<<<) is marked as one, since a shell or xargs reads it as input.
+      if (tok ~ /^[0-9]+$/) { tok = ""; have = 0 } else flush()
+      r = c; while (i < n && index("<>&|", substr(s, i + 1, 1))) r = r substr(s, ++i, 1)
+      if (r ~ /^<</ && r != "<<<") cf = 1   # second review of #62332: a heredoc body is read here as words, its quotes too
+      emit(r == "<<<" ? "<<<" : ">"); continue
+    }
     tok = tok c; have = 1
   }
   sep()
+  if (nc) print "\006"
 }
 AWK
 push_moves=0   # 1 once a word that changes the directory, the git dir or the branch is seen
 push_lit() { case "$1" in *'$'*|*'`'*|'~'*) return 1 ;; esac; return 0; }   # a word read as written
+# TheHub #62332: a wrapper's options come before the command it runs (env -i, timeout -s KILL 60,
+# sudo -u x, nice -n 5), and push_judge read the first option as the command. $1: the wrapper, in
+# lower case. Moves push_judge's i past it, its options and their values, and the words it takes
+# before the command (timeout's duration). A directory option (env -C, sudo -D or -R) moves the
+# push; env -S's string is judged as the command it is (returns 1: judged).
+push_wrap() {
+  local v="" l="" p=0 mv="" x k ch
+  shopt -u nocasematch
+  case "$1" in
+    env) v=uCSPa; l=" unset chdir split-string argv0 "; mv=C ;;
+    exec) v=a ;;
+    nice) v=n; l=" adjustment " ;;
+    time) v=fo; l=" format output " ;;
+    sudo) v=ugpUCDhrtTR; l=" user group prompt other-user close-from chdir host role type command-timeout chroot "; mv=DR ;;
+    doas) v=uC ;;
+    timeout) v=sk; l=" signal kill-after "; p=1 ;;
+    stdbuf) v=ioe; l=" input output error " ;;
+    ionice) v=cnpPu; l=" class classdata pid pgid uid " ;;
+    xargs) v=aEIdLnPs; l=" arg-file eof delimiter max-lines max-args max-procs max-chars replace process-slot-var " ;;
+  esac
+  i=$((i + 1))
+  while [ "$i" -lt "$n" ]; do
+    x=${w[i]}
+    case "$x" in
+      --) i=$((i + 1)); break ;;
+      --split-string=*) x="${x#*=} ${w[*]:i+1}"; push_guard "${x//$'\004'/$'\n'}"; shopt -s nocasematch; return 1 ;;
+      --chdir=*|--chroot=*) push_moves=1; i=$((i + 1)) ;;
+      --*=*) i=$((i + 1)) ;;
+      --?*) case "${x#--}" in chdir|chroot) push_moves=1 ;; split-string) [ "$1" = env ] && { x="${w[*]:i+1}"; push_guard "${x//$'\004'/$'\n'}"; shopt -s nocasematch; return 1; } ;; esac
+            if [[ $l == *" ${x#--} "* ]]; then i=$((i + 2)); else i=$((i + 1)); fi ;;
+      -?*)
+        for ((k = 1; k < ${#x}; k++)); do
+          ch=${x:k:1}
+          [ -n "$v" ] && [[ $v == *"$ch"* ]] || continue
+          [ -n "$mv" ] && [[ $mv == *"$ch"* ]] && push_moves=1
+          if [ "$1$ch" = envS ]; then
+            if [ $((k + 1)) -lt ${#x} ]; then x="${x:k+1} ${w[*]:i+1}"; else x="${w[*]:i+1}"; fi
+            push_guard "${x//$'\004'/$'\n'}"; shopt -s nocasematch; return 1
+          fi
+          [ $((k + 1)) -eq ${#x} ] && i=$((i + 1))   # the value is the next word
+          break
+        done
+        i=$((i + 1)) ;;
+      *) break ;;
+    esac
+  done
+  i=$((i + p))
+  shopt -s nocasematch
+  return 0
+}
 push_judge() { # $@: the words of one invocation
   local w=("$@") n=$# i=0 a dir="" ndir=0 sub="" pos=0 cur=0 cfg_bad="" first="" dry=0
   # Words before the command: VAR=value assignments (GIT_DIR and GIT_WORK_TREE move the push),
@@ -1421,14 +1568,35 @@ push_judge() { # $@: the words of one invocation
   # the command, moves every push after it (in any case: PowerShell's CD is cd).
   # T1 (review round 3): matched in any case with nocasematch (bash 3.1+), not by starting tr
   # twice per command; the option is set for these two case statements only.
-  local kind=""
+  local kind="" hs="" k ww=()
+  # TheHub #62332: a here-string (<<< word) is the command's input, which a shell runs and xargs
+  # adds to the command. It is taken out of the words and kept in hs.
+  for ((k = 0; k < n; k++)); do
+    if [ "${w[k]}" = "<<<" ]; then hs+="${w[k+1]:-} "; k=$((k + 1)); else ww+=("${w[k]}"); fi
+  done
+  w=("${ww[@]}"); n=${#w[@]}
   shopt -s nocasematch
   while [ "$i" -lt "$n" ]; do
     a=${w[i]}
     case "$a" in
       git_dir=*|git_work_tree=*|'$env:git_dir'*|'$env:git_work_tree'*) push_moves=1; i=$((i + 1)); continue ;;
+      # TheHub #62332: git config given in the environment, as -c gives it on the command line
+      git_config_key_*=*|git_config_parameters=*) case "${a#*=}" in *push*|*mirror*|*alias.*) cfg_bad=${a%%=*}=${a#*=} ;; esac; i=$((i + 1)); continue ;;
+      # Review of #62332: /dev/null holds no config, so it maps nothing. Any other file can
+      # (remote.<name>.push maps even a push that names its branch), and stays refused.
+      # Second review of #62332: /dev/null only, as written ([ = ] ignores nocasematch). NUL is a
+      # device on Windows only; elsewhere it is a file in the current directory, so it is refused.
+      git_config_global=*|git_config_system=*) [ "${a#*=}" = /dev/null ] || cfg_bad=$a; i=$((i + 1)); continue ;;
+      git_config=*) cfg_bad=$a; i=$((i + 1)); continue ;;
       [a-z_]*=*|'$env:'*) i=$((i + 1)); continue ;;
-      env|command|builtin|exec|nice|nohup|time|sudo|doas) i=$((i + 1)); continue ;;
+      # TheHub #62332: reserved words, and a redirect and its target, before the command
+      if|then|do|else|elif|while|until|'!'|'{'|coproc|builtin|nohup|busybox) i=$((i + 1)); continue ;;
+      '>') i=$((i + 2)); continue ;;
+      # (a return from here first unsets nocasematch: the rest of the hook matches case)
+      env|command|exec|nice|time|sudo|doas|timeout|stdbuf|setsid|ionice) push_wrap "${a,,}" || { shopt -u nocasematch; return 0; }; continue ;;
+      xargs) push_wrap xargs || { shopt -u nocasematch; return 0; }
+             if [ -n "$hs" ]; then shopt -u nocasematch; a="${w[*]:i} $hs"; push_guard "${a//$'\004'/$'\n'}"; return 0; fi
+             continue ;;
     esac
     break
   done
@@ -1442,8 +1610,12 @@ push_judge() { # $@: the words of one invocation
     a=${first##*[/\\]}; [[ $a == *.exe ]] && a=${a%????}
     case "$a" in
       cd|pushd|popd|chdir|set-location|sl|push-location|pop-location) kind="cd" ;;
-      sh|bash|dash|zsh|ash) kind="sh" ;;
+      sh|bash|dash|zsh|ash|ksh|mksh|yash|rbash|fish|su) kind="sh" ;;   # TheHub #62332: more shells, and su -c
+      pwsh|powershell) kind="ps" ;;
+      cmd) kind="cmd" ;;
+      find) kind="find" ;;
       eval) kind="eval" ;;
+      *'$'*|*'`'*) kind="dyn" ;;   # TheHub #62332: "$SHELL", $(command -v git): a name this hook cannot read
       git) isgit=1 ;;
       *git) [ "${w[i+1]:-}" = "git" ] && isgit=1 ;;   # a path whose separators the tokenizer dropped
     esac
@@ -1454,26 +1626,78 @@ push_judge() { # $@: the words of one invocation
     cd) push_moves=1; return 0 ;;
     sh)
       # A shell -c body is a command of its own: judge it the same way (review round 2).
-      local k=$((i + 1))
+      # TheHub #62332: -o / -O take a value (bash -o pipefail -c); su takes a user; with no -c, a
+      # here-string is the shell's input.
+      k=$((i + 1))
       while [ "$k" -lt "$n" ]; do
-        case "${w[k]}" in -*c*) [ $((k + 1)) -lt "$n" ] && push_guard "${w[k+1]//$'\004'/$'\n'}"; return 0 ;; -*) ;; *) return 0 ;; esac
+        case "${w[k]}" in
+          -*c*) [ $((k + 1)) -lt "$n" ] && push_guard "${w[k+1]//$'\004'/$'\n'}"; return 0 ;;
+          -o|+o|-O|+O) k=$((k + 1)) ;;
+          -s|--shell|-g|--group) [ "${a,,}" = su ] && k=$((k + 1)) ;;
+          -*|+*) ;;
+          *) [ "${a,,}" = su ] || return 0 ;;
+        esac
+        k=$((k + 1))
+      done
+      [ -n "$hs" ] && push_guard "${hs//$'\004'/$'\n'}"
+      return 0 ;;
+    ps)   # TheHub #62332: pwsh / powershell -Command (any prefix, any case) runs the words after it
+      k=$((i + 1))
+      while [ "$k" -lt "$n" ]; do
+        case "${w[k],,}" in
+          -c|-co|-com|-comm|-comma|-comman|-command|/c|/command) a="${w[*]:k+1}"; push_guard "${a//$'\004'/$'\n'}"; return 0 ;;
+          -f|-file|-e|-ec|-enc|-encodedcommand) return 0 ;;
+          -ep|-ex|-executionpolicy|-wd|-workingdirectory|-config|-configurationname|-settingsfile|-if|-inputformat|-of|-outputformat|-w|-windowstyle|-custompipename|-v|-version) k=$((k + 1)) ;;
+          -*) ;;
+          *) a="${w[*]:k}"; push_guard "${a//$'\004'/$'\n'}"; return 0 ;;   # Windows PowerShell: the words are the command
+        esac
+        k=$((k + 1))
+      done
+      return 0 ;;
+    cmd)  # TheHub #62332: cmd /c (or /k) runs the rest of the line
+      k=$((i + 1))
+      while [ "$k" -lt "$n" ]; do
+        case "${w[k],,}" in /c|/k|//c|//k) a="${w[*]:k+1}"; push_guard "${a//$'\004'/$'\n'}"; return 0 ;; /*) ;; *) return 0 ;; esac
+        k=$((k + 1))
+      done
+      return 0 ;;
+    find)  # TheHub #62332: find -exec, -execdir, -ok and -okdir run the words up to ; or +
+      local e
+      k=$((i + 1))
+      while [ "$k" -lt "$n" ]; do
+        case "${w[k]}" in
+          -exec|-execdir|-ok|-okdir)
+            e=$((k + 1))
+            while [ "$e" -lt "$n" ] && [ "${w[e]}" != ";" ] && [ "${w[e]}" != "+" ]; do e=$((e + 1)); done
+            [ "$e" -gt $((k + 1)) ] && push_judge "${w[@]:k+1:e-k-1}"
+            k=$e ;;
+        esac
         k=$((k + 1))
       done
       return 0 ;;
     eval) a="${w[*]:i+1}"; push_guard "${a//$'\004'/$'\n'}"; return 0 ;;
+    dyn)   # TheHub #62332: a -c body is judged as a shell's; followed by push, the name is judged as git
+      k=$((i + 1))
+      while [ "$k" -lt "$n" ]; do
+        case "${w[k]}" in -*c*) [ $((k + 1)) -lt "$n" ] && push_guard "${w[k+1]//$'\004'/$'\n'}"; break ;; -*) ;; *) break ;; esac
+        k=$((k + 1))
+      done
+      [ "${w[i+1]:-}" = push ] || return 0
+      isgit=1 ;;
   esac
   [ "$isgit" -eq 1 ] || return 0
   i=$((i + 1))
   [ "${w[i]:-}" = "git" ] && i=$((i + 1))   # the bare name normalize() appended
   # git's global options. One this hook does not know, before a push, is refused (round 2):
   # skipping it would let the push go unread.
-  local unknown=""
+  local unknown="" ali=()
   while [ "$i" -lt "$n" ]; do
     a=${w[i]}
     case "$a" in
       -C) ndir=$((ndir + 1)); dir=${w[i+1]:-}; push_lit "$dir" || dir='$'; i=$((i + 2)) ;;
-      -c) case "${w[i+1]:-}" in [Pp][Uu][Ss][Hh].*|[Rr][Ee][Mm][Oo][Tt][Ee].*.[Pp][Uu][Ss][Hh]=*|[Rr][Ee][Mm][Oo][Tt][Ee].*.[Mm][Ii][Rr][Rr][Oo][Rr]=*) cfg_bad=${w[i+1]} ;; esac; i=$((i + 2)) ;;
-      -c*) case "${a#-c}" in [Pp][Uu][Ss][Hh].*|[Rr][Ee][Mm][Oo][Tt][Ee].*.[Pp][Uu][Ss][Hh]=*) cfg_bad=${a#-c} ;; esac; i=$((i + 1)) ;;
+      -c) case "${w[i+1]:-}" in [Pp][Uu][Ss][Hh].*|[Rr][Ee][Mm][Oo][Tt][Ee].*.[Pp][Uu][Ss][Hh]=*|[Rr][Ee][Mm][Oo][Tt][Ee].*.[Mm][Ii][Rr][Rr][Oo][Rr]=*) cfg_bad="-c ${w[i+1]}" ;;
+            [Aa][Ll][Ii][Aa][Ss].*=*) ali+=("${w[i+1]#*.}") ;; esac; i=$((i + 2)) ;;
+      -c*) case "${a#-c}" in [Pp][Uu][Ss][Hh].*|[Rr][Ee][Mm][Oo][Tt][Ee].*.[Pp][Uu][Ss][Hh]=*) cfg_bad=$a ;; [Aa][Ll][Ii][Aa][Ss].*=*) ali+=("${a#*.}") ;; esac; i=$((i + 1)) ;;
       --git-dir|--work-tree) push_moves=1; i=$((i + 2)) ;;
       --git-dir=*|--work-tree=*) push_moves=1; i=$((i + 1)) ;;
       --namespace|--config-env|--attr-source|--super-prefix|--list-cmds) i=$((i + 2)) ;;
@@ -1484,6 +1708,35 @@ push_judge() { # $@: the words of one invocation
     esac
   done
   sub=${w[i]:-}
+  # TheHub #62332: a subcommand that is an alias given with -c (alias.p=push) is what it expands to.
+  # Review of #62332: an alias that names no push (alias.st=status) is read as the subcommand it
+  # names; one that runs a shell (!), names push or send-pack, holds a $ or a backtick, starts with
+  # tag, update-ref, fetch or config, or names another -c alias is refused.
+  # Second review of #62332: an allow-list. Git reads alias names in any case, splits the value
+  # like a command line (pu\sh and pu""sh are push) and takes options before the subcommand
+  # (-p tag). So the alias is read as its first word only when the value is plain: a letter, then
+  # letters, digits, spaces and - only (no quote, backslash, $, backtick, tab or =). Every other
+  # value, a value that starts with -, a first word that is any -c alias name (in any case), and
+  # a name given twice (git takes the last) is refused.
+  local al av ax fw hit=0 lsub=${sub,,}
+  if [ -n "$sub" ]; then
+    for al in "${ali[@]}"; do
+      al=${al,,}; ax=${al%%=*}
+      [ "$ax" = "$lsub" ] || [ "${ax%%.*}" = "$lsub" ] || continue
+      hit=$((hit + 1)); av=${al#*=}
+    done
+  fi
+  if [ "$hit" -gt 0 ]; then
+    fw=""
+    if [ "$hit" -eq 1 ] && [[ $av =~ ^[a-z][a-z0-9\ -]*$ ]]; then
+      fw=${av%% *}
+      case "$av" in *push*|*send-pack*) fw="" ;; esac
+      case "$fw" in tag|update-ref|fetch|config) fw="" ;; esac   # a ref write the tag rule reads
+      for al in "${ali[@]}"; do al=${al,,}; ax=${al%%=*}; { [ "$ax" = "$fw" ] || [ "${ax%%.*}" = "$fw" ]; } && fw=""; done
+    fi
+    [ -n "$fw" ] || block "a git command run through an alias given with -c (alias.${lsub}), which this hook does not expand; it may be a push. Write the subcommand out." "AC-5, CM-5"
+    sub=$fw
+  fi
   case "$sub" in
     checkout|switch) push_moves=1; return 0 ;;
     send-pack) block "git send-pack, the plumbing under git push, which can move main. Push a feature branch with git push." "AC-5, CM-5" ;;
@@ -1492,7 +1745,7 @@ push_judge() { # $@: the words of one invocation
     *) return 0 ;;
   esac
   [ -n "$unknown" ] && block "a git push after a global option this hook cannot read ($unknown). Push without it, or name the branch: git push origin <feature>." "AC-5, CM-5"
-  [ -n "$cfg_bad" ] && block "a git push with -c $cfg_bad, which can map the push onto main. Push a feature branch by name." "AC-5, CM-5"
+  [ -n "$cfg_bad" ] && block "a git push with $cfg_bad, git config that can map the push onto main. Push a feature branch by name." "AC-5, CM-5"
   i=$((i + 1))
   local dyn=0 r dst name
   while [ "$i" -lt "$n" ]; do
@@ -1511,8 +1764,10 @@ push_judge() { # $@: the words of one invocation
           for opt in all mirror branches; do         # git accepts any unique prefix of a long option
             case "$opt" in "$name"*) block "a push of every branch or ref (--$opt, read from --$name), main included. Push one feature branch." "AC-5, CM-5" ;; esac
           done
+          # TheHub #62332: --force by a prefix (--for, --forc), and its variants
+          case "$name" in for|forc|force|force-*) block "force push (--$name). Published history is immutable — it is the AU-12 audit trail." "AIC-3, AU-12, SI-7" ;; esac
         fi ;;
-      -*) ;;
+      -*) case "${a%%o*}" in *f*) block "force push (-f in $a). Published history is immutable — it is the AU-12 audit trail." "AIC-3, AU-12, SI-7" ;; esac ;;   # TheHub #62332: a short cluster
       *)
         pos=$((pos + 1))
         if [ "$pos" -gt 1 ]; then                          # the first is the repository
@@ -1585,6 +1840,12 @@ push_guard() { # $1: one view of the command
   # itself (depth 0) is text an agent wrote, so only it is cleaned of the marks.
   [ "$push_depth" -eq 0 ] && src=${src//[$'\001\002\003\004\005']/?}
   mapfile -t toks < <(printf '%s' "$src" | LC_ALL=C awk "$push_tok_awk")
+  # Review of TheHub #62332: a # the reader could not prove is a comment (\006): the text is read
+  # again with that # as an ordinary character, and both readings are judged.
+  if [ "${toks[${#toks[@]}-1]:-}" = $'\006' ]; then
+    unset 'toks[${#toks[@]}-1]'; toks+=($'\001')
+    mapfile -t -O "${#toks[@]}" toks < <(printf '%s' "$src" | LC_ALL=C awk -v pr2=1 "$push_tok_awk")
+  fi
   toks+=($'\001')
   for t in "${toks[@]}"; do
     if [ "$t" = $'\001' ]; then
@@ -2421,8 +2682,13 @@ if [ "$ps_cmd" != "$raw_cmd" ] && [ "$ps_cmd" != "$word_cmd" ]; then cmd="$ps_cm
 # space, a quote or .exe. A heredoc that merely mentions git in prose still pays the
 # tokenizer once, never a process per word.
 push_gate='(^|[][[:space:];&|(){}`"'"'"'/\\=!])[Gg][Ii][Tt]([.][Ee][Xx][Ee])?([[:space:];&|()`"'"'"']|$)'
-if [[ $raw_cmd =~ $push_gate ]] || { [ "$ps_cmd" != "$raw_cmd" ] && [[ $ps_cmd =~ $push_gate ]]; }; then
+# TheHub #62332: bash deletes a backslash-newline (the rules above read it as a space), removes a
+# backslash and quotes inside a word (g\it, g"i"t) and decodes $'...'.
+push_gate_txt=${tag_src//$'\\\n'/}; push_gate_txt=${push_gate_txt//\\/}; push_gate_txt=${push_gate_txt//\"/}; push_gate_txt=${push_gate_txt//\'/}
+if [[ $raw_cmd =~ $push_gate ]] || [[ $push_gate_txt =~ $push_gate ]] || [[ $raw_cmd == *"\$'"* ]] \
+   || { [ "$ps_cmd" != "$raw_cmd" ] && [[ $ps_cmd =~ $push_gate ]]; }; then
   guard_hdsub=1; push_moves=0; push_guard "$raw_cmd"
+  case "$tag_src" in *$'\\\n'*) guard_hdsub=1; push_moves=0; push_guard "$tag_src" ;; esac   # TheHub #62332: the words a backslash-newline joins
   if [ "$ps_cmd" != "$raw_cmd" ]; then guard_hdsub=0; push_moves=0; push_guard "$ps_cmd"; fi
 fi
 # Round 4 (timing): the word judge runs only when a view names a container engine at all,
