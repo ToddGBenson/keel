@@ -87,3 +87,19 @@ challenge to #62331's AC-2 recorded in the PR body.
 - `tok_awk` is now `"$HD_AWK"'...'`: one more awk program text is concatenated per call, no extra
   process. The timing tests are the check (see above).
 - `ansi()` maps a non-ASCII escape to `?`, so a decoded word with one is never a literal git.
+
+## Rework after the independent review (2026-11-28)
+
+- Finding 1 (a quoted substitution ended the outer command): `tok_awk` and `ps_tok_awk` now hold
+  a body's output (`buf`) and print it after the command it stands in has ended (`dfr`); the
+  outer word goes on after the body as one that is not literal. The unquoted `$( )` and backtick
+  are read the same way (finding 3g, open on main, closed by the same change).
+- Finding 2 (an escaped `case`): a word with a quote or a backslash in it (`lq`) is never the
+  reserved word.
+- Fell out of the same change (finding 3a): a `}` in a body nested in `${ }` no longer ends the
+  `${ }`; a `#` inside `[ ]` (a subscript, a `[[ =~ ]]` group) is not proved a comment; a case
+  pattern `)` inside a body no longer pops the level outside it.
+- Every input of the review's blocking table is a selftest row (and, in the private mirror, a
+  corpus entry), red at the reviewed head and green at this one.
+- Still open (not in this rework): findings 3b, 3c, 3d, 3e, 3f and 4 (follow-ups TheHub #62450,
+  #62451).
