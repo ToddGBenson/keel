@@ -691,6 +691,18 @@ check $'class: an ANSI-C body pushing a feature' allow "$(payload $'bash -c $\'g
 check $'class: --no-force and a short cluster without f' allow "$(payload $'git push --no-force -u origin feat')" guard-bash.sh
 check $'class: on feat: timeout git push' allow "$(cwpj "$onfeat" $'timeout 60 git push')" guard-bash.sh
 check $'class: on main: a feature push after a comment' allow "$(cwpj "$onmain" $'git push origin feat # the PR branch')" guard-bash.sh
+echo "guard-bash.sh — the push reader drops only a comment it can prove; -c aliases and config files it can read (TheHub #62332 review)"
+# One row per class. The full input list is kept in the private mirror's corpus.
+check $'class: a # inside ${ } is no comment' block "$(payload $'echo ${x:- #}; git push origin feat:main')" guard-bash.sh
+check $'class: a # inside a backtick is no comment' block "$(payload $'echo ` # n`; git push origin feat:main')" guard-bash.sh
+check $'class: a # in an array subscript is no comment' block "$(payload $'declare -A a; a[x # y]=1; git push origin feat:main')" guard-bash.sh
+check $'class: on main: a # inside ${ }, then a plain push' block "$(cwpj "$onmain" $'echo ${x:- #}; git push')" guard-bash.sh
+check $'class: a config file named by GIT_CONFIG_GLOBAL' block "$(payload $'GIT_CONFIG_GLOBAL=./push.cfg git push origin feat')" guard-bash.sh
+check $'class: a -c alias that expands to status' allow "$(payload $'git -c alias.st=status st')" guard-bash.sh
+check $'class: GIT_CONFIG_GLOBAL=/dev/null, then a feature push' allow "$(payload $'GIT_CONFIG_GLOBAL=/dev/null git push origin feat')" guard-bash.sh
+check $'nocasematch is unset after env -S' allow "$(payload $'docker RUN img pytest; env -S \'git status\'')" guard-bash.sh
+check $'nocasematch is unset after env --split-string' allow "$(payload $'docker RUN img pytest; env --split-string=\'git status\'')" guard-bash.sh
+check $'nocasematch is unset after an xargs here-string' allow "$(payload $'docker RUN img pytest; xargs -n1 echo <<< \'git status\'')" guard-bash.sh
 rm -rf "$onmain" "$onfeat"
 echo ""
 echo "guard-bash.sh — a binary name is added, never substituted (TheHub #61987)"
