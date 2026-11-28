@@ -1694,13 +1694,14 @@ push_judge() { # $@: the words of one invocation
   sub=${w[i]:-}
   # TheHub #62332: a subcommand that is an alias given with -c (alias.p=push) is what it expands to.
   # Review of #62332: an alias that names no push (alias.st=status) is read as the subcommand it
-  # names; one that runs a shell (!), names push or send-pack, holds a $ or a backtick, or names
-  # another -c alias is refused.
+  # names; one that runs a shell (!), names push or send-pack, holds a $ or a backtick, starts with
+  # tag, update-ref, fetch or config, or names another -c alias is refused.
   local al av ax
   for al in "${ali[@]}"; do
     al=${al,,}; [ -n "$sub" ] && [ "${al%%=*}" = "${sub,,}" ] || continue
     av=${al#*=}; av=${av#"${av%%[![:space:]]*}"}
     case "$av" in '!'*|*push*|*send-pack*|*'$'*|*'`'*|'') av="" ;; esac
+    case "${av%%[[:space:]]*}" in tag|update-ref|fetch|config) av="" ;; esac   # a ref write the tag rule reads
     if [ -n "$av" ]; then for ax in "${ali[@]}"; do [ "${ax%%=*}" = "${av%%[[:space:]]*}" ] && av=""; done; fi
     [ -n "$av" ] || block "a git command run through an alias given with -c (alias.${al}), which this hook does not expand; it may be a push. Write the subcommand out." "AC-5, CM-5"
     sub=${av%%[[:space:]]*}; break
