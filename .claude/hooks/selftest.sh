@@ -704,6 +704,23 @@ check $'class: GIT_CONFIG_GLOBAL=/dev/null, then a feature push' allow "$(payloa
 check $'nocasematch is unset after env -S' allow "$(payload $'docker RUN img pytest; env -S \'git status\'')" guard-bash.sh
 check $'nocasematch is unset after env --split-string' allow "$(payload $'docker RUN img pytest; env --split-string=\'git status\'')" guard-bash.sh
 check $'nocasematch is unset after an xargs here-string' allow "$(payload $'docker RUN img pytest; xargs -n1 echo <<< \'git status\'')" guard-bash.sh
+echo "guard-bash.sh — the push reader proves a # only with no construct open, on one stack; a -c alias is read only when its value is plain (TheHub #62332 second review)"
+# One row per class. The full input list is kept in the private mirror's corpus.
+check $'class: a } in a backtick inside ${ } does not close it' block "$(payload $'echo ${x:-`echo }` #}; git push origin feat:main')" guard-bash.sh
+check $'class: a ] in a backtick inside a subscript does not close it' block "$(payload $'declare -A a; a[`echo ]` # y]=1; git push origin feat:main')" guard-bash.sh
+check $'class: a ) in a backtick inside (( )) does not close it' block "$(payload $'(( 1 + `echo ) )` # )); git push origin feat:main')" guard-bash.sh
+check $'class: on main: a } in a backtick inside ${ }, then a plain push' block "$(cwpj "$onmain" $'echo ${x:-`echo }` #}; git push')" guard-bash.sh
+check $'class: a } in <( ) inside ${ } does not close it' block "$(payload $'echo ${x:-<(echo }) #}; git push origin feat:main')" guard-bash.sh
+check $'class: a $( ) holding a quote proves no # after it' block "$(payload $'echo $(echo ")"; echo " #"); git push origin feat:main')" guard-bash.sh
+check $'class: a heredoc holding a quote proves no # after it' block "$(payload $'cat <<EOF\nit\'s\nEOF\necho \' #\'; git push origin feat:main')" guard-bash.sh
+check $'class: a -c alias chain in another case' block "$(payload $'git -c alias.B=push -c alias.a=B a origin feat:main')" guard-bash.sh
+check $'class: a -c alias value with a backslash' block "$(payload $'git -c "alias.x=pu\\\\sh" x origin feat:main')" guard-bash.sh
+check $'class: a -c alias value with quotes' block "$(payload $'git -c $\'alias.x=pu\\x22\\x22sh\' x origin feat:main')" guard-bash.sh
+check $'class: a -c alias value that starts with an option' block "$(payload $'git -c alias.t=\'-p tag\' t v1.2.3')" guard-bash.sh
+check $'class: a -c alias given twice' block "$(payload $'git -c alias.p=status -c alias.p=push p origin feat:main')" guard-bash.sh
+check $'class: GIT_CONFIG_GLOBAL naming NUL' block "$(payload $'GIT_CONFIG_GLOBAL=nul git push origin feat')" guard-bash.sh
+check $'class: a -c alias with a plain value and an option (kept)' allow "$(payload $'git -c alias.lg=\'log --oneline\' lg -3')" guard-bash.sh
+check $'class: a comment after a plain $( ) is proved (kept)' allow "$(payload $'echo $(git rev-parse HEAD) # then; git push origin feat:main')" guard-bash.sh
 rm -rf "$onmain" "$onfeat"
 echo ""
 echo "guard-bash.sh — a binary name is added, never substituted (TheHub #61987)"
