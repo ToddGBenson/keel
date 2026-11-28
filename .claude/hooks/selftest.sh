@@ -662,6 +662,35 @@ for sx in bash.exe BASH Bash.Exe; do
 done
 check "PS: on main: git.exe push"           block "$(cwpay "$onmain" 'git.exe push' | sed 's/^{/{"tool_name":"PowerShell",/')" guard-bash.sh
 check "PS: on main: GIT push origin HEAD"   block "$(cwpay "$onmain" 'GIT push origin HEAD' | sed 's/^{/{"tool_name":"PowerShell",/')" guard-bash.sh
+echo ""
+echo "guard-bash.sh — the push judge reads wrappers, reserved words, & redirects, a backslash and more launchers (TheHub #62332)"
+# One row per class. The full input list is kept in the private mirror's corpus.
+cwpj() { payload "$2" | sed "s|^{|{\"cwd\":\"$1\",|"; }   # the payload, with a cwd
+check $'class: a push under timeout and its duration' block "$(payload $'timeout 60 git push origin feat:main')" guard-bash.sh
+check $'class: a push under env with an option' block "$(payload $'env -i git push origin feat:main')" guard-bash.sh
+check $'class: a push under a launcher not listed before' block "$(payload $'stdbuf -o0 git push origin feat:main')" guard-bash.sh
+check $'class: a push after a reserved word (if/then)' block "$(payload $'if true; then git push origin feat:main; fi')" guard-bash.sh
+check $'class: a redirect with & before the refspec' block "$(payload $'git push origin 2>&1 feat:main')" guard-bash.sh
+check $'class: git spelled with a backslash' block "$(payload $'g\\it push origin feat:main')" guard-bash.sh
+check $'class: a backslash-newline inside the refspec' block "$(payload $'git push origin feat:ma\\\nin')" guard-bash.sh
+check $'class: a shell not listed before' block "$(payload $'ksh -c \'git push origin feat:main\'')" guard-bash.sh
+check $'class: find -exec runs a push' block "$(payload $'find . -maxdepth 0 -exec git push origin feat:main \\;')" guard-bash.sh
+check $'class: a here-string fed to a shell' block "$(payload $'bash <<< \'git push origin feat:main\'')" guard-bash.sh
+check $'class: an ANSI-C quoted shell body' block "$(payload $'bash -c $\'git push origin feat:main\'')" guard-bash.sh
+check $'class: a git alias given with -c' block "$(payload $'git -c alias.p=push p origin feat:main')" guard-bash.sh
+check $'class: GIT_CONFIG_* assignments before the push' block "$(payload $'GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=remote.origin.push GIT_CONFIG_VALUE_0=HEAD:main git push origin')" guard-bash.sh
+check $'class: an abbreviated --force' block "$(payload $'git push --forc origin feat')" guard-bash.sh
+check $'class: a quote in a comment ends nothing' block "$(payload $'git log -1 # it\'s\ngit push origin feat:main # \'')" guard-bash.sh
+check $'class: on main: a comment after git push' block "$(cwpj "$onmain" $'git push # then open the PR')" guard-bash.sh
+check $'class: on main: timeout, if/then and env -i' block "$(cwpj "$onmain" $'timeout 60 git push')" guard-bash.sh
+check $'class: a feature push under timeout' allow "$(payload $'timeout 60 git push origin feat')" guard-bash.sh
+check $'class: a feature push, a redirect, a pipe' allow "$(payload $'git push origin feat 2>&1 | tail -5')" guard-bash.sh
+check $'class: a feature push in an if' allow "$(payload $'if git diff --quiet; then git push origin feat; fi')" guard-bash.sh
+check $'class: find -exec that runs no push' allow "$(payload $'find . -name \'*.md\' -exec grep -l push {} +')" guard-bash.sh
+check $'class: an ANSI-C body pushing a feature' allow "$(payload $'bash -c $\'git push origin feat\'')" guard-bash.sh
+check $'class: --no-force and a short cluster without f' allow "$(payload $'git push --no-force -u origin feat')" guard-bash.sh
+check $'class: on feat: timeout git push' allow "$(cwpj "$onfeat" $'timeout 60 git push')" guard-bash.sh
+check $'class: on main: a feature push after a comment' allow "$(cwpj "$onmain" $'git push origin feat # the PR branch')" guard-bash.sh
 rm -rf "$onmain" "$onfeat"
 echo ""
 echo "guard-bash.sh — a binary name is added, never substituted (TheHub #61987)"
