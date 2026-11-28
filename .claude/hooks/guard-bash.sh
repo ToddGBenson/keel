@@ -1891,74 +1891,146 @@ ctr_guard() { # $1: one view of the command
 # A Bash payload is read the bash way and a PowerShell payload the PowerShell way. A shell, eval, Invoke-Expression, cmd /c or
 # Start-Process that runs a command is judged on that command. A payload that names no tool is
 # a Bash one: Claude Code's PowerShell tool always sends tool_name.
-read -r -d '' tok_awk <<'AWK'
-function flush() { if (have) { gsub(/\n/, "\003", tok); print tok; tok = ""; have = 0 } }
-function bodies(   k, line, body, j, dl) {        # the heredoc bodies that start after this newline
-  for (k = 1; k <= nhd; k++) {
-    body = ""
-    while (i < n) {
-      j = index(substr(s, i + 1), "\n"); if (j == 0) j = n - i + 1
-      line = substr(s, i + 1, j - 1); i += j
-      dl = line; if (hdash[k]) sub(/^\t+/, "", dl)
-      if (dl == hdelim[k]) break
-      body = body line "\n"
-    }
-    gsub(/\n/, "\003", body); print "\002" body
+# TheHub #62331, #62350: the bash reader is built on the heredoc reader the container rule uses
+# (HD_AWK), so a delimiter it cannot read as bash does ($'E', 'E F', E\<newline>F) opens no
+# heredoc. Before, it waited for a line bash never ends the body with, and read every line after
+# it as heredoc text. What else it reads as bash reads it:
+#   - $'...' is an ANSI-C quote: a backslash escapes the next character (an escaped quote ends
+#     nothing), and the escapes are decoded, so $'\x67it' is git.
+#   - Inside double quotes, the body of $(...) or of a backtick is read as commands, with quotes
+#     and comments of its own, until the ) or backtick that ends it. "$(git tag v1)" was one
+#     quoted word, and a quote inside the body ended the outer quote early.
+#   - A << in arithmetic ($((...)), ((...)), $[...]) opens no heredoc.
+#   - A # opens a comment only where this reader can prove bash reads one: at the start of a word
+#     after a blank, an operator or the start of the text, outside arithmetic, an extglob pattern
+#     and a ${...} it could not read whole. After a ) or a closing backtick (which end a word only
+#     sometimes), or in one of those places, the rest of the line is still read as words, with
+#     quotes as plain characters. Dropping it hid a release-tag push: $(true)#; git push ...
+#   - Where the reading can be wrong (such a comment holding a quote, a backslash, a $, a
+#     backtick or a <<; a heredoc delimiter it cannot read; a quote or substitution left open at
+#     the end), it says so (a \004 line) and tag_guard refuses a release-tag word anywhere.
+tok_awk="$HD_AWK"'
+function flush() {
+  if (have) {
+    gsub(/\n/, "\003", tok); print tok; nw++
+    if (fn && nw == 1) { if (tok == "case") fcd[fn]++; else if (tok == "esac" && fcd[fn]) fcd[fn]-- }
+    tok = ""; have = 0
   }
-  nhd = 0
 }
+function brk() { flush(); print "\001"; nw = 0 }
+function bodies(   k) { for (k = 1; k <= nhd; k++) print "\002" hd_body(k); nhd = 0 }   # after this newline
+function inbt() { return bt || (fn && ft[fn] == "b") }
+function ansi(   e, v, k, m, z) {   # i on the $ of an ANSI-C quote: the decoded text goes to tok; i ends on its closing quote
+  z = 0
+  for (i += 2; i <= n; i++) {
+    e = substr(s, i, 1)
+    if (e == "\047") return
+    if (e == "\\" && i < n) {
+      e = substr(s, ++i, 1); v = -1
+      if (e == "n") v = 10; else if (e == "t") v = 9; else if (e == "r") v = 13; else if (e == "a") v = 7
+      else if (e == "b") v = 8; else if (e == "f") v = 12; else if (e == "v") v = 11; else if (e == "e" || e == "E") v = 27
+      else if (e == "x" || e == "u" || e == "U") {
+        m = (e == "x") ? 2 : (e == "u") ? 4 : 8; v = 0
+        for (k = 0; k < m && index("0123456789abcdefABCDEF", substr(s, i + 1, 1)); k++) v = v * 16 + index("0123456789abcdef", tolower(substr(s, ++i, 1))) - 1
+        if (k == 0) { if (!z) tok = tok "\\" e; continue }
+      }
+      else if (e ~ /[0-7]/) { v = e + 0; for (k = 1; k < 3 && substr(s, i + 1, 1) ~ /[0-7]/; k++) v = v * 8 + substr(s, ++i, 1) }
+      else if (e == "c" && i < n) { e = toupper(substr(s, ++i, 1)); v = (e == "?") ? 127 : ((e in ord) ? ord[e] % 32 : 0) }
+      else { if (!z) tok = tok ((e == "\\" || e == "\047" || e == "\"" || e == "?") ? e : "\\" e); continue }
+      if (v == 0) z = 1                        # bash ends the word at a NUL
+      if (!z) tok = tok ((v > 0 && v < 128) ? sprintf("%c", v) : "?")
+      continue
+    }
+    if (!z) tok = tok e
+  }
+  amb = 1                                      # never closed
+}
+BEGIN { for (k = 32; k < 127; k++) ord[sprintf("%c", k)] = k }
 { s = (NR > 1) ? s "\n" $0 : $0 }
 END {
-  n = length(s); q = ""; tok = ""; have = 0; nhd = 0
+  n = length(s); q = ""; tok = ""; have = 0; nhd = 0; bt = 0; fn = 0; sp = 0; na = 0; ne = 0; ab = 0; ob = 0; cm = 0; amb = 0; nw = 0
   for (i = 1; i <= n; i++) {
     c = substr(s, i, 1); d = substr(s, i + 1, 1)
-    if (q == "'") { if (c == "'") q = ""; else tok = tok c; continue }
+    if (cm) {   # a # this reader cannot prove is a comment: its words are read, its quotes are text
+      if (c == "\n" || (c == "`" && cmb)) cm = 0
+      else {
+        if (c == " " || c == "\t") flush()
+        else if (c == ";" || c == "|" || c == "&" || c == "(" || c == ")") brk()
+        else if (c == "<" || c == ">" || c == "`") { if (c == "`" || d == "<") amb = 1; flush() }
+        else { if (c == "\047" || c == "\"" || c == "\\" || c == "$") amb = 1; tok = tok c; have = 1 }
+        continue
+      }
+    }
+    if (q == "\047") { if (c == "\047") q = ""; else tok = tok c; continue }
     if (q == "\"") {
       if (c == "\"") q = ""
       else if (c == "\\" && d == "\n") i++
       else if (c == "\\" && (d == "$" || d == "`" || d == "\"" || d == "\\")) { tok = tok d; i++ }
+      else if ((c == "$" && d == "(") || c == "`") {   # its body is commands, until the ) or ` that ends it
+        tok = tok "$"; brk(); fn++; ft[fn] = (c == "`") ? "b" : "p"; fsp[fn] = sp; fcd[fn] = 0; q = ""
+        if (c == "$") { i++; if (substr(s, i + 1, 1) == "(") { pst[++sp] = "a"; na++; i++ } }   # $((: arithmetic
+      }
       else tok = tok c
       continue
     }
-    if (c == "'" || c == "\"") { q = c; have = 1; continue }
+    if (c == "\047" || c == "\"") { q = c; have = 1; continue }
+    if (c == "$" && d == "\047") { ansi(); have = 1; continue }
     if (c == "\\" && i < n) { i++; if (d != "\n") { tok = tok d; have = 1 }; continue }
     # TheHub #62239 follow-up: ${...} is one word, so a # inside it is text; inside backticks a
     # comment ends at the closing backtick. Dropping the rest of the line hid a release-tag push.
     # It ends where bash ends it (review of binnacle #119): only ${ is a level, a bare { is text,
     # a backslash steps over the next character, and quotes are skipped. Still open at the end of
     # the text, the $ is read as an ordinary character, as before. So is one holding $(, <(, >(, a
-    # backtick or $' outside single quotes, which this loop does not parse: a quote in a comment or
-    # heredoc inside one ran the loop past the end (second and third review of binnacle #119).
+    # backtick or an ANSI-C quote outside single quotes, which this loop does not parse: a quote in a
+    # comment or heredoc inside one ran the loop past the end (second and third review of binnacle #119).
+    # TheHub #62331: such a ${ is counted (ob) until its }, and a # inside it is not a comment.
     if (c == "$" && d == "{") {
       e = 1; qq = ""
       for (j = i + 2; j <= n; j++) {
         x = substr(s, j, 1)
-        if (qq != "'" && (x == "`" || (x == "$" && (substr(s, j + 1, 1) == "(" || substr(s, j + 1, 1) == "'")) || ((x == "<" || x == ">") && substr(s, j + 1, 1) == "("))) { j = n + 1; break }
-        if (x == "\\" && qq != "'") { j++; continue }
+        if (qq != "\047" && (x == "`" || (x == "$" && (substr(s, j + 1, 1) == "(" || substr(s, j + 1, 1) == "\047")) || ((x == "<" || x == ">") && substr(s, j + 1, 1) == "("))) { j = n + 1; break }
+        if (x == "\\" && qq != "\047") { j++; continue }
         if (qq != "") { if (x == qq) qq = ""; continue }
-        if (x == "'" || x == "\"") qq = x
+        if (x == "\047" || x == "\"") qq = x
         else if (x == "$" && substr(s, j + 1, 1) == "{") { e++; j++ }
         else if (x == "}" && --e == 0) break
       }
       if (j <= n) { tok = tok substr(s, i, j - i + 1); i = j; have = 1; continue }
+      ob++
     }
-    if (c == "#" && !have) { while (i < n && substr(s, i + 1, 1) != "\n" && !(bt && substr(s, i + 1, 1) == "`")) i++; continue }
-    if (c == " " || c == "\t") { flush(); continue }
-    if (c == "\n") { flush(); if (nhd) bodies(); print "\001"; continue }
-    if (c == "&" && d == ">") { flush(); i++; while (substr(s, i + 1, 1) ~ /[>|&]/) i++; print ">"; continue }
-    if (c == ";" || c == "|" || c == "&" || c == "(" || c == ")") { flush(); print "\001"; continue }
-    if (c == "`") { bt = !bt; tok = tok c; have = 1; flush(); print "\001"; continue }   # a word holding ` is not literal
-    if (c == "<" && d == "<" && substr(s, i + 2, 1) == "<") { flush(); i += 2; print "<<<"; continue }
-    if (c == "<" && d == "<") {
-      flush(); i++
-      dash = 0; if (substr(s, i + 1, 1) == "-") { dash = 1; i++ }
-      while (substr(s, i + 1, 1) ~ /[ \t]/) i++
-      dl = ""
-      while (i < n) { e = substr(s, i + 1, 1); if (e ~ /[ \t\n;|&<>()]/) break; i++; if (e != "'" && e != "\"" && e != "\\") dl = dl e }
-      nhd++; hdelim[nhd] = dl; hdash[nhd] = dash
+    if (c == "}" && ob) ob--
+    if (c == "#" && !have) {
+      p = substr(s, i - 1, 1)
+      if (na || ne || ab || ob || p == ")" || (p == "`" && !bt)) { cm = 1; cmb = inbt(); continue }
+      while (i < n && substr(s, i + 1, 1) != "\n" && !(inbt() && substr(s, i + 1, 1) == "`")) i++
       continue
     }
+    if (c == " " || c == "\t") { flush(); continue }
+    if (c == "\n") { flush(); if (nhd) bodies(); print "\001"; nw = 0; continue }
+    if (c == "&" && d == ">") { flush(); i++; while (substr(s, i + 1, 1) ~ /[>|&]/) i++; print ">"; continue }
+    if (c == "$" && d == "[") ab++
+    if (c == "]" && ab) ab--
+    if (c == "(") {   # what it opens: arithmetic ((, $(( ), an extglob pattern, or anything else
+      p = substr(s, i - 1, 1)
+      if (d == "(" || (sp && pst[sp] == "a")) { pst[++sp] = "a"; na++ }
+      else if ((p != "" && index("@!+*?", p)) || (sp && pst[sp] == "e")) { pst[++sp] = "e"; ne++ }
+      else pst[++sp] = "c"
+      brk(); continue
+    }
+    if (c == ")") {
+      if (fn && ft[fn] == "p" && sp == fsp[fn] && !fcd[fn]) { brk(); fn--; q = "\""; tok = "$"; have = 1; continue }   # the end of "$(...)"
+      if (sp) { if (pst[sp] == "a") na--; else if (pst[sp] == "e") ne--; sp-- }
+      brk(); continue
+    }
+    if (c == "`") {
+      if (fn && ft[fn] == "b") { brk(); fn--; q = "\""; tok = "$"; have = 1; continue }   # the end of a backtick in "..."
+      bt = !bt; tok = tok c; have = 1; flush(); print "\001"; nw = 0; continue   # a word holding ` is not literal
+    }
+    if (c == ";" || c == "|" || c == "&") { brk(); continue }
+    if (c == "<" && d == "<" && substr(s, i + 2, 1) == "<") { flush(); i += 2; print "<<<"; continue }
+    if (c == "<" && d == "<" && !na && !ab) { flush(); if (!hd_open()) amb = 1; continue }
     if (c == "<" || c == ">") {
+      if (na || ab) { flush(); continue }
       if (tok ~ /^[0-9]+$/) { tok = ""; have = 0 } else flush()
       while (substr(s, i + 1, 1) ~ /[<>&|]/) i++
       print ">"; continue
@@ -1966,15 +2038,30 @@ END {
     tok = tok c; have = 1
   }
   flush()
-}
-AWK
+  if (q != "" || fn) amb = 1
+  if (amb) print "\004"
+}'
+# TheHub #62350: the PowerShell reader reads the body of a $(...) inside "..." as commands, until
+# the ) that ends it ("$(git tag v1)" was one quoted word), and a <# ... #> block comment ends at
+# its #>, not at the end of the line (a command after the #> was dropped). An expandable here-string
+# (@"...") that holds a $( is reported as unreadable (a \004 line), as the bash reader does, and so
+# is a # after a ) or a } (the rest of that line is still read as words) or a quote left open.
 read -r -d '' ps_tok_awk <<'AWK'
 function flush() { if (have) { gsub(/\n/, "\003", tok); print tok; tok = ""; have = 0 } }
 { s = (NR > 1) ? s "\n" $0 : $0 }
 END {
-  n = length(s); q = ""; tok = ""; have = 0
+  n = length(s); q = ""; tok = ""; have = 0; fn = 0; cm = 0; amb = 0
   for (i = 1; i <= n; i++) {
     c = substr(s, i, 1); d = substr(s, i + 1, 1)
+    if (cm) {   # a # after a ) or }: its words are read, its quotes are text
+      if (c == "\n") cm = 0
+      else {
+        if (c == " " || c == "\t" || c == ",") flush()
+        else if (c == ";" || c == "|" || c == "&" || c == "(" || c == ")" || c == "{" || c == "}") { flush(); print "\001" }
+        else { if (c == "'" || c == "\"" || c == "`" || c == "$" || c == "@") amb = 1; tok = tok c; have = 1 }
+        continue
+      }
+    }
     if (q == "'") {
       if (c == "'" && d == "'") { tok = tok "'"; i++ } else if (c == "'") q = ""; else tok = tok c
       continue
@@ -1983,12 +2070,14 @@ END {
       if (c == "`" && i < n) { i++; if (d != "\n") tok = tok d }
       else if (c == "\"" && d == "\"") { tok = tok "\""; i++ }
       else if (c == "\"") q = ""
+      else if (c == "$" && d == "(") { tok = tok "$"; flush(); print "\001"; fn++; fdep[fn] = 0; q = ""; i++ }   # a subexpression: commands
       else tok = tok c
       continue
     }
     if (c == "@" && (d == "'" || d == "\"") && substr(s, i + 2, 1) == "\n") {   # a here-string (round 3)
       e = "\n" d "@"; j = index(substr(s, i + 3), e)
-      if (j == 0) { tok = tok substr(s, i + 3); have = 1; i = n; continue }
+      if (j == 0) { tok = tok substr(s, i + 3); have = 1; i = n; amb = 1; continue }
+      if (d == "\"" && index(substr(s, i + 3, j - 1), "$(")) amb = 1
       tok = tok substr(s, i + 3, j - 1); have = 1; i = i + 2 + j + 2; continue
     }
     if (c == "'" || c == "\"") { q = c; have = 1; continue }
@@ -1999,8 +2088,21 @@ END {
       for (; i <= n; i++) { c = substr(s, i, 1); tok = tok c; if (c == "`" && i < n) { tok = tok substr(s, ++i, 1); continue }; if (c == "}") break }
       have = 1; continue
     }
-    if (c == "#" && !have) { while (i < n && substr(s, i + 1, 1) != "\n") i++; continue }
+    if (c == "<" && d == "#") {   # a block comment, to its #>
+      flush(); j = index(substr(s, i + 2), "#>")
+      if (j == 0) { i = n; continue }
+      i = i + j + 2; continue
+    }
+    if (c == "#" && !have) {
+      p = substr(s, i - 1, 1)
+      if (p == ")" || p == "}") { cm = 1; continue }
+      while (i < n && substr(s, i + 1, 1) != "\n") i++
+      continue
+    }
     if (c == " " || c == "\t" || c == ",") { flush(); continue }
+    if (c == ")" && fn && fdep[fn] == 0) { flush(); print "\001"; fn--; q = "\""; tok = "$"; have = 1; continue }   # the end of "$(...)"
+    if (c == "(" && fn) fdep[fn]++
+    if (c == ")" && fn) fdep[fn]--
     if (c == "\n" || c == ";" || c == "|" || c == "&" || c == "(" || c == ")" || c == "{" || c == "}") { flush(); print "\001"; continue }
     if (c == "<" || c == ">") {
       if (tok ~ /^([0-9]+|\*)$/) { tok = ""; have = 0 } else flush()
@@ -2010,6 +2112,8 @@ END {
     tok = tok c; have = 1
   }
   flush()
+  if (q != "" || fn) amb = 1
+  if (amb) print "\004"
 }
 AWK
 tag_msg="A v* tag is the ref a release is cut from, and cutting a release is the operator's decision. Push your branch and open a PR; after merge the operator creates the tag and dispatches release.yml."
@@ -2242,7 +2346,7 @@ tag_gate() { # $1: nested command text -> true when it must be judged
   [ "$r" -eq 0 ] && [[ $t =~ $tag_ere ]] && r=1
   shopt -u nocasematch
   [ "$r" -eq 1 ] && return 0
-  read -r -a deep <<< "${t//[;|&(){}<>=,]/ }"
+  read -r -a deep <<< "${t//$tag_sep/ }"   # TheHub #62331: the class written here ended the expansion at its }
   tag_shaped "${deep[@]}"
 }
 tag_guard() { # $1: bash|ps, $2: the command text
@@ -2270,14 +2374,35 @@ tag_guard() { # $1: bash|ps, $2: the command text
     mapfile -t toks < <(printf '%s' "$src" | LC_ALL=C awk "$tok_awk")
   fi
   toks+=($'\001')
+  local amb=0
   for t in "${toks[@]}"; do
+    if [ "$t" = $'\004' ]; then amb=1; continue; fi   # TheHub #62331, #62350: a reading that can be wrong
     if [ "$t" = $'\001' ]; then
       [ "${#seg[@]}" -gt 0 ] && tag_seg "${seg[@]}"
       seg=(); continue
     fi
     seg+=("${t//$'\003'/$'\n'}")
   done
+  [ "$amb" -eq 1 ] && tag_amb "$src"
   tag_mode=$mode_was; tag_depth=$((tag_depth - 1))
+}
+# TheHub #62331, #62350: a tokenizer says (a \004 line) when its reading of the text can differ
+# from the shell's: a # it cannot prove is a comment, holding a quote, a backslash, a $, a backtick
+# or a <<; a heredoc delimiter it cannot read; a quote or substitution left open. Such a text is
+# also judged the blunt way: quotes and escapes removed, a word shaped like a release tag (or a
+# tag-sending option or config key) together with a word that can write one is refused.
+tag_sep=$'[;|&(){}<>=,\n\t\r]'   # held in a variable: a } written in ${t//[...]/ } ends the expansion there
+tag_amb() { # $1: the text
+  local t=$1 a deep=() shaped=0 cmd=0
+  t=${t//$'\\\n'/}; t=${t//[\'\"\`\\]/}
+  read -r -a deep <<< "${t//$tag_sep/ }"
+  tag_shaped "${deep[@]}" && shaped=1
+  for a in "${deep[@]}"; do
+    tag_cfg "$a" && shaped=1
+    case "${a,,}" in push|tag|send-pack|update-ref|fetch|config|api) cmd=1 ;; esac
+  done
+  [ "$shaped" -eq 1 ] && [ "$cmd" -eq 1 ] && block "a command this hook cannot read the way the shell will (a # it cannot prove is a comment, holding a quote, a backslash, a \$ or a backtick; a heredoc delimiter it cannot read; or a quote left open) that names a release tag and a command that can push or create one. Write it plainly, without that comment. $tag_msg" "CM-3, AIC-1, AC-5"
+  return 0
 }
 tag_names_ref_cmd() { # true when a word among $@ is a git subcommand that can write a tag
   local a; for a in "$@"; do case "$a" in push|tag|send-pack|update-ref|fetch|config) return 0 ;; esac; done; return 1
