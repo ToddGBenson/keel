@@ -51,6 +51,19 @@ three container-rule forms in the story's "also open" list (TheHub #62391).
 - **Hooks identical:** `diff` against binnacle #124's hook shows only the known comment at lines
   1050-1053.
 - **Merge order:** `git merge-tree` of this branch and the #62331 branch (keel #225): no conflict.
+- **Both PRs merged (this branch + #225), python:3.13 (the pr-checks image, mawk 1.3.4), `--cpus 2
+  --memory 2g`:** every `test/*.test.py` exit 0; selftest 862 passed, 0 failed (816 on main + 21 + 25);
+  corpus 324 entries, 1186 hook runs, 0 failed, 36 open; agent evals exit 0.
+- **Cost, same container:** selftest 99 s on main, 120 s here (the push judge now reads every
+  segment that starts with a wrapper); hook-tag-timing passes.
+- **shellcheck v0.10.0 (the CI image), the repo's `ci/scripts/shellcheck.sh`:** `-S warning` exit 0.
+  At style level `guard-bash.sh` has one SC2015 more than main: `[ -n "$v" ] && [[ ... ]] || continue`
+  in `push_wrap`'s short-option loop, where `continue` is meant to run unless both tests hold (it
+  skips a letter that takes no value).
+- **Concourse `pr-checks`:** build 1454 at 0eda43b passed on worker linux-2 (corpus 257 s). Build
+  1456 at 8de2406 (only the record added) timed out at the task's 20 minutes on worker linux-3, every
+  finished suite green, corpus 1004 s. TheHub #62268 (linux-3 overruns keel pr-checks) is the cause;
+  this commit asks for a new judgment.
 - **Cold read:** a return from inside `push_judge`'s nocasematch section (the `env -S` and the xargs
   here-string paths) left the option set for the rest of the hook. Fixed in the third commit.
 
