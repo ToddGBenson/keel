@@ -1426,10 +1426,19 @@ function ansi(   e, v, k, m, z) {   # TheHub #62332: i on the $ of $'...'; the d
 BEGIN { for (k = 32; k < 127; k++) ord[sprintf("%c", k)] = k }
 { s = (NR > 1) ? s "\n" $0 : $0 }
 END {
-  n = length(s); q = ""
+  n = length(s); q = ""; ob = 0; bt = 0; pd = 0; sq = 0; cm = 0; nc = 0
   for (i = 1; i <= n; i++) {
     c = substr(s, i, 1); d = substr(s, i + 1, 1)
-    if (c == "\005") { q = ""; sep(); continue }   # the end of one body of a level (TheHub #62239 review)
+    if (c == "\005") { q = ""; ob = 0; bt = 0; pd = 0; sq = 0; cm = 0; sep(); continue }   # the end of one body of a level (TheHub #62239 review)
+    if (cm) {   # a # this reader cannot prove is a comment: its words are read, its quotes are text
+      if (c == "\n") cm = 0
+      else {
+        if (c == " " || c == "\t") flush()
+        else if (index(";|&()`", c)) sep()
+        else { tok = tok c; have = 1 }
+        continue
+      }
+    }
     if (q != "") {
       if (c == q) q = ""
       else if (c == "\\" && q == "\"" && d == "\n") i++   # TheHub #62332: a backslash-newline is removed, in "..." too
@@ -1449,10 +1458,27 @@ END {
     # TheHub #62332: a # that starts a word after a blank or an operator is a comment to the end of
     # the line; a quote in it opens nothing. A # anywhere else (glued to a word, after a ) or a
     # redirect) is read as a word: reading more words can only block more.
+    # Review of #62332: only where this reader can prove it. Inside a ${ } (ob), a backtick (bt),
+    # any ( ) (pd: a subshell, (( )), an extglob pattern, a [[ =~ ]] group) or a [ ] (sq: a
+    # subscript) bash may read no comment, and dropping the line hid the push after it. There the
+    # rest of the line is read as words with quotes as text (cm), and the line is marked (\006) so
+    # push_guard reads the text a second time (pr2) with that # as an ordinary character, as main
+    # read every #. Each reading is right in one of the two cases; both are judged.
     if (c == "#" && !have && (i == 1 || index(" \t\n;|&(\005", substr(s, i - 1, 1)))) {
-      while (i < n && substr(s, i + 1, 1) != "\n" && substr(s, i + 1, 1) != "\005") i++
-      continue
+      if (ob || bt || pd || sq) {
+        if (!pr2) { nc = 1; cm = 1; continue }
+      } else {
+        while (i < n && substr(s, i + 1, 1) != "\n" && substr(s, i + 1, 1) != "\005") i++
+        continue
+      }
     }
+    if (c == "$" && d == "{") ob++
+    else if (c == "}" && ob) ob--
+    else if (c == "[") sq++
+    else if (c == "]" && sq) sq--
+    else if (c == "(") pd++
+    else if (c == ")" && pd) pd--
+    else if (c == "`") bt = !bt
     if (c == " " || c == "\t") { flush(); continue }
     if (c == "&" && d == ">") { c = ">"; i++ }           # TheHub #62332: &> and &>> redirect; they end no command
     if (c == "\n" || c == ";" || c == "|" || c == "&" || c == "(" || c == ")" || c == "`") { sep(); continue }
@@ -1466,6 +1492,7 @@ END {
     tok = tok c; have = 1
   }
   sep()
+  if (nc) print "\006"
 }
 AWK
 push_moves=0   # 1 once a word that changes the directory, the git dir or the branch is seen
@@ -1541,6 +1568,9 @@ push_judge() { # $@: the words of one invocation
       git_dir=*|git_work_tree=*|'$env:git_dir'*|'$env:git_work_tree'*) push_moves=1; i=$((i + 1)); continue ;;
       # TheHub #62332: git config given in the environment, as -c gives it on the command line
       git_config_key_*=*|git_config_parameters=*) case "${a#*=}" in *push*|*mirror*|*alias.*) cfg_bad=${a%%=*}=${a#*=} ;; esac; i=$((i + 1)); continue ;;
+      # Review of #62332: /dev/null (NUL) holds no config, so it maps nothing. Any other file can
+      # (remote.<name>.push maps even a push that names its branch), and stays refused.
+      git_config_global=/dev/null|git_config_system=/dev/null|git_config_global=nul|git_config_system=nul) i=$((i + 1)); continue ;;
       git_config=*|git_config_global=*|git_config_system=*) cfg_bad=$a; i=$((i + 1)); continue ;;
       [a-z_]*=*|'$env:'*) i=$((i + 1)); continue ;;
       # TheHub #62332: reserved words, and a redirect and its target, before the command
@@ -1663,9 +1693,17 @@ push_judge() { # $@: the words of one invocation
   done
   sub=${w[i]:-}
   # TheHub #62332: a subcommand that is an alias given with -c (alias.p=push) is what it expands to.
-  local al
+  # Review of #62332: an alias that names no push (alias.st=status) is read as the subcommand it
+  # names; one that runs a shell (!), names push or send-pack, holds a $ or a backtick, or names
+  # another -c alias is refused.
+  local al av ax
   for al in "${ali[@]}"; do
-    al=${al,,}; [ "${al%%=*}" = "${sub,,}" ] && [ -n "$sub" ] && block "a git command run through an alias given with -c (alias.${al}), which this hook does not expand; it may be a push. Write the subcommand out." "AC-5, CM-5"
+    al=${al,,}; [ -n "$sub" ] && [ "${al%%=*}" = "${sub,,}" ] || continue
+    av=${al#*=}; av=${av#"${av%%[![:space:]]*}"}
+    case "$av" in '!'*|*push*|*send-pack*|*'$'*|*'`'*|'') av="" ;; esac
+    if [ -n "$av" ]; then for ax in "${ali[@]}"; do [ "${ax%%=*}" = "${av%%[[:space:]]*}" ] && av=""; done; fi
+    [ -n "$av" ] || block "a git command run through an alias given with -c (alias.${al}), which this hook does not expand; it may be a push. Write the subcommand out." "AC-5, CM-5"
+    sub=${av%%[[:space:]]*}; break
   done
   case "$sub" in
     checkout|switch) push_moves=1; return 0 ;;
@@ -1770,6 +1808,12 @@ push_guard() { # $1: one view of the command
   # itself (depth 0) is text an agent wrote, so only it is cleaned of the marks.
   [ "$push_depth" -eq 0 ] && src=${src//[$'\001\002\003\004\005']/?}
   mapfile -t toks < <(printf '%s' "$src" | LC_ALL=C awk "$push_tok_awk")
+  # Review of TheHub #62332: a # the reader could not prove is a comment (\006): the text is read
+  # again with that # as an ordinary character, and both readings are judged.
+  if [ "${toks[${#toks[@]}-1]:-}" = $'\006' ]; then
+    unset 'toks[${#toks[@]}-1]'; toks+=($'\001')
+    mapfile -t -O "${#toks[@]}" toks < <(printf '%s' "$src" | LC_ALL=C awk -v pr2=1 "$push_tok_awk")
+  fi
   toks+=($'\001')
   for t in "${toks[@]}"; do
     if [ "$t" = $'\001' ]; then
