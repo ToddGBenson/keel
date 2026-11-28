@@ -1006,6 +1006,18 @@ check $'class: a tag read in "$( )" is allowed' allow "$(payload $'echo "$(git d
 check $'class: an ANSI-C quote, then a branch push' allow "$(payload $'echo $\'it\\\'s\'; git push origin feature-x')" guard-bash.sh
 check $'class: PowerShell: a subexpression that reads is allowed' allow "$(pspayload $'Write-Host "$(git rev-parse HEAD)"')" guard-bash.sh
 echo ""
+echo "guard-bash.sh — a quoted or unquoted substitution keeps the outer command's words together; an escaped reserved word is a word (TheHub #62331, #62350 review)"
+# One row per class. The full input list is kept in the private mirror's corpus.
+check $'class: a quoted substitution before the tag name keeps the command' block "$(payload $'git tag -a -m "$(cat notes.txt)" v2.0.0')" guard-bash.sh
+check $'class: an assignment from a quoted substitution before the command' block "$(payload $'X="$(true)" eval \'git tag v2.0.0\'')" guard-bash.sh
+check $'class: PowerShell: a subexpression before the tag name keeps it' block "$(pspayload $'git push "$(echo origin)" v2.0.0')" guard-bash.sh
+check $'class: an escaped reserved word is a word' block "$(payload $'echo "$(\\case x)"; git tag v2.0.0; echo "$(\\esac)" ")"')" guard-bash.sh
+check $'class: an unquoted substitution before the tag name keeps the command' block "$(payload $'git push $(echo origin) v2.0.0')" guard-bash.sh
+check $'class: a } nested in ${ } inside a substitution does not end it' block "$(payload $'echo ${x:-$(echo }) #}; git push origin v2.0.0')" guard-bash.sh
+check $'class: a # in a subscript is no comment' block "$(payload $'declare -A a; a[x # y]=1; git push origin v2.0.0')" guard-bash.sh
+check $'class: an annotated tag from a quoted substitution, not a release tag' allow "$(payload $'git tag -a -m "$(cat notes.txt)" wip-1')" guard-bash.sh
+check $'class: an assignment from a quoted substitution, then a feature push' allow "$(payload $'X="$(date)" git push origin feature-x')" guard-bash.sh
+echo ""
 echo "guard-write.sh — must BLOCK (AU-9, AIC-5)"
 check "hand-edit generated SARIF" block "$(wpayload 'evidence/142/g4/scan.sarif' 'x')"    guard-write.sh
 check "hand-edit generated XML"   block "$(wpayload 'evidence/142/g4/results.xml' 'x')"   guard-write.sh
