@@ -1018,6 +1018,16 @@ check $'class: a # in a subscript is no comment' block "$(payload $'declare -A a
 check $'class: an annotated tag from a quoted substitution, not a release tag' allow "$(payload $'git tag -a -m "$(cat notes.txt)" wip-1')" guard-bash.sh
 check $'class: an assignment from a quoted substitution, then a feature push' allow "$(payload $'X="$(date)" git push origin feature-x')" guard-bash.sh
 echo ""
+echo "guard-bash.sh — a body holding case or esac, or a comment in a backtick at any depth, is a reading the tag rule judges the blunt way (TheHub #62331, #62350 second review)"
+# One row per class. The full input list is kept in the private mirror's corpus.
+check $'class: case after a reserved word in an unquoted $( )' block "$(payload $'echo $(if true; then case x in x) git tag v1.2.3;; esac; fi)')" guard-bash.sh
+check $'class: a pattern spelled esac in an unquoted $( )' block "$(payload $'echo $(case x in a|esac) ;; x) git tag v1.2.3;; esac)')" guard-bash.sh
+check $'class: case as an arithmetic operand in "$( )"' block "$(payload $'echo "$((x|case))"; git tag v1.2.3; echo "|esac ))"')" guard-bash.sh
+check $'class: a comment in a $( ) inside a backtick ends at the backtick' block "$(payload $'echo `echo $(true # `; git tag v1.2.3\n)`')" guard-bash.sh
+check $'class: PowerShell: an escape inside "$( )"' block "$(pspayload $'Write-Host "$(`"(`")"; git tag v1.2.3; Write-Host ")"')" guard-bash.sh
+check $'class: a case in a substitution with no tag command (kept)' allow "$(payload $'echo $(if true; then case x in x) echo hi;; esac; fi)')" guard-bash.sh
+check $'class: a case in a loop over a substitution, then a feature push (kept)' allow "$(payload $'for f in $(ls); do case "$f" in *.md) echo "$f";; esac; done; git push origin feat')" guard-bash.sh
+echo ""
 echo "guard-write.sh — must BLOCK (AU-9, AIC-5)"
 check "hand-edit generated SARIF" block "$(wpayload 'evidence/142/g4/scan.sarif' 'x')"    guard-write.sh
 check "hand-edit generated XML"   block "$(wpayload 'evidence/142/g4/results.xml' 'x')"   guard-write.sh
