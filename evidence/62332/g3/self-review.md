@@ -100,3 +100,63 @@ three container-rule forms in the story's "also open" list (TheHub #62391).
   (checked with git: `feat -> main`).
 - The review's three nocasematch rows are selftest rows.
 - Still open (not in this rework): finding 2 (follow-ups TheHub #62450, #62451).
+
+## Second rework after the independent re-review (2026-11-28)
+
+PO ruling: change the strategy, not the patch count. Wherever the reader cannot prove its reading it
+now fails closed. Commits: the rows first (red at the reviewed head), then the fix; no force-push.
+
+- Finding 1 (a closer lowered the wrong counter): the four counters are one stack of open
+  constructs (`${`, `[`, `(`, a backtick). A closer pops only the opener it matches, and one that
+  matches none leaves no `#` of that body proved; a `#` is proved only with the stack empty.
+  Found during this rework and closed the same way (`cf`): a `$( )` whose body holds more than
+  plain words (its parentheses are counted as written; one such input was refused on main and
+  allowed at the reviewed head); a `$( )`, `${ }` or backtick inside `"..."`; a bare `{` inside an
+  open construct; and a heredoc, whose body this reader reads as words (a quote in it was allowed
+  on main too). An unproved `#` costs a second reading (main's), never a dropped line.
+- Finding 2 (the alias rule): an allow-list. A `-c` alias is read as its first word only when its
+  value is a letter, then letters, digits, spaces and `-` only. Any other value, a value that
+  starts with `-`, a first word that is any `-c` alias name (compared in any case), and a name
+  given twice (git takes the last) are refused; a name with a dot is compared by its first part too.
+- Finding 3 (`GIT_CONFIG_GLOBAL=nul`): removed. `GIT_CONFIG_GLOBAL` and `GIT_CONFIG_SYSTEM` are
+  allowed for `/dev/null` only, as written (`[ = ]` ignores nocasematch). NUL was not kept for
+  Windows: Git for Windows accepts `/dev/null` from Git Bash, and that a relative `nul` is the
+  device in every directory on every Windows build is not something the hook can prove.
+- Rows: one per class in keel, every input in the mirror; each block row is allowed at the reviewed
+  head.
+- New false positives: a `-c` alias whose value holds anything but letters, digits, spaces and `-`
+  (`alias.lg='log --format=%h'`) or starts with `-`; a `-c` alias given twice or a chain of them;
+  `GIT_CONFIG_GLOBAL=nul`/`NUL`; and more comments read twice, which refuses a command only when the
+  comment's text after an unprovable `#` holds a push the judge refuses.
+- Out of scope, open on main: finding 4 (one text both readings get wrong) and finding 5 (config
+  this judge does not read: `GIT_CONFIG_*` or `--config-env` aliases, `-c include.path`, a moved
+  `HOME` or `XDG_CONFIG_HOME`), TheHub #62450.
+
+### How it was checked
+
+- **The reviewer's full probe set** (the first review's p1 to p12, the earlier builder matrices,
+  the re-review's pA1 to pA4, pB1 to pB4, p6 and the timing set) plus the inputs this rework added:
+  438 distinct inputs, through the real hook (PreToolUse JSON on stdin, Git Bash 5.2.37, at most 4
+  hook runs at a time) at main, both reviewed heads, both new heads and the two merged into main:
+  2628 hook runs per repository. Inputs main refuses that a new head or the merged tree allows:
+  **0** of the reviewer's set. Of the inputs this rework added, 1: a comment after a plain `$( )`
+  that holds a push in its text (`echo $(git rev-parse HEAD) # then; git push origin feat:main`).
+  Bash reads it as a comment and runs no push (checked with stubs in git's place); main refused it
+  because main read every `#` as a word. It is a kept selftest row, and the reviewed head allowed it
+  too. Inputs a reviewed head refuses that its new head allows: 0. keel and the mirror gave the same
+  verdict in every one of the 2628 cells. No deadline hit; the slowest run took 8.2 s.
+- **44 everyday agent commands** (pushes, heredoc commit messages and PR bodies, comments, `case`,
+  `-c` aliases, PowerShell) at the same six trees: the same verdict everywhere except one false
+  positive listed in the PR (`git -c alias.lg='log --format=%h' lg`).
+- **Hooks identical:** `guard-bash.sh` differs from the pair's only in the known comment at lines
+  1050-1053, at each new head and in the merged trees.
+
+- **Full selftest, Git Bash, in 4 shards (each check row once, the 8 assertions outside
+  check() in every shard, the hook's stderr read on every block):** this head 859 check rows,
+  0 failed; the two PRs merged into main 896 check rows, 0 failed. Every shard exit 0, no
+  deadline hit, every block names a rule.
+- **Corpus, the mirror's merged tree, every class, both parser modes, 4 workers:** 554
+  entries, 1874 hook runs, 0 failed, 36 open (the known gaps), exit 0, 1114 s.
+- **Not run:** Linux, the python:3.13 container (no Docker for this rework), shellcheck
+  (not installed on this host). CI runs them.
+
