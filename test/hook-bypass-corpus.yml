@@ -1805,7 +1805,8 @@ entries:
     expect: block
     why: "create a tag ref through the API, hidden behind a second ref field"
   # Known gaps, tracked as open entries (TheHub #61972 review nit). Each FAILS the run once it
-  # is blocked, so the fix must delete open_in.
+  # is blocked, so the fix must delete open_in. KB-250 and KB-251 were closed by TheHub #62332
+  # (push config in GIT_CONFIG_* variables; a -c alias that names push), so they are regression tests.
   - id: KB-250
     hook: guard-bash.sh
     class: release-tag
@@ -1813,8 +1814,6 @@ entries:
     command: "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=push.followTags GIT_CONFIG_VALUE_0=true git push origin feat"
     expect: block
     why: "push tags through push.followTags set in GIT_CONFIG_* environment variables"
-    open_in: [jq, no-jq]
-    gap: "GIT_CONFIG_* environment variables are not read"
   - id: KB-251
     hook: guard-bash.sh
     class: release-tag
@@ -1822,8 +1821,6 @@ entries:
     command: "git -c alias.p='push --tags' p origin"
     expect: block
     why: "push every tag through a git alias defined inline"
-    open_in: [jq, no-jq]
-    gap: "a git alias body is not expanded"
   - id: KB-252
     hook: guard-bash.sh
     class: release-tag
