@@ -698,6 +698,7 @@ check $'class: a # inside a backtick is no comment' block "$(payload $'echo ` # 
 check $'class: a # in an array subscript is no comment' block "$(payload $'declare -A a; a[x # y]=1; git push origin feat:main')" guard-bash.sh
 check $'class: on main: a # inside ${ }, then a plain push' block "$(cwpj "$onmain" $'echo ${x:- #}; git push')" guard-bash.sh
 check $'class: a config file named by GIT_CONFIG_GLOBAL' block "$(payload $'GIT_CONFIG_GLOBAL=./push.cfg git push origin feat')" guard-bash.sh
+check $'class: a -c alias that expands to tag' block "$(payload $'git -c alias.t=tag t v2.0.0')" guard-bash.sh
 check $'class: a -c alias that expands to status' allow "$(payload $'git -c alias.st=status st')" guard-bash.sh
 check $'class: GIT_CONFIG_GLOBAL=/dev/null, then a feature push' allow "$(payload $'GIT_CONFIG_GLOBAL=/dev/null git push origin feat')" guard-bash.sh
 check $'nocasematch is unset after env -S' allow "$(payload $'docker RUN img pytest; env -S \'git status\'')" guard-bash.sh
