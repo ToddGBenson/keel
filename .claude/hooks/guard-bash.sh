@@ -1910,16 +1910,35 @@ ctr_guard() { # $1: one view of the command
 #     backtick or a <<; a heredoc delimiter it cannot read; a quote or substitution left open at
 #     the end), it says so (a \004 line) and tag_guard refuses a release-tag word anywhere.
 tok_awk="$HD_AWK"'
+# TheHub #62331 review: the body of a $( ) or a backtick is a command of its own, and the word it
+# stands in goes on after it ("$(cat notes)" v1 is one command, git tag ... v1). Inside a body,
+# output is held (buf) and printed after the command it stands in has ended (dfr), so the words
+# of the outer command stay together. Before, the body ended the outer command, and the words after it
+# were read as a new command whose name is not literal.
+function out(x) { if (fn) buf[fn] = buf[fn] x "\n"; else print x }
+function endc() {   # the end of a command at this level, then the bodies that stood in it
+  out("\001"); nw = 0
+  if (dfr[fn] != "") { if (fn) buf[fn] = buf[fn] dfr[fn]; else printf "%s", dfr[fn]; dfr[fn] = "" }
+}
 function flush() {
   if (have) {
-    gsub(/\n/, "\003", tok); print tok; nw++
-    if (fn && nw == 1) { if (tok == "case") fcd[fn]++; else if (tok == "esac" && fcd[fn]) fcd[fn]-- }
-    tok = ""; have = 0
+    gsub(/\n/, "\003", tok); out(tok); nw++
+    # a quoted or escaped spelling (\case, "case") is a word, not the reserved word (TheHub #62331 review)
+    if (fn && nw == 1 && !lq) { if (tok == "case") fcd[fn]++; else if (tok == "esac" && fcd[fn]) fcd[fn]-- }
+    tok = ""; have = 0; lq = 0
   }
 }
-function brk() { flush(); print "\001"; nw = 0 }
-function bodies(   k) { for (k = 1; k <= nhd; k++) print "\002" hd_body(k); nhd = 0 }   # after this newline
-function inbt() { return bt || (fn && ft[fn] == "b") }
+function brk() { flush(); endc() }
+function nest(t, dq) {   # a body opens; t: p for $( ), b for a backtick; dq: inside "..."
+  fn++; ft[fn] = t; fq[fn] = dq; fsp[fn] = sp; fcd[fn] = 0; ftok[fn] = tok; flq[fn] = lq; fnw[fn] = nw; buf[fn] = ""; dfr[fn] = ""
+  tok = ""; have = 0; lq = 0; nw = 0; q = ""
+}
+function unnest(   b) {   # the body ends: the outer word goes on, as one that is not literal
+  brk(); b = buf[fn]; q = fq[fn] ? "\"" : ""; tok = ftok[fn] "$"; have = 1; lq = flq[fn]; nw = fnw[fn]; fn--
+  dfr[fn] = dfr[fn] b
+}
+function bodies(   k) { for (k = 1; k <= nhd; k++) out("\002" hd_body(k)); nhd = 0 }   # after this newline
+function inbt() { return fn && ft[fn] == "b" }
 function ansi(   e, v, k, m, z) {   # i on the $ of an ANSI-C quote: the decoded text goes to tok; i ends on its closing quote
   z = 0
   for (i += 2; i <= n; i++) {
@@ -1948,7 +1967,7 @@ function ansi(   e, v, k, m, z) {   # i on the $ of an ANSI-C quote: the decoded
 BEGIN { for (k = 32; k < 127; k++) ord[sprintf("%c", k)] = k }
 { s = (NR > 1) ? s "\n" $0 : $0 }
 END {
-  n = length(s); q = ""; tok = ""; have = 0; nhd = 0; bt = 0; fn = 0; sp = 0; na = 0; ne = 0; ab = 0; ob = 0; cm = 0; amb = 0; nw = 0
+  n = length(s); q = ""; tok = ""; have = 0; nhd = 0; fn = 0; sp = 0; na = 0; ne = 0; ab = 0; ob = 0; sq = 0; cm = 0; amb = 0; nw = 0; lq = 0; bto = -1
   for (i = 1; i <= n; i++) {
     c = substr(s, i, 1); d = substr(s, i + 1, 1)
     if (cm) {   # a # this reader cannot prove is a comment: its words are read, its quotes are text
@@ -1957,7 +1976,11 @@ END {
         if (c == " " || c == "\t") flush()
         else if (c == ";" || c == "|" || c == "&" || c == "(" || c == ")") brk()
         else if (c == "<" || c == ">" || c == "`") { if (c == "`" || d == "<") amb = 1; flush() }
-        else { if (c == "\047" || c == "\"" || c == "\\" || c == "$") amb = 1; tok = tok c; have = 1 }
+        else {
+          if (c == "\047" || c == "\"" || c == "\\" || c == "$") amb = 1
+          if (c == "[") sq++; else if (c == "]" && sq) sq--
+          tok = tok c; have = 1
+        }
         continue
       }
     }
@@ -1967,15 +1990,18 @@ END {
       else if (c == "\\" && d == "\n") i++
       else if (c == "\\" && (d == "$" || d == "`" || d == "\"" || d == "\\")) { tok = tok d; i++ }
       else if ((c == "$" && d == "(") || c == "`") {   # its body is commands, until the ) or ` that ends it
-        tok = tok "$"; brk(); fn++; ft[fn] = (c == "`") ? "b" : "p"; fsp[fn] = sp; fcd[fn] = 0; q = ""
+        nest((c == "`") ? "b" : "p", 1); bto = i
         if (c == "$") { i++; if (substr(s, i + 1, 1) == "(") { pst[++sp] = "a"; na++; i++ } }   # $((: arithmetic
       }
       else tok = tok c
       continue
     }
-    if (c == "\047" || c == "\"") { q = c; have = 1; continue }
-    if (c == "$" && d == "\047") { ansi(); have = 1; continue }
-    if (c == "\\" && i < n) { i++; if (d != "\n") { tok = tok d; have = 1 }; continue }
+    if (c == "\047" || c == "\"") { q = c; have = 1; lq = 1; continue }
+    if (c == "$" && d == "\047") { ansi(); have = 1; lq = 1; continue }
+    if (c == "\\" && i < n) { i++; if (d != "\n") { tok = tok d; have = 1; lq = 1 }; continue }
+    if (c == "$" && d == "(") {   # TheHub #62331 review: unquoted too, the body is commands and the word goes on
+      nest("p", 0); i++; if (substr(s, i + 1, 1) == "(") { pst[++sp] = "a"; na++; i++ }; continue
+    }
     # TheHub #62239 follow-up: ${...} is one word, so a # inside it is text; inside backticks a
     # comment ends at the closing backtick. Dropping the rest of the line hid a release-tag push.
     # It ends where bash ends it (review of binnacle #119): only ${ is a level, a bare { is text,
@@ -1996,20 +2022,22 @@ END {
         else if (x == "}" && --e == 0) break
       }
       if (j <= n) { tok = tok substr(s, i, j - i + 1); i = j; have = 1; continue }
-      ob++
+      obk[++ob] = fn SUBSEP sp
     }
-    if (c == "}" && ob) ob--
+    if (c == "}" && ob && obk[ob] == fn SUBSEP sp) ob--   # a } in a body inside the ${ } ends it not (TheHub #62331 review)
+    # TheHub #62331 review: a # in a [ ] (a subscript, a [[ =~ ]] group) is no comment either (sq).
     if (c == "#" && !have) {
       p = substr(s, i - 1, 1)
-      if (na || ne || ab || ob || p == ")" || (p == "`" && !bt)) { cm = 1; cmb = inbt(); continue }
+      if (na || ne || ab || ob || sq || p == ")" || (p == "`" && bto != i - 1)) { cm = 1; cmb = inbt(); continue }
       while (i < n && substr(s, i + 1, 1) != "\n" && !(inbt() && substr(s, i + 1, 1) == "`")) i++
       continue
     }
     if (c == " " || c == "\t") { flush(); continue }
-    if (c == "\n") { flush(); if (nhd) bodies(); print "\001"; nw = 0; continue }
-    if (c == "&" && d == ">") { flush(); i++; while (substr(s, i + 1, 1) ~ /[>|&]/) i++; print ">"; continue }
+    if (c == "\n") { flush(); if (nhd) bodies(); endc(); continue }
+    if (c == "&" && d == ">") { flush(); i++; while (substr(s, i + 1, 1) ~ /[>|&]/) i++; out(">"); continue }
     if (c == "$" && d == "[") ab++
-    if (c == "]" && ab) ab--
+    else if (c == "[" && substr(s, i - 1, 1) != "$") sq++
+    if (c == "]") { if (ab) ab--; else if (sq) sq-- }
     if (c == "(") {   # what it opens: arithmetic ((, $(( ), an extglob pattern, or anything else
       p = substr(s, i - 1, 1)
       if (d == "(" || (sp && pst[sp] == "a")) { pst[++sp] = "a"; na++ }
@@ -2018,27 +2046,29 @@ END {
       brk(); continue
     }
     if (c == ")") {
-      if (fn && ft[fn] == "p" && sp == fsp[fn] && !fcd[fn]) { brk(); fn--; q = "\""; tok = "$"; have = 1; continue }   # the end of "$(...)"
-      if (sp) { if (pst[sp] == "a") na--; else if (pst[sp] == "e") ne--; sp-- }
+      if (fn && ft[fn] == "p" && sp == fsp[fn] && !fcd[fn]) { unnest(); continue }   # the end of $(...)
+      if (sp > (fn ? fsp[fn] : 0)) { if (pst[sp] == "a") na--; else if (pst[sp] == "e") ne--; sp-- }   # a case pattern pops no outer level
       brk(); continue
     }
     if (c == "`") {
-      if (fn && ft[fn] == "b") { brk(); fn--; q = "\""; tok = "$"; have = 1; continue }   # the end of a backtick in "..."
-      bt = !bt; tok = tok c; have = 1; flush(); print "\001"; nw = 0; continue   # a word holding ` is not literal
+      if (fn && ft[fn] == "b") { unnest(); continue }   # the end of a backtick body
+      nest("b", 0); bto = i; continue                    # unquoted too: its body is commands, and the word goes on
     }
     if (c == ";" || c == "|" || c == "&") { brk(); continue }
-    if (c == "<" && d == "<" && substr(s, i + 2, 1) == "<") { flush(); i += 2; print "<<<"; continue }
+    if (c == "<" && d == "<" && substr(s, i + 2, 1) == "<") { flush(); i += 2; out("<<<"); continue }
     if (c == "<" && d == "<" && !na && !ab) { flush(); if (!hd_open()) amb = 1; continue }
     if (c == "<" || c == ">") {
       if (na || ab) { flush(); continue }
       if (tok ~ /^[0-9]+$/) { tok = ""; have = 0 } else flush()
       while (substr(s, i + 1, 1) ~ /[<>&|]/) i++
-      print ">"; continue
+      out(">"); continue
     }
     tok = tok c; have = 1
   }
   flush()
   if (q != "" || fn) amb = 1
+  while (fn) { brk(); b = buf[fn]; tok = ftok[fn] "$"; have = 1; fn--; dfr[fn] = dfr[fn] b }   # a body left open is still judged
+  flush(); endc()
   if (amb) print "\004"
 }'
 # TheHub #62350: the PowerShell reader reads the body of a $(...) inside "..." as commands, until
@@ -2047,7 +2077,13 @@ END {
 # (@"...") that holds a $( is reported as unreadable (a \004 line), as the bash reader does, and so
 # is a # after a ) or a } (the rest of that line is still read as words) or a quote left open.
 read -r -d '' ps_tok_awk <<'AWK'
-function flush() { if (have) { gsub(/\n/, "\003", tok); print tok; tok = ""; have = 0 } }
+# TheHub #62350 review: a "$( )" body is a command of its own, printed after the command it stands
+# in, whose word goes on after it (as in the bash reader above).
+function out(x) { if (fn) buf[fn] = buf[fn] x "\n"; else print x }
+function endc() { out("\001"); if (dfr[fn] != "") { if (fn) buf[fn] = buf[fn] dfr[fn]; else printf "%s", dfr[fn]; dfr[fn] = "" } }
+function flush() { if (have) { gsub(/\n/, "\003", tok); out(tok); tok = ""; have = 0 } }
+function nest() { fn++; fdep[fn] = 0; ftok[fn] = tok; buf[fn] = ""; dfr[fn] = ""; tok = ""; have = 0; q = "" }
+function unnest(   b) { flush(); endc(); b = buf[fn]; tok = ftok[fn] "$"; have = 1; q = "\""; fn--; dfr[fn] = dfr[fn] b }
 { s = (NR > 1) ? s "\n" $0 : $0 }
 END {
   n = length(s); q = ""; tok = ""; have = 0; fn = 0; cm = 0; amb = 0
@@ -2057,7 +2093,7 @@ END {
       if (c == "\n") cm = 0
       else {
         if (c == " " || c == "\t" || c == ",") flush()
-        else if (c == ";" || c == "|" || c == "&" || c == "(" || c == ")" || c == "{" || c == "}") { flush(); print "\001" }
+        else if (c == ";" || c == "|" || c == "&" || c == "(" || c == ")" || c == "{" || c == "}") { flush(); endc() }
         else { if (c == "'" || c == "\"" || c == "`" || c == "$" || c == "@") amb = 1; tok = tok c; have = 1 }
         continue
       }
@@ -2070,7 +2106,7 @@ END {
       if (c == "`" && i < n) { i++; if (d != "\n") tok = tok d }
       else if (c == "\"" && d == "\"") { tok = tok "\""; i++ }
       else if (c == "\"") q = ""
-      else if (c == "$" && d == "(") { tok = tok "$"; flush(); print "\001"; fn++; fdep[fn] = 0; q = ""; i++ }   # a subexpression: commands
+      else if (c == "$" && d == "(") { nest(); i++ }   # a subexpression: commands
       else tok = tok c
       continue
     }
@@ -2100,19 +2136,21 @@ END {
       continue
     }
     if (c == " " || c == "\t" || c == ",") { flush(); continue }
-    if (c == ")" && fn && fdep[fn] == 0) { flush(); print "\001"; fn--; q = "\""; tok = "$"; have = 1; continue }   # the end of "$(...)"
+    if (c == ")" && fn && fdep[fn] == 0) { unnest(); continue }   # the end of "$(...)"
     if (c == "(" && fn) fdep[fn]++
     if (c == ")" && fn) fdep[fn]--
-    if (c == "\n" || c == ";" || c == "|" || c == "&" || c == "(" || c == ")" || c == "{" || c == "}") { flush(); print "\001"; continue }
+    if (c == "\n" || c == ";" || c == "|" || c == "&" || c == "(" || c == ")" || c == "{" || c == "}") { flush(); endc(); continue }
     if (c == "<" || c == ">") {
       if (tok ~ /^([0-9]+|\*)$/) { tok = ""; have = 0 } else flush()
       while (substr(s, i + 1, 1) ~ /[<>&]/) i++
-      print ">"; continue
+      out(">"); continue
     }
     tok = tok c; have = 1
   }
   flush()
   if (q != "" || fn) amb = 1
+  while (fn) { flush(); endc(); b = buf[fn]; tok = ftok[fn] "$"; have = 1; fn--; dfr[fn] = dfr[fn] b }   # a body left open is still judged
+  flush(); endc()
   if (amb) print "\004"
 }
 AWK
